@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-kt-gray-50 text-kt-green-900 font-sans antialiased;
+  }
+  *:focus-visible {
+    @apply outline-none ring-2 ring-kt-gold-500 ring-offset-2 ring-offset-white;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-kt-green-600 text-white hover:bg-kt-green-700 shadow-kt-green hover:shadow-lg active:scale-[0.98];
+  }
+  .btn-gold {
+    @apply btn bg-kt-gold-500 text-kt-green-900 hover:bg-kt-gold-600 hover:text-white shadow-kt-gold active:scale-[0.98];
+  }
+  .btn-secondary {
+    @apply btn bg-white text-kt-green-800 border border-kt-gray-200 hover:border-kt-green-600 hover:text-kt-green-700;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-kt-green-800 hover:bg-kt-gray-100;
+  }
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700 active:scale-[0.98];
+  }
+  .btn-success {
+    @apply btn bg-kt-green-600 text-white hover:bg-kt-green-700 active:scale-[0.98];
+  }
+
+  .input {
+    @apply w-full px-4 py-2.5 rounded-xl border border-kt-gray-200 bg-white text-kt-green-900
+           placeholder:text-kt-gray-400 transition-all duration-200
+           focus:border-kt-green-600 focus:ring-2 focus:ring-kt-green-600/20 outline-none;
+  }
+  .textarea {
+    @apply input resize-none min-h-[100px] font-sans;
+  }
+  .label {
+    @apply block text-sm font-semibold text-kt-green-800 mb-1.5;
+  }
+
+  .card {
+    @apply bg-white rounded-2xl shadow-kt-soft border border-kt-gray-100;
+  }
+  .card-hover {
+    @apply card transition-all duration-300 hover:shadow-kt-card hover:-translate-y-0.5;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold;
+  }
+  .badge-pending      { @apply badge bg-kt-gold-100 text-kt-gold-800; }
+  .badge-approved     { @apply badge bg-kt-green-100 text-kt-green-800; }
+  .badge-rejected     { @apply badge bg-red-100 text-red-800; }
+  .badge-feedback     { @apply badge bg-blue-100 text-blue-800; }
+  .badge-available    { @apply badge bg-kt-green-100 text-kt-green-700; }
+  .badge-unavailable  { @apply badge bg-kt-gray-200 text-kt-gray-600; }
+}
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+  .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { @apply bg-kt-gray-200 rounded-full; }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover { @apply bg-kt-gray-300; }
+}

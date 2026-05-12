@@ -1,0 +1,262 @@
+/**
+ * Authentication servisleri.
+ *
+ * Güvenlik:
+ * - app_security.md §4: Argon2id parola hash; brute-force lockout (5 deneme → 15 dk).
+ * - app_security.md §4: User ve Admin tabloları ayrı.
+ * - Generic hata mesajı (kullanıcı varlığı ifşa edilmez).
+ */
+import argon2 from 'argon2';
+import { nanoid } from 'nanoid';
+import { config } from '../config/env';
+import { getDb } from '../db/schema';
+import { HttpError } from '../middleware/error.middleware';
+import type { AdminRecord, SubjectKind, UserRecord } from '../types/auth.types';
+import { issueRefreshToken, signAccessToken, type IssuedTokens } from './token.service';
+import type { RegisterInput } from '../validators/schemas';
+
+const ARGON2_OPTIONS: argon2.Options = {
+  type: argon2.argon2id,
+  memoryCost: 2 ** 16,
+  timeCost: 3,
+  parallelism: 1,
+};
+
+type SubjectRecord = UserRecord | AdminRecord;
+
+function tableFor(kind: SubjectKind): 'users' | 'admins' {
+  return kind === 'user' ? 'users' : 'admins';
+}
+
+function findSubjectByEmail(kind: SubjectKind, email: string): SubjectRecord | undefined {
+  const table = tableFor(kind);
+  const sql = `SELECT * FROM ${table} WHERE email = ? AND status = 1 LIMIT 1`;
+  return getDb().prepare(sql).get(email) as SubjectRecord | undefined;
+}
+
+function isLocked(record: SubjectRecord): boolean {
+  if (!record.locked_until) return false;
+  return new Date(record.locked_until).getTime() > Date.now();
+}
+
+function incrementFailedLogin(kind: SubjectKind, id: string, currentFails: number): void {
+  const table = tableFor(kind);
+  const newCount = currentFails + 1;
+  const shouldLock = newCount >= config.maxLoginAttempts;
+  const lockUntil = shouldLock
+    ? new Date(Date.now() + config.loginLockoutMinutes * 60_000).toISOString()
+    : null;
+
+  getDb()
+    .prepare(
+      `UPDATE ${table}
+       SET failed_login_count = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    )
+    .run(newCount, lockUntil, id);
+}
+
+function resetFailedLogin(kind: SubjectKind, id: string): void {
+  const table = tableFor(kind);
+  getDb()
+    .prepare(
+      `UPDATE ${table}
+       SET failed_login_count = 0, locked_until = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    )
+    .run(id);
+}
+
+export interface LoginResult {
+  tokens: IssuedTokens;
+  subject: { id: string; email: string; fullName: string; role: string };
+  locked: boolean;
+}
+
+const GENERIC_AUTH_ERROR = 'E-posta veya parola hatalı.';
+
+export async function login(
+  kind: SubjectKind,
+  email: string,
+  password: string
+): Promise<LoginResult> {
+  const record = findSubjectByEmail(kind, email);
+
+  if (!record) {
+    // Side channel timing leak'i azaltmak için yine de argon2 hesaplaması yap.
+    await argon2.hash('decoy_password_for_timing_protection', ARGON2_OPTIONS);
+    throw new HttpError(401, GENERIC_AUTH_ERROR, 'AUTH_FAILED');
+  }
+
+  if (isLocked(record)) {
+    throw new HttpError(
+      423,
+      'Hesabınız geçici olarak kilitlendi. Lütfen daha sonra tekrar deneyin.',
+      'ACCOUNT_LOCKED'
+    );
+  }
+
+  let passwordOk = false;
+  try {
+    passwordOk = await argon2.verify(record.password_hash, password);
+  } catch {
+    passwordOk = false;
+  }
+
+  if (!passwordOk) {
+    incrementFailedLogin(kind, record.id, record.failed_login_count);
+    throw new HttpError(401, GENERIC_AUTH_ERROR, 'AUTH_FAILED');
+  }
+
+  resetFailedLogin(kind, record.id);
+
+  const accessPayload = {
+    sub: record.id,
+    role: record.role,
+    email: record.email,
+  };
+
+  const { token: accessToken, ttl } = signAccessToken(kind, accessPayload);
+  const { token: refreshToken } = issueRefreshToken(kind, record.id);
+
+  return {
+    tokens: { accessToken, refreshToken, expiresIn: ttl },
+    subject: {
+      id: record.id,
+      email: record.email,
+      fullName: record.full_name,
+      role: record.role,
+    },
+    locked: false,
+  };
+}
+
+/**
+ * Yeni kullanıcı kaydı (yalnızca 'user' rolü).
+ *
+ * Güvenlik:
+ * - Admin kaydı bu endpoint üzerinden YAPILAMAZ — sadece users tablosuna yazar.
+ * - Aynı e-posta hem users hem admins tablosunda **bulunmamalıdır** (e-posta çakışması).
+ * - Argon2id ile hash; parola politikası schema tarafında uygulanır.
+ * - Transaction içinde unique kontrol + insert (race condition koruması).
+ * - E-posta varsa generic hata döner (account enumeration korumas tam değil ama bilinçli tercih).
+ */
+export async function registerUser(input: RegisterInput): Promise<{ id: string; email: string; fullName: string }> {
+  const db = getDb();
+  const normalizedEmail = input.email.trim().toLowerCase();
+
+  // 1) Çakışma kontrolü — hem admins hem users tablosunda
+  const existingAdmin = db
+    .prepare('SELECT id FROM admins WHERE email = ? LIMIT 1')
+    .get(normalizedEmail);
+  if (existingAdmin) {
+    throw new HttpError(409, 'Bu e-posta adresi zaten kullanılıyor.', 'EMAIL_TAKEN');
+  }
+  const existingUser = db
+    .prepare('SELECT id FROM users WHERE email = ? LIMIT 1')
+    .get(normalizedEmail);
+  if (existingUser) {
+    throw new HttpError(409, 'Bu e-posta adresi zaten kullanılıyor.', 'EMAIL_TAKEN');
+  }
+
+  // 2) Parola hash
+  const passwordHash = await argon2.hash(input.password, ARGON2_OPTIONS);
+
+  // 3) Insert
+  const id = nanoid();
+  try {
+    db.prepare(
+      `INSERT INTO users (id, email, password_hash, full_name, role, status)
+       VALUES (?, ?, ?, ?, 'user', 1)`
+    ).run(id, normalizedEmail, passwordHash, input.fullName.trim());
+  } catch (err) {
+    // UNIQUE constraint çakışması (yarış durumu)
+    if ((err as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      throw new HttpError(409, 'Bu e-posta adresi zaten kullanılıyor.', 'EMAIL_TAKEN');
+    }
+    throw err;
+  }
+
+  return { id, email: normalizedEmail, fullName: input.fullName.trim() };
+}
+
+export function findSubjectById(kind: SubjectKind, id: string): SubjectRecord | undefined {
+  const table = tableFor(kind);
+  return getDb()
+    .prepare(`SELECT * FROM ${table} WHERE id = ? AND status = 1 LIMIT 1`)
+    .get(id) as SubjectRecord | undefined;
+}
+
+/**
+ * Unified login: aynı e-posta önce admins'te, sonra users'ta aranır.
+ * Timing-safe: kullanıcı bulunmasa bile decoy argon2 hash hesaplanır.
+ *
+ * Güvenlik notları:
+ * - Admin/User tabloları AYRI (data izolasyonu korunur).
+ * - Aynı e-posta her iki tabloda olsa bile yalnızca İLK eşleşme (admin) auth eder.
+ *   Bu admin önceliği kasıtlı: aynı kişi hem admin hem user olarak listelenmişse
+ *   yüksek yetki için yetkilendirilir.
+ * - JWT key pair, audience ve refresh token paneli hala AYRI (cross-token bypass yok).
+ */
+export async function unifiedLogin(email: string, password: string): Promise<LoginResult & { kind: SubjectKind }> {
+  // 1) Admin tablosunda dene
+  const adminRecord = findSubjectByEmail('admin', email);
+  if (adminRecord) {
+    if (isLocked(adminRecord)) {
+      throw new HttpError(
+        423,
+        'Hesabınız geçici olarak kilitlendi. Lütfen daha sonra tekrar deneyin.',
+        'ACCOUNT_LOCKED'
+      );
+    }
+    const ok = await argon2.verify(adminRecord.password_hash, password).catch(() => false);
+    if (ok) {
+      resetFailedLogin('admin', adminRecord.id);
+      const accessPayload = { sub: adminRecord.id, role: adminRecord.role, email: adminRecord.email };
+      const { token: accessToken, ttl } = signAccessToken('admin', accessPayload);
+      const { token: refreshToken } = issueRefreshToken('admin', adminRecord.id);
+      return {
+        kind: 'admin',
+        tokens: { accessToken, refreshToken, expiresIn: ttl },
+        subject: { id: adminRecord.id, email: adminRecord.email, fullName: adminRecord.full_name, role: adminRecord.role },
+        locked: false,
+      };
+    }
+    incrementFailedLogin('admin', adminRecord.id, adminRecord.failed_login_count);
+    // Don't fall through to user table — admin password failure is final
+    throw new HttpError(401, GENERIC_AUTH_ERROR, 'AUTH_FAILED');
+  }
+
+  // 2) User tablosunda dene
+  const userRecord = findSubjectByEmail('user', email);
+  if (!userRecord) {
+    // Hiçbir tabloda yok — yine de decoy hash (timing protection)
+    await argon2.hash('decoy_password_for_timing_protection', ARGON2_OPTIONS);
+    throw new HttpError(401, GENERIC_AUTH_ERROR, 'AUTH_FAILED');
+  }
+
+  if (isLocked(userRecord)) {
+    throw new HttpError(
+      423,
+      'Hesabınız geçici olarak kilitlendi. Lütfen daha sonra tekrar deneyin.',
+      'ACCOUNT_LOCKED'
+    );
+  }
+
+  const ok = await argon2.verify(userRecord.password_hash, password).catch(() => false);
+  if (!ok) {
+    incrementFailedLogin('user', userRecord.id, userRecord.failed_login_count);
+    throw new HttpError(401, GENERIC_AUTH_ERROR, 'AUTH_FAILED');
+  }
+
+  resetFailedLogin('user', userRecord.id);
+  const accessPayload = { sub: userRecord.id, role: userRecord.role, email: userRecord.email };
+  const { token: accessToken, ttl } = signAccessToken('user', accessPayload);
+  const { token: refreshToken } = issueRefreshToken('user', userRecord.id);
+  return {
+    kind: 'user',
+    tokens: { accessToken, refreshToken, expiresIn: ttl },
+    subject: { id: userRecord.id, email: userRecord.email, fullName: userRecord.full_name, role: userRecord.role },
+    locked: false,
+  };
+}

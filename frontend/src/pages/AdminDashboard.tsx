@@ -1,0 +1,498 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AppShell } from '../components/AppShell';
+import { BookingDetailModal } from '../components/BookingDetailModal';
+import { StatusBadge } from '../components/StatusBadge';
+import { useToast } from '../components/Toast';
+import { useAuth } from '../contexts/AuthContext';
+import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
+import { api } from '../services/api';
+import type { AdminStats, Booking, BookingStatus, ReviewBookingPayload } from '../types';
+
+type StatusFilter = 'all' | BookingStatus;
+
+interface StatCardConfig {
+  key: 'total' | 'pending' | 'approved' | 'feedback_requested' | 'rejected';
+  label: string;
+  filter: StatusFilter;
+  icon: JSX.Element;
+  bg: string;
+  iconBg: string;
+  text: string;
+  hint: string;
+}
+
+const STAT_CARDS: StatCardConfig[] = [
+  {
+    key: 'pending',
+    label: 'Bekleyen',
+    filter: 'pending',
+    bg: 'from-amber-400 to-orange-500',
+    iconBg: 'bg-white/25',
+    text: 'text-white',
+    hint: 'incelenmeyi bekliyor',
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'approved',
+    label: 'Onaylanan',
+    filter: 'approved',
+    bg: 'from-emerald-500 to-kt-green-700',
+    iconBg: 'bg-white/25',
+    text: 'text-white',
+    hint: 'aktif kiralama',
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'feedback_requested',
+    label: 'Düzeltme İstenen',
+    filter: 'feedback_requested',
+    bg: 'from-sky-400 to-blue-600',
+    iconBg: 'bg-white/25',
+    text: 'text-white',
+    hint: 'kullanıcı yanıtı bekleniyor',
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'rejected',
+    label: 'Reddedilen',
+    filter: 'rejected',
+    bg: 'from-rose-500 to-red-600',
+    iconBg: 'bg-white/25',
+    text: 'text-white',
+    hint: 'arşivlendi',
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  },
+];
+
+const STATUS_TABS: { key: StatusFilter; label: string; accent: string }[] = [
+  { key: 'all', label: 'Tümü', accent: 'bg-kt-green-700' },
+  { key: 'pending', label: 'Bekleyen', accent: 'bg-amber-500' },
+  { key: 'approved', label: 'Onaylanan', accent: 'bg-emerald-600' },
+  { key: 'feedback_requested', label: 'Düzeltme', accent: 'bg-blue-500' },
+  { key: 'rejected', label: 'Reddedilen', accent: 'bg-red-500' },
+];
+
+function fmtDateShort(iso: string): string {
+  return new Date(iso).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
+}
+function fmtRelative(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return 'az önce';
+  if (minutes < 60) return `${minutes} dk önce`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} sa önce`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} g önce`;
+  return new Date(iso).toLocaleDateString('tr-TR');
+}
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 6) return 'İyi geceler';
+  if (h < 12) return 'Günaydın';
+  if (h < 18) return 'İyi günler';
+  return 'İyi akşamlar';
+}
+function initials(name: string): string {
+  return name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+}
+
+export default function AdminDashboard() {
+  const toast = useToast();
+  const { admin } = useAuth();
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [filter, setFilter] = useState<StatusFilter>('pending');
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Booking | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [search, setSearch] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [bookingsRes, statsRes] = await Promise.all([
+        api.listAdminBookings(),
+        api.adminStats(),
+      ]);
+      setBookings(bookingsRes.bookings);
+      setStats(statsRes.stats);
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Veriler yüklenemedi.');
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Real-time: yeni booking gelince / status değişince otomatik yenile
+  useRealtimeEvents('admin', (type, data) => {
+    if (
+      type === 'booking.created' ||
+      type === 'booking.updated' ||
+      type === 'booking.reviewed' ||
+      type === 'booking.withdrawn'
+    ) {
+      load();
+      if (type === 'booking.created') {
+        const fromWaitlist =
+          typeof data === 'object' && data !== null && (data as { fromWaitlist?: boolean }).fromWaitlist;
+        toast.push(
+          'info',
+          fromWaitlist
+            ? 'Bekleme listesinden yeni talep oluştu.'
+            : 'Yeni talep geldi.'
+        );
+      }
+    }
+  });
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return bookings.filter((b) => {
+      if (filter !== 'all' && b.status !== filter) return false;
+      if (!q) return true;
+      return (
+        b.projectName.toLowerCase().includes(q) ||
+        b.userEmail?.toLowerCase().includes(q) ||
+        b.userFullName?.toLowerCase().includes(q) ||
+        b.roomCode.toLowerCase().includes(q) ||
+        b.roomName.toLowerCase().includes(q)
+      );
+    });
+  }, [bookings, filter, search]);
+
+  const recentActivity = useMemo(() => {
+    return [...bookings]
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .slice(0, 6);
+  }, [bookings]);
+
+  async function review(payload: ReviewBookingPayload) {
+    if (!selected) return;
+    setReviewing(true);
+    try {
+      await api.reviewBooking(selected.id, payload);
+      toast.push(
+        'success',
+        payload.action === 'approve'
+          ? 'Talep onaylandı.'
+          : payload.action === 'reject'
+          ? 'Talep reddedildi.'
+          : 'Düzeltme isteği kullanıcıya iletildi.'
+      );
+      setSelected(null);
+      await load();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'İşlem başarısız.');
+    } finally {
+      setReviewing(false);
+    }
+  }
+
+  const statValue = (key: StatCardConfig['key']): number => {
+    if (!stats) return 0;
+    return (stats as unknown as Record<string, number>)[key] ?? 0;
+  };
+
+  const totalCount = statValue('total');
+  const pendingCount = statValue('pending');
+
+  return (
+    <AppShell kind="admin">
+      {/* ============ KARŞILAMA BANDI ============ */}
+      <section className="mb-6">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-kt-green-800 via-kt-green-700 to-kt-green-900 text-white p-6 md:p-8 shadow-kt-card">
+          <div className="absolute -top-20 -right-20 w-72 h-72 bg-kt-gold-500/20 rounded-full blur-3xl" />
+          <div className="absolute -bottom-16 -left-16 w-72 h-72 bg-emerald-400/10 rounded-full blur-3xl" />
+          <div className="absolute inset-0 opacity-[0.05]" style={{
+            backgroundImage: 'radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)',
+            backgroundSize: '28px 28px',
+          }} />
+
+          <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-kt-gold-400 to-kt-gold-600 text-kt-green-900 flex items-center justify-center text-2xl font-extrabold shadow-kt-gold shrink-0">
+                {admin ? initials(admin.fullName) : '··'}
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-widest text-kt-gold-300 font-semibold mb-0.5">
+                  Yönetim Paneli
+                </div>
+                <h1 className="text-2xl md:text-3xl font-extrabold">
+                  {greeting()}, {admin?.fullName?.split(' ')[0] ?? 'Admin'} 👋
+                </h1>
+                <p className="text-white/70 text-sm mt-1">
+                  {pendingCount > 0
+                    ? `${pendingCount} talep incelemenizi bekliyor.`
+                    : 'Tüm talepler incelendi. Bravo!'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <div className="text-3xl font-extrabold text-kt-gold-400">{totalCount}</div>
+                <div className="text-xs uppercase tracking-widest text-white/60">Toplam Talep</div>
+              </div>
+              <div className="w-px h-12 bg-white/20" />
+              <button onClick={load} className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 backdrop-blur text-white font-semibold text-sm transition-all flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Yenile
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ============ STAT KARTLARI ============ */}
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {STAT_CARDS.map((s) => {
+          const isActive = filter === s.filter;
+          const value = statValue(s.key);
+          return (
+            <button
+              key={s.key}
+              onClick={() => setFilter(s.filter)}
+              className={`group relative overflow-hidden rounded-2xl p-5 text-left bg-gradient-to-br ${s.bg} text-white shadow-kt-soft transition-all hover:-translate-y-0.5 hover:shadow-kt-card ${
+                isActive ? 'ring-4 ring-kt-gold-400/60 ring-offset-2 ring-offset-kt-gray-50' : ''
+              }`}
+            >
+              <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/10 rounded-full blur-2xl group-hover:scale-125 transition-transform duration-500" />
+              <div className="relative">
+                <div className="flex items-start justify-between mb-3">
+                  <div className={`w-11 h-11 rounded-xl ${s.iconBg} backdrop-blur flex items-center justify-center ${s.text}`}>
+                    {s.icon}
+                  </div>
+                  <span className="text-xs font-bold uppercase tracking-wider opacity-80">{s.label}</span>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-4xl font-extrabold tabular-nums">{value}</span>
+                  <span className="text-xs text-white/70 ml-1">/ {totalCount}</span>
+                </div>
+                <div className="text-xs text-white/75 mt-0.5">{s.hint}</div>
+              </div>
+            </button>
+          );
+        })}
+      </section>
+
+      {/* ============ İÇERİK: MAIN + SIDEBAR ============ */}
+      <div className="grid lg:grid-cols-3 gap-6">
+        {/* SOL: BOOKING LİSTESİ */}
+        <section className="lg:col-span-2 card p-5 md:p-6">
+          {/* Search + filter tabs */}
+          <div className="flex flex-col gap-4 mb-5">
+            <div className="relative">
+              <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-kt-gray-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+              </svg>
+              <input
+                type="search"
+                className="input pl-11"
+                placeholder="Proje, kullanıcı veya oda kodu ara..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                maxLength={60}
+              />
+            </div>
+
+            <div className="flex flex-wrap gap-1.5 p-1 bg-kt-gray-100 rounded-xl">
+              {STATUS_TABS.map((tab) => {
+                const isActive = filter === tab.key;
+                const count = tab.key === 'all' ? totalCount : statValue(tab.key as StatCardConfig['key']);
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setFilter(tab.key)}
+                    className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${
+                      isActive
+                        ? 'bg-white text-kt-green-900 shadow-kt-soft'
+                        : 'text-kt-gray-500 hover:text-kt-green-800'
+                    }`}
+                  >
+                    {tab.label}
+                    <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                      isActive ? `${tab.accent} text-white` : 'bg-kt-gray-200 text-kt-gray-600'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Liste */}
+          {loading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-kt-gray-100 p-4 animate-pulse h-24" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="py-16 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-kt-green-50 text-kt-green-600 mx-auto mb-4 flex items-center justify-center">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-kt-green-900 mb-1">Bu kategoride talep yok</h3>
+              <p className="text-kt-gray-500 text-sm">Farklı bir filtre seçin veya arama metnini temizleyin.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filtered.map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => setSelected(b)}
+                  className="w-full text-left rounded-xl border border-kt-gray-100 hover:border-kt-gold-300 p-4 transition-all hover:shadow-kt-soft hover:-translate-y-0.5 group focus:outline-none focus:ring-2 focus:ring-kt-gold-400 focus:ring-offset-2"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                      {b.userFullName ? initials(b.userFullName) : '??'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="text-[11px] font-bold text-kt-gold-700 tracking-wider">{b.roomCode}</span>
+                        <span className="text-kt-gray-300 text-xs">·</span>
+                        <span className="text-xs text-kt-gray-500 truncate">{b.roomName}</span>
+                        <StatusBadge status={b.status} />
+                      </div>
+                      <div className="font-bold text-kt-green-900 truncate group-hover:text-kt-gold-700 transition-colors">
+                        {b.projectName}
+                      </div>
+                      <div className="text-xs text-kt-gray-600 flex items-center gap-3 flex-wrap mt-1">
+                        <span className="flex items-center gap-1">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                          {b.userFullName}
+                        </span>
+                        <span className="flex items-center gap-1 text-kt-gray-400">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                          {fmtDateShort(b.startDate)} → {fmtDateShort(b.endDate)}
+                        </span>
+                        <span className="text-kt-gray-400">{b.periodMonths} ay</span>
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="text-[11px] text-kt-gray-400">{fmtRelative(b.createdAt)}</div>
+                      <div className="text-kt-gold-600 font-semibold text-xs mt-1 flex items-center justify-end gap-1 group-hover:gap-2 transition-all">
+                        İncele
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* SAĞ: SIDEBAR — son aktivite */}
+        <aside className="space-y-6">
+          {/* Hızlı eylem */}
+          <div className="card p-5 bg-gradient-to-br from-kt-gold-50 to-white border-kt-gold-100">
+            <div className="flex items-start gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-kt-gold-400 to-kt-gold-600 text-kt-green-900 flex items-center justify-center shrink-0 shadow-kt-gold">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-bold text-kt-green-900">Hızlı Karar</h3>
+                <p className="text-xs text-kt-gray-500">Bekleyen talepler için hızlı erişim</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setFilter('pending')}
+              className="w-full text-left p-3 rounded-xl bg-white hover:bg-kt-gold-50 transition-colors border border-kt-gold-100 flex items-center justify-between"
+            >
+              <span className="text-sm font-semibold text-kt-green-800">{pendingCount} talep incele</span>
+              <svg className="w-4 h-4 text-kt-gold-600" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          </div>
+
+          {/* Son aktivite */}
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-kt-green-900">Son Aktivite</h3>
+              <span className="text-[10px] uppercase tracking-wider font-bold text-kt-gray-400">{recentActivity.length} kayıt</span>
+            </div>
+            {recentActivity.length === 0 ? (
+              <p className="text-sm text-kt-gray-500 py-4 text-center">Henüz aktivite yok</p>
+            ) : (
+              <ul className="space-y-3">
+                {recentActivity.map((b) => (
+                  <li key={b.id}>
+                    <button
+                      onClick={() => setSelected(b)}
+                      className="w-full text-left flex items-start gap-3 group"
+                    >
+                      <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
+                        b.status === 'approved' ? 'bg-emerald-500' :
+                        b.status === 'rejected' ? 'bg-red-500' :
+                        b.status === 'feedback_requested' ? 'bg-blue-500' : 'bg-amber-500'
+                      }`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-kt-green-900 truncate group-hover:text-kt-gold-700 transition-colors">
+                          {b.projectName}
+                        </div>
+                        <div className="text-[11px] text-kt-gray-500 mt-0.5">
+                          {b.userFullName} · {b.roomCode} · {fmtRelative(b.updatedAt)}
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Güvenlik bilgisi */}
+          <div className="rounded-2xl p-4 bg-kt-green-50 border border-kt-green-100 text-xs text-kt-green-800">
+            <div className="flex items-center gap-2 font-bold mb-1">
+              <svg className="w-4 h-4 text-kt-green-700" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+              </svg>
+              Güvenli Yönetim
+            </div>
+            <p className="text-kt-green-700 leading-relaxed">
+              Tüm onay/red/feedback aksiyonları audit log'a kaydedilir. RS256 imzalı admin oturumu.
+            </p>
+          </div>
+        </aside>
+      </div>
+
+      <BookingDetailModal
+        booking={selected}
+        open={!!selected}
+        loading={reviewing}
+        onClose={() => !reviewing && setSelected(null)}
+        onReview={review}
+      />
+    </AppShell>
+  );
+}

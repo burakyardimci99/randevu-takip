@@ -1,0 +1,233 @@
+import { Link, NavLink, useNavigate } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { Logo } from './Logo';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from './Toast';
+import type { SubjectKind } from '../types';
+
+interface AppShellProps {
+  kind: SubjectKind;
+  children: ReactNode;
+  /** Ek nav öğeleri (örn. sayfa-spesifik linkler). Sabit nav listesinin yanına eklenir. */
+  nav?: ReactNode;
+}
+
+interface NavItem {
+  to: string;
+  label: string;
+  icon: JSX.Element;
+}
+
+const USER_NAV: NavItem[] = [
+  {
+    to: '/rooms',
+    label: 'Odalar',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/bookings',
+    label: 'Taleplerim',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/waitlist',
+    label: 'Sıramda',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/showcase',
+    label: 'Galeri',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/profile',
+    label: 'Profilim',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+      </svg>
+    ),
+  },
+];
+
+const ADMIN_NAV: NavItem[] = [
+  {
+    to: '/admin',
+    label: 'Talepler',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/calendar',
+    label: 'Takvim',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/analytics',
+    label: 'Analiz',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/waitlist',
+    label: 'Bekleme',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/users',
+    label: 'Kullanıcılar',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/audit',
+    label: 'Audit',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/security',
+    label: 'Güvenlik',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+      </svg>
+    ),
+  },
+];
+
+export function AppShell({ kind, children, nav }: AppShellProps) {
+  const { user, admin, logout } = useAuth();
+  const toast = useToast();
+  const navigate = useNavigate();
+  const me = kind === 'user' ? user : admin;
+  const items = kind === 'user' ? USER_NAV : ADMIN_NAV;
+
+  async function handleLogout() {
+    try {
+      await logout(kind);
+      toast.push('info', 'Çıkış yapıldı.');
+      navigate('/login', { replace: true });
+    } catch {
+      toast.push('error', 'Çıkış sırasında bir sorun oluştu.');
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col bg-kt-gray-50">
+      <header className="bg-white border-b border-kt-gray-100 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
+          <Link to={items[0].to} className="shrink-0">
+            <Logo size="sm" />
+          </Link>
+
+          {/* Primary nav (sabit) */}
+          <nav className="hidden md:flex items-center gap-1 flex-1 justify-center">
+            {items.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === '/admin' || item.to === '/rooms'}
+                className={({ isActive }) =>
+                  `px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-colors ${
+                    isActive
+                      ? 'bg-kt-green-50 text-kt-green-800'
+                      : 'text-kt-gray-500 hover:text-kt-green-700 hover:bg-kt-gray-50'
+                  }`
+                }
+              >
+                {item.icon}
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
+
+          <div className="flex items-center gap-2 md:gap-3 shrink-0">
+            {nav}
+            <Link
+              to={kind === 'user' ? '/profile' : '/admin'}
+              className="hidden md:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-kt-gray-50 hover:bg-kt-gray-100 transition-colors"
+              title={kind === 'user' ? 'Profilim' : 'Admin'}
+            >
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-kt-gold-500 to-kt-gold-700 text-white flex items-center justify-center font-bold text-xs">
+                {me?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('') ?? '??'}
+              </div>
+              <div className="text-xs">
+                <div className="font-semibold text-kt-green-800 leading-tight">{me?.fullName}</div>
+                <div className="text-kt-gray-500 leading-tight">
+                  {kind === 'admin' ? 'Yönetici' : 'Kullanıcı'}
+                </div>
+              </div>
+            </Link>
+            <button onClick={handleLogout} className="btn-ghost text-sm">
+              Çıkış
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile nav */}
+        <nav className="md:hidden border-t border-kt-gray-100 px-6 py-2 flex items-center gap-1 overflow-x-auto scrollbar-thin">
+          {items.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === '/admin' || item.to === '/rooms'}
+              className={({ isActive }) =>
+                `px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap ${
+                  isActive ? 'bg-kt-green-50 text-kt-green-800' : 'text-kt-gray-500'
+                }`
+              }
+            >
+              {item.icon}
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+      </header>
+
+      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 animate-fade-in">
+        {children}
+      </main>
+
+      <footer className="border-t border-kt-gray-100 bg-white py-4 text-center text-xs text-kt-gray-400">
+        Kuveyt Türk AI Lab · Demo Ortam · v1.0
+      </footer>
+    </div>
+  );
+}

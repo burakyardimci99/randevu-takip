@@ -1,0 +1,170 @@
+/**
+ * Server-Sent Events (SSE) servisi.
+ *
+ * Kullanım amacı:
+ * - Booking state değişikliklerinde (created/approved/rejected) frontend'i anlık bilgilendir.
+ * - Admin paneli: yeni booking gelince pending sayısı artar.
+ * - User paneli: kendi booking'i status değiştirince UI güncellenir.
+ *
+ * Güvenlik:
+ * - Bağlantı access_token (Authorization veya `?access_token=` query) ile doğrulanır.
+ *   Sadece bearer JWT validate edilir; SSE state-changing değildir, CSRF korumadan muaf.
+ * - Yalnızca subject'in görme yetkisi olan event'ler gönderilir (user → kendi, admin → tümü).
+ * - Browser EventSource Authorization header destekleyemediği için query string desteği var;
+ *   token URL'ye access logging'de görünebilir → production'da reverse proxy log filtresi.
+ */
+import type { Express, Request, Response } from 'express';
+import { verifyAccessToken } from './token.service';
+import { logger } from '../utils/logger';
+import type { SubjectKind } from '../types/auth.types';
+
+interface SseClient {
+  id: string;
+  res: Response;
+  subjectId: string;
+  subjectType: SubjectKind;
+}
+
+const clients = new Map<string, SseClient>();
+let clientCounter = 0;
+
+export type SseEventType =
+  | 'booking.created'
+  | 'booking.updated'
+  | 'booking.reviewed'
+  | 'booking.withdrawn'
+  | 'waitlist.changed'
+  | 'ping';
+
+export interface SsePayload {
+  type: SseEventType;
+  data: Record<string, unknown>;
+}
+
+/**
+ * Tüm bağlı client'lara filter ile yayın yap.
+ * Filter: predicate fonksiyonu — hangi client'lara gidecek.
+ */
+export function broadcast(
+  payload: SsePayload,
+  filter: (client: SseClient) => boolean = () => true
+): void {
+  const data = `event: ${payload.type}\ndata: ${JSON.stringify(payload.data)}\n\n`;
+  for (const client of clients.values()) {
+    if (!filter(client)) continue;
+    try {
+      client.res.write(data);
+    } catch (err) {
+      logger.warn('sse_write_failed', { clientId: client.id, err: (err as Error).message });
+      clients.delete(client.id);
+    }
+  }
+}
+
+/** Admin'lere broadcast et. */
+export function broadcastToAdmins(payload: SsePayload): void {
+  broadcast(payload, (c) => c.subjectType === 'admin');
+}
+
+/** Belirli user'a broadcast et. */
+export function broadcastToUser(userId: string, payload: SsePayload): void {
+  broadcast(payload, (c) => c.subjectType === 'user' && c.subjectId === userId);
+}
+
+/** Hem belirli user'a hem tüm admin'lere broadcast et. */
+export function broadcastBooking(payload: SsePayload, userId: string): void {
+  broadcast(
+    payload,
+    (c) => c.subjectType === 'admin' || (c.subjectType === 'user' && c.subjectId === userId)
+  );
+}
+
+function extractToken(req: Request): { kind: SubjectKind; token: string } | null {
+  const header = req.get('authorization');
+  if (header) {
+    const [scheme, token] = header.split(' ');
+    if (scheme === 'Bearer' && token) {
+      return { kind: 'user', token: token.trim() }; // kind unknown — try both below
+    }
+  }
+  const q = req.query.access_token;
+  if (typeof q === 'string' && q.length > 20) {
+    return { kind: 'user', token: q };
+  }
+  return null;
+}
+
+function verifyAny(token: string): { kind: SubjectKind; sub: string } | null {
+  try {
+    const decoded = verifyAccessToken('user', token);
+    return { kind: 'user', sub: decoded.sub };
+  } catch {
+    /* try admin */
+  }
+  try {
+    const decoded = verifyAccessToken('admin', token);
+    return { kind: 'admin', sub: decoded.sub };
+  } catch {
+    return null;
+  }
+}
+
+export function initSseRoutes(app: Express): void {
+  app.get('/api/events', (req: Request, res: Response) => {
+    const tokenInfo = extractToken(req);
+    if (!tokenInfo) {
+      res.status(401).json({ error: 'Yetkilendirme gerekli.', code: 'AUTH_REQUIRED' });
+      return;
+    }
+
+    const verified = verifyAny(tokenInfo.token);
+    if (!verified) {
+      res.status(401).json({ error: 'Token geçersiz.', code: 'AUTH_INVALID' });
+      return;
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // nginx için
+    res.flushHeaders();
+
+    const id = `sse-${++clientCounter}`;
+    const client: SseClient = {
+      id,
+      res,
+      subjectId: verified.sub,
+      subjectType: verified.kind,
+    };
+    clients.set(id, client);
+
+    // Hello mesajı
+    res.write(`event: hello\ndata: ${JSON.stringify({ id, kind: verified.kind })}\n\n`);
+
+    // Her 25 saniyede ping (load balancer timeout korunması)
+    const ping = setInterval(() => {
+      try {
+        res.write(`event: ping\ndata: ${JSON.stringify({ t: Date.now() })}\n\n`);
+      } catch {
+        clearInterval(ping);
+        clients.delete(id);
+      }
+    }, 25_000);
+
+    req.on('close', () => {
+      clearInterval(ping);
+      clients.delete(id);
+      logger.info('sse_client_disconnected', { id, total: clients.size });
+    });
+
+    logger.info('sse_client_connected', {
+      id,
+      kind: verified.kind,
+      total: clients.size,
+    });
+  });
+}
+
+export function activeClientCount(): number {
+  return clients.size;
+}
