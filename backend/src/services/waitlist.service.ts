@@ -157,7 +157,7 @@ export function joinWaitlist(userId: string, input: JoinWaitlistInput): Waitlist
     if (!conflict) {
       throw new HttpError(
         409,
-        'Bu oda bu tarihte zaten müsait. Doğrudan kiralama oluşturabilirsiniz.',
+        'Bu oda bu tarihte zaten müsait. Doğrudan randevu oluşturabilirsiniz.',
         'WAITLIST_ROOM_AVAILABLE'
       );
     }

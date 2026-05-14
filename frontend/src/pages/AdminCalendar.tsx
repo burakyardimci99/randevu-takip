@@ -75,7 +75,7 @@ export default function AdminCalendar() {
       <div className="mb-6">
         <h1 className="text-3xl font-extrabold text-kt-green-900 mb-1">Takvim</h1>
         <p className="text-kt-gray-500 text-sm">
-          Tüm kiralama taleplerinin aylık görünümü · {bookings.length} talep
+          Tüm randevu taleplerinin aylık görünümü · {bookings.length} talep
         </p>
       </div>
 

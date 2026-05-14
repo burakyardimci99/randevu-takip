@@ -8,9 +8,12 @@ import Register from './pages/Register';
 import Profile from './pages/Profile';
 import UserRooms from './pages/UserRooms';
 import UserBookings from './pages/UserBookings';
+import UserFAQ from './pages/UserFAQ';
+import UserLicenses from './pages/UserLicenses';
 import UserWaitlist from './pages/UserWaitlist';
 import Showcase from './pages/Showcase';
 import PrivacySettings from './pages/PrivacySettings';
+import PublicProfile from './pages/PublicProfile';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminUsers from './pages/AdminUsers';
 import AdminAnalytics from './pages/AdminAnalytics';
@@ -18,6 +21,7 @@ import AdminCalendar from './pages/AdminCalendar';
 import AdminWaitlist from './pages/AdminWaitlist';
 import AdminSecurity from './pages/AdminSecurity';
 import AdminAuditLog from './pages/AdminAuditLog';
+import AdminLicenses from './pages/AdminLicenses';
 
 export default function App() {
   return (
@@ -29,6 +33,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/showcase" element={<Showcase />} />
+            <Route path="/u/:userId" element={<PublicProfile />} />
             {/* Eski URL'ler /login'e yönlendirilir — backwards compat */}
             <Route path="/admin/login" element={<Navigate to="/login" replace />} />
 
@@ -61,6 +66,22 @@ export default function App() {
               element={
                 <ProtectedRoute kind="user">
                   <UserWaitlist />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/licenses"
+              element={
+                <ProtectedRoute kind="user">
+                  <UserLicenses />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/yardim"
+              element={
+                <ProtectedRoute kind="user">
+                  <UserFAQ />
                 </ProtectedRoute>
               }
             />
@@ -126,6 +147,14 @@ export default function App() {
               element={
                 <ProtectedRoute kind="admin">
                   <AdminAuditLog />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/licenses"
+              element={
+                <ProtectedRoute kind="admin">
+                  <AdminLicenses />
                 </ProtectedRoute>
               }
             />

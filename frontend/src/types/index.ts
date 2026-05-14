@@ -18,6 +18,7 @@ export interface UserProfile {
   phone: string | null;
   bio: string | null;
   projectIdea: string | null;
+  profilePhoto: string | null;
   status: number;
   createdAt: string;
   updatedAt: string;
@@ -260,6 +261,7 @@ export interface ShowcaseItem {
   district: string;
   neighborhood: string;
   theme: string;
+  authorId: string;
   authorFullName: string;
   periodMonths: number;
   startDate: string;
@@ -271,6 +273,67 @@ export interface ShowcaseItem {
 /* ============================================================
  * SEMANTIC SEARCH
  * ============================================================ */
+
+/* ============================================================
+ * LİSANSLAR
+ * ============================================================ */
+
+export type LicenseTier = 'paid' | 'free' | 'enterprise';
+export type LicenseCategory =
+  | 'AI Assistant'
+  | 'IDE'
+  | 'Cloud'
+  | 'API'
+  | 'Framework'
+  | 'Database';
+
+export interface UserLicenseEntry {
+  technology: string;
+  name: string;
+  category: LicenseCategory;
+  monthlyUsd: number;
+  tier: LicenseTier;
+  vendor: string;
+  bookingCount: number;
+}
+
+export interface UserLicenseUsage {
+  userId: string;
+  userFullName: string;
+  userEmail: string;
+  department: string | null;
+  licenses: UserLicenseEntry[];
+  totalMonthlyUsd: number;
+  activeBookingCount: number;
+}
+
+export interface LicenseSummary {
+  technology: string;
+  name: string;
+  category: LicenseCategory;
+  tier: LicenseTier;
+  monthlyUsd: number;
+  vendor: string;
+  userCount: number;
+  bookingCount: number;
+  totalMonthlyUsd: number;
+  users: Array<{ id: string; fullName: string; email: string }>;
+}
+
+export interface LicenseReport {
+  generatedAt: string;
+  byUser: UserLicenseUsage[];
+  bySoftware: LicenseSummary[];
+  totals: {
+    totalUsers: number;
+    paidLicenseUsers: number;
+    totalMonthlyUsd: number;
+    totalAnnualUsd: number;
+    distinctLicensesUsed: number;
+    paidLicenseCount: number;
+    freeLicenseCount: number;
+  };
+}
 
 export interface SimilarBooking {
   bookingId: string;
@@ -285,4 +348,116 @@ export interface SimilarBooking {
   isOwn?: boolean;
   anonymized?: boolean;
   createdAt: string;
+}
+
+/* ============================================================
+ * MESAJLAŞMA
+ * ============================================================ */
+
+export interface BookingMessage {
+  id: string;
+  bookingId: string;
+  authorId: string;
+  authorType: 'user' | 'admin';
+  authorName: string;
+  body: string;
+  readByRecipient: boolean;
+  createdAt: string;
+}
+
+export interface ThreadMeta {
+  total: number;
+  unread: number;
+}
+
+/* ============================================================
+ * SHOWCASE ETKİLEŞİM
+ * ============================================================ */
+
+export interface LikeStatus {
+  liked: boolean;
+  count: number;
+}
+
+export interface ShowcaseComment {
+  id: string;
+  bookingId: string;
+  userId: string;
+  userFullName: string;
+  userProfilePhoto: string | null;
+  body: string;
+  createdAt: string;
+}
+
+export type ShowcaseEngagement = Record<string, { likes: number; comments: number }>;
+
+/* ============================================================
+ * PUBLIC PROFİL
+ * ============================================================ */
+
+export interface PublicProfile {
+  id: string;
+  fullName: string;
+  department: string | null;
+  title: string | null;
+  bio: string | null;
+  projectIdea: string | null;
+  profilePhoto: string | null;
+  joinedAt: string;
+  projects: Array<{
+    id: string;
+    projectName: string;
+    projectDescription: string;
+    technologies: string[];
+    roomCode: string;
+    roomName: string;
+    startDate: string;
+    endDate: string;
+    isHighlight: boolean;
+    likeCount: number;
+    commentCount: number;
+    approvedAt: string | null;
+  }>;
+  stats: {
+    projectCount: number;
+    totalLikes: number;
+    totalComments: number;
+  };
+}
+
+
+/* ============================================================
+ * LİSANS TALEPLERİ — request/approval iş akışı
+ * (license analytics LicenseReport'tan AYRI — bu user'ın admin'den
+ *  istediği lisans için)
+ * ============================================================ */
+
+export type LicenseRequestStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'feedback_requested';
+
+export interface LicenseRequest {
+  id: string;
+  userId: string;
+  licenseKey: string;
+  licenseName: string;
+  vendor: string | null;
+  category: string | null;
+  reason: string;
+  durationMonths: 1 | 3 | 6 | 12;
+  status: LicenseRequestStatus;
+  adminFeedback: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LicenseRequestWithUser extends LicenseRequest {
+  userFullName: string;
+  userEmail: string;
+  userDepartment: string | null;
+  reviewerName: string | null;
 }

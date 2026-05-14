@@ -174,11 +174,11 @@ export function bookingReviewedEmail(args: {
   let bodyText = `${greeting.replace(/<[^>]+>/g, '')}\n\n`;
 
   if (args.status === 'approved') {
-    bodyHtml += `<p>${projectLine} kiralama talebiniz <strong style="color:#10B981;">onaylandı</strong>. Tarihinizde odanız hazır olacak.</p>`;
-    bodyText += `${args.projectName} (${args.roomCode}) kiralama talebiniz onaylandı.\n`;
+    bodyHtml += `<p>${projectLine} randevu talebiniz <strong style="color:#10B981;">onaylandı</strong>. Tarihinizde odanız hazır olacak.</p>`;
+    bodyText += `${args.projectName} (${args.roomCode}) randevu talebiniz onaylandı.\n`;
   } else if (args.status === 'rejected') {
-    bodyHtml += `<p>${projectLine} kiralama talebiniz <strong style="color:#EF4444;">reddedildi</strong>.</p>`;
-    bodyText += `${args.projectName} (${args.roomCode}) kiralama talebiniz reddedildi.\n`;
+    bodyHtml += `<p>${projectLine} randevu talebiniz <strong style="color:#EF4444;">reddedildi</strong>.</p>`;
+    bodyText += `${args.projectName} (${args.roomCode}) randevu talebiniz reddedildi.\n`;
   } else {
     bodyHtml += `<p>${projectLine} talebiniz için <strong style="color:#3B82F6;">düzeltme talep edildi</strong>. Lütfen panelinizden düzenleyip yeniden gönderin.</p>`;
     bodyText += `${args.projectName} (${args.roomCode}) için düzeltme talep edildi.\n`;
@@ -237,7 +237,7 @@ export function bookingCreatedAdminEmail(args: {
   roomCode: string;
   submitterName: string;
 }): EmailMessage {
-  const title = '📥 Yeni kiralama talebi';
+  const title = '📥 Yeni randevu talebi';
   const bodyHtml = `
     <p><strong>${escapeHtml(args.submitterName)}</strong> tarafından yeni bir talep geldi:</p>
     <ul>

@@ -204,7 +204,7 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
           <div className="flex items-start justify-between">
             <div>
               <div className="text-xs font-semibold uppercase tracking-wider opacity-90 mb-1">
-                {isEditing ? 'Talebi Düzenle' : 'Kiralama Talebi'} · {room.code}
+                {isEditing ? 'Talebi Düzenle' : 'Randevu Talebi'} · {room.code}
               </div>
               <h2 className="text-2xl font-bold">{room.name}</h2>
             </div>
@@ -222,7 +222,7 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
 
         <form onSubmit={handleSubmit} className="overflow-y-auto scrollbar-thin px-6 py-5 space-y-5 flex-1">
           <div>
-            <label className="label">Kiralama Periyodu</label>
+            <label className="label">Randevu Süresi</label>
             <div className="grid grid-cols-3 gap-2">
               {[1, 2, 3].map((m) => (
                 <button

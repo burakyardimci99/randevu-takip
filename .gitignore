@@ -63,5 +63,6 @@ A2/
 # Editor temp
 *.bak
 
-# Claude Code local settings
+# Claude Code local settings + worktrees
 .claude/settings.local.json
+.claude/worktrees/

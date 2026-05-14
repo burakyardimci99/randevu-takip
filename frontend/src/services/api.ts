@@ -21,16 +21,27 @@ import type {
   AuthTokens,
   AuthUser,
   Booking,
+  BookingMessage,
   CreateBookingPayload,
   JoinWaitlistPayload,
+  LicenseReport,
+  LicenseRequest,
+  LicenseRequestStatus,
+  LicenseRequestWithUser,
+  LikeStatus,
   MfaEnrollResult,
   MfaStatus,
   ProfileUpdatePayload,
+  PublicProfile,
   ReviewBookingPayload,
   Room,
+  ShowcaseComment,
+  ShowcaseEngagement,
   ShowcaseItem,
   SimilarBooking,
   SubjectKind,
+  ThreadMeta,
+  UserLicenseUsage,
   UserListItem,
   UserProfile,
   WaitlistEntry,
@@ -76,6 +87,16 @@ async function fetchCsrfToken(force = false): Promise<string | null> {
   })();
 
   return csrfFetching;
+}
+
+/**
+ * Cache'lenmiş CSRF token'ı temizler. Login/Register sayfası mount olduğunda
+ * çağrılır — backend restart veya session geçişi sonrası eski token'la
+ * 403 alma riskini ortadan kaldırır (bir sonraki istek fresh fetch yapar).
+ */
+export function clearCsrfCache(): void {
+  cachedCsrfToken = null;
+  csrfFetching = null;
 }
 
 async function refreshAccess(kind: SubjectKind): Promise<boolean> {
@@ -380,6 +401,14 @@ export const api = {
     return request<AnalyticsResponse>('/admin/analytics', { kind: 'admin' });
   },
 
+  async adminLicenses() {
+    return request<LicenseReport>('/admin/licenses', { kind: 'admin' });
+  },
+
+  async myLicenseUsage() {
+    return request<UserLicenseUsage>('/user/me/licenses', { kind: 'user' });
+  },
+
   async adminListWaitlist() {
     return request<{ entries: WaitlistEntry[] }>('/admin/waitlist', { kind: 'admin' });
   },
@@ -477,6 +506,128 @@ export const api = {
     );
   },
 
+  /* ============ PROFİL FOTOĞRAFI ============ */
+
+  async setMyPhoto(dataUrl: string) {
+    return request<{ ok: boolean }>('/user/me/photo', {
+      method: 'PUT',
+      body: { dataUrl },
+      kind: 'user',
+    });
+  },
+
+  async clearMyPhoto() {
+    return request<{ ok: boolean }>('/user/me/photo', {
+      method: 'DELETE',
+      kind: 'user',
+    });
+  },
+
+  /* ============ MESAJLAR (BOOKING THREAD) ============ */
+
+  async userUnreadCount() {
+    return request<{ unread: number }>('/user/messages/unread', { kind: 'user' });
+  },
+
+  async adminUnreadCount() {
+    return request<{ unread: number }>('/admin/messages/unread', { kind: 'admin' });
+  },
+
+  async userListMessages(bookingId: string) {
+    return request<{ messages: BookingMessage[]; meta: ThreadMeta }>(
+      `/user/bookings/${encodeURIComponent(bookingId)}/messages`,
+      { kind: 'user' }
+    );
+  },
+
+  async userPostMessage(bookingId: string, body: string) {
+    return request<{ message: BookingMessage }>(
+      `/user/bookings/${encodeURIComponent(bookingId)}/messages`,
+      { method: 'POST', body: { body }, kind: 'user' }
+    );
+  },
+
+  async userMarkRead(bookingId: string) {
+    return request<{ updated: number }>(
+      `/user/bookings/${encodeURIComponent(bookingId)}/messages/read`,
+      { method: 'POST', kind: 'user' }
+    );
+  },
+
+  async adminListMessages(bookingId: string) {
+    return request<{ messages: BookingMessage[]; meta: ThreadMeta }>(
+      `/admin/bookings/${encodeURIComponent(bookingId)}/messages`,
+      { kind: 'admin' }
+    );
+  },
+
+  async adminPostMessage(bookingId: string, body: string) {
+    return request<{ message: BookingMessage }>(
+      `/admin/bookings/${encodeURIComponent(bookingId)}/messages`,
+      { method: 'POST', body: { body }, kind: 'admin' }
+    );
+  },
+
+  async adminMarkRead(bookingId: string) {
+    return request<{ updated: number }>(
+      `/admin/bookings/${encodeURIComponent(bookingId)}/messages/read`,
+      { method: 'POST', kind: 'admin' }
+    );
+  },
+
+  /* ============ SHOWCASE LIKES & COMMENTS ============ */
+
+  async getLikeStatus(bookingId: string) {
+    return request<LikeStatus>(`/user/showcase/${encodeURIComponent(bookingId)}/likes`, {
+      kind: 'user',
+    });
+  },
+
+  async toggleLike(bookingId: string) {
+    return request<LikeStatus>(`/user/showcase/${encodeURIComponent(bookingId)}/like`, {
+      method: 'POST',
+      kind: 'user',
+    });
+  },
+
+  async listComments(bookingId: string) {
+    return request<{ comments: ShowcaseComment[] }>(
+      `/user/showcase/${encodeURIComponent(bookingId)}/comments`,
+      { kind: 'user' }
+    );
+  },
+
+  async postComment(bookingId: string, body: string) {
+    return request<{ comment: ShowcaseComment }>(
+      `/user/showcase/${encodeURIComponent(bookingId)}/comments`,
+      { method: 'POST', body: { body }, kind: 'user' }
+    );
+  },
+
+  async deleteComment(commentId: string) {
+    return request<{ deleted: boolean }>(
+      `/user/showcase/comments/${encodeURIComponent(commentId)}`,
+      { method: 'DELETE', kind: 'user' }
+    );
+  },
+
+  async showcaseEngagement() {
+    return request<{ engagement: ShowcaseEngagement }>('/public/showcase/engagement', {
+      kind: 'user',
+      auth: false,
+      noAuth: true,
+    });
+  },
+
+  /* ============ PUBLIC PROFİL ============ */
+
+  async getPublicProfile(userId: string) {
+    return request<{ profile: PublicProfile }>(
+      `/public/users/${encodeURIComponent(userId)}`,
+      { kind: 'user', auth: false, noAuth: true }
+    );
+  },
+
   /* ============ PUBLIC ============ */
 
   async showcase() {
@@ -524,5 +675,57 @@ export const api = {
       body: payload,
       kind: 'admin',
     });
+  },
+
+  /* ============ LİSANS TALEPLERİ ============ */
+
+  async licenseCatalog() {
+    return request<{
+      items: Array<{
+        key: string;
+        name: string;
+        vendor: string;
+        category: string;
+        tier: 'paid' | 'free' | 'enterprise';
+        monthlyUsd: number;
+      }>;
+    }>('/user/licenses/catalog', { kind: 'user' });
+  },
+
+  async listMyLicenseRequests() {
+    return request<{ items: LicenseRequest[] }>('/user/licenses/requests', { kind: 'user' });
+  },
+
+  async createLicenseRequest(payload: {
+    licenseKey: string;
+    licenseName: string;
+    vendor?: string | null;
+    category?: string | null;
+    reason: string;
+    durationMonths: 1 | 3 | 6 | 12;
+  }) {
+    return request<{ request: LicenseRequest }>('/user/licenses/requests', {
+      method: 'POST',
+      body: payload,
+      kind: 'user',
+    });
+  },
+
+  async adminListLicenseRequests(statusFilter?: LicenseRequestStatus) {
+    const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return request<{ items: LicenseRequestWithUser[] }>(
+      `/admin/licenses/requests${qs}`,
+      { kind: 'admin' }
+    );
+  },
+
+  async adminReviewLicenseRequest(
+    requestId: string,
+    payload: { action: 'approve' | 'reject' | 'request_feedback'; adminFeedback?: string | null }
+  ) {
+    return request<{ request: LicenseRequestWithUser }>(
+      `/admin/licenses/requests/${encodeURIComponent(requestId)}/review`,
+      { method: 'POST', body: payload, kind: 'admin' }
+    );
   },
 };

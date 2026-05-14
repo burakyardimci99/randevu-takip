@@ -145,7 +145,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
             Bu oda şu an dolu. Sıraya yazıldığınızda, oda boşalır boşalmaz
-            otomatik kiralama talebi oluşturulur ve sizi bilgilendiririz.
+            otomatik randevu talebi oluşturulur ve sizi bilgilendiririz.
           </div>
 
           <div className="grid grid-cols-2 gap-3">

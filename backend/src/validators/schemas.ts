@@ -213,3 +213,59 @@ export const mfaVerifySchema = z.object({
 });
 
 export type MfaVerifyInput = z.infer<typeof mfaVerifySchema>;
+
+/* ============================================================
+ * Lisans talebi
+ * ============================================================ */
+
+/**
+ * License key: küçük harf + boşluk + nokta + tire + alfanümerik
+ * (LICENSE_CATALOG anahtarları örn. 'github copilot', 'next.js' gibi).
+ * 'custom' özel değeri — kullanıcı serbest yazdığında.
+ */
+const licenseKeySchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(1)
+  .max(60)
+  .regex(/^[a-z0-9.\- ]+$/, 'Lisans tanımlayıcısı geçersiz karakter içeriyor.');
+
+export const createLicenseRequestSchema = z.object({
+  licenseKey: licenseKeySchema,
+  licenseName: z.string().trim().min(2).max(80),
+  vendor: z.string().trim().max(60).nullable().optional(),
+  category: z.string().trim().max(40).nullable().optional(),
+  reason: z
+    .string()
+    .trim()
+    .min(20, 'Gerekçe en az 20 karakter olmalı.')
+    .max(1000, 'Gerekçe en fazla 1000 karakter olabilir.'),
+  durationMonths: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(12)]),
+});
+
+export type CreateLicenseRequestInput = z.infer<typeof createLicenseRequestSchema>;
+
+export const reviewLicenseRequestSchema = z.object({
+  action: z.union([
+    z.literal('approve'),
+    z.literal('reject'),
+    z.literal('request_feedback'),
+  ]),
+  adminFeedback: z.string().trim().max(1000).nullable().optional(),
+});
+
+export type ReviewLicenseRequestInput = z.infer<typeof reviewLicenseRequestSchema>;
+
+export const adminLicenseRequestsFilterSchema = z.object({
+  status: z
+    .union([
+      z.literal('pending'),
+      z.literal('approved'),
+      z.literal('rejected'),
+      z.literal('feedback_requested'),
+    ])
+    .optional(),
+});
+
+export type AdminLicenseRequestsFilter = z.infer<typeof adminLicenseRequestsFilterSchema>;

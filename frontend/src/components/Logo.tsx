@@ -1,9 +1,15 @@
+/**
+ * Logo component — Kuveyt Türk AI Lab.
+ *
+ * Yeni logo (Logolar/logo1.png → /public/ai-lab-logo.png) fütüristik
+ * AI temalı circuit pattern içerir; biz onu glow + dark backdrop ile sunarız.
+ */
 interface LogoProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
   variant?: 'dark' | 'light';
-  /** Logo'nun arka planına beyaz card + soft shadow uygula. */
+  /** Logo'nun arka planına dark glow card uygula. */
   framed?: boolean;
-  /** Logonun yanında "AI Lab · Oda Kiralama" alt metnini göster. */
+  /** Logonun yanında "AI Lab · Randevu Sistemi" alt metnini göster. */
   showTagline?: boolean;
 }
 
@@ -11,7 +17,7 @@ const HEIGHT_MAP = {
   sm: 'h-10',
   md: 'h-14',
   lg: 'h-20',
-  xl: 'h-44', // Hero/landing için büyük gösterim
+  xl: 'h-44',
 } as const;
 
 const TAGLINE_SIZE = {
@@ -21,22 +27,29 @@ const TAGLINE_SIZE = {
   xl: 'text-base',
 } as const;
 
-export function Logo({ size = 'md', variant = 'dark', framed = false, showTagline = false }: LogoProps) {
+export function Logo({
+  size = 'md',
+  variant = 'dark',
+  framed = false,
+  showTagline = false,
+}: LogoProps) {
   const heightClass = HEIGHT_MAP[size];
   const taglineSize = TAGLINE_SIZE[size];
 
-  // Frame içine alındığında her zaman beyaz arka planlı logo (kt-logo.jpg) kullanılır
-  // çünkü beyaz card içinde renkli logo daha iyi durur.
-  const logoSrc = framed ? '/kt-logo.jpg' : (variant === 'light' ? '/kt-logo-dark.jpg' : '/kt-logo.jpg');
+  // Tek logo (her variant'ta aynı JPEG kullanır — logoyla birlikte dark glow background)
+  const logoSrc = '/ai-lab-logo.jpg';
 
-  const taglinePrimary = variant === 'light' ? 'text-kt-gold-300' : 'text-kt-gold-700';
-  const taglineSecondary = variant === 'light' ? 'text-white/85' : 'text-kt-green-800';
-  const divider = variant === 'light' ? 'border-white/25' : 'border-kt-green-700/15';
+  const taglinePrimary =
+    variant === 'light' ? 'text-kt-gold-300' : 'text-kt-gold-600';
+  const taglineSecondary =
+    variant === 'light' ? 'text-white/85' : 'text-kt-green-800';
+  const divider =
+    variant === 'light' ? 'border-white/25' : 'border-kt-gold-400/30';
 
   const img = (
     <img
       src={logoSrc}
-      alt="Kuveyt Türk"
+      alt="Kuveyt Türk AI Lab"
       className={`${heightClass} w-auto object-contain shrink-0`}
       loading="eager"
       decoding="async"
@@ -47,22 +60,32 @@ export function Logo({ size = 'md', variant = 'dark', framed = false, showTaglin
     <div className="flex items-center gap-3">
       {framed ? (
         <div
-          className={`rounded-2xl bg-white shadow-kt-soft p-2.5 transition-all ${
-            variant === 'light' ? 'ring-1 ring-kt-gold-300/30' : 'border border-kt-gold-100/60'
-          }`}
+          className={`relative rounded-2xl p-2 transition-all overflow-hidden
+            bg-gradient-to-br from-kt-green-950 via-kt-green-900 to-kt-green-800
+            shadow-glow-cyan ring-1 ring-kt-gold-400/30 hover:ring-kt-gold-400/60`}
         >
-          {img}
+          {/* AI grid overlay */}
+          <div className="absolute inset-0 bg-neural-grid-dark opacity-40 pointer-events-none" />
+          {/* Glow corner accent */}
+          <div className="absolute -top-3 -right-3 w-12 h-12 bg-kt-gold-400/40 rounded-full blur-2xl pointer-events-none" />
+          <div className="relative">{img}</div>
         </div>
       ) : (
         img
       )}
       {showTagline && (
         <div className={`pl-3 border-l ${divider} leading-tight`}>
-          <div className={`font-bold tracking-wider uppercase ${taglineSize} ${taglinePrimary}`}>
+          <div
+            className={`font-bold tracking-[0.18em] uppercase ${taglineSize} ${taglinePrimary}`}
+          >
             AI Lab
           </div>
-          <div className={`${taglineSecondary} ${size === 'sm' ? 'text-xs' : 'text-sm'} font-semibold whitespace-nowrap`}>
-            Oda Kiralama
+          <div
+            className={`${taglineSecondary} ${
+              size === 'sm' ? 'text-xs' : 'text-sm'
+            } font-semibold whitespace-nowrap`}
+          >
+            Randevu Sistemi
           </div>
         </div>
       )}

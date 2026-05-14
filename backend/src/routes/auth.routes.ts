@@ -24,6 +24,7 @@ import { authRateLimit } from '../middleware/security.middleware';
 import { HttpError } from '../middleware/error.middleware';
 import {
   clearRefreshCookie,
+  csrfProtection,
   getRefreshCookie,
   setRefreshCookie,
 } from '../middleware/cookie-auth';
@@ -40,6 +41,7 @@ const router = Router();
 router.post(
   '/register',
   authRateLimit,
+  csrfProtection,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const input = registerSchema.parse(req.body);
@@ -90,6 +92,7 @@ router.post(
 router.post(
   '/login',
   authRateLimit,
+  csrfProtection,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const input = loginSchema.parse(req.body);
@@ -219,7 +222,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
-router.post('/logout', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/logout', csrfProtection, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const tokens: string[] = [];
     const userCookie = getRefreshCookie(req, 'user');

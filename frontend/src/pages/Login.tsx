@@ -1,11 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/Toast';
+import { clearCsrfCache } from '../services/api';
+import LoginPage from '@/components/ui/gaming-login';
 
 /**
  * Tek giriş ekranı. Backend hem admins hem users tablosunu kontrol eder.
  * Login başarılıysa response.type ('user' | 'admin') dönüşüne göre yönlendirme yapılır.
+ *
+ * Görsel: Landing hero ile ortak arkaplan (/ai-lab-bg.jpg + ken-burns + AI mesh
+ * orb'ları) + gaming-login style glass dark form card.
  */
 export default function Login() {
   const { login } = useAuth();
@@ -13,8 +18,15 @@ export default function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [showDemo, setShowDemo] = useState(false);
+
+  // Sayfa açıldığında cache'lenmiş CSRF token'ı temizle. Backend restart
+  // veya session geçişi sonrası bayat token kullanmamak için (bir sonraki
+  // istek fresh fetch yapacak).
+  useEffect(() => {
+    clearCsrfCache();
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,149 +48,96 @@ export default function Login() {
     }
   }
 
+  function fillDemo(which: 'user' | 'admin') {
+    if (which === 'user') {
+      setEmail('user@klab.test');
+      setPassword('Demo1234!Pass');
+    } else {
+      setEmail('admin@klab.test');
+      setPassword('Admin1234!Pass');
+    }
+  }
+
   return (
-    <div className="min-h-screen flex flex-col relative overflow-hidden bg-kt-green-950">
-      {/* ============ ARKA PLAN ============ */}
-      {/* 1. Mekan render'ı + ken-burns hareketi */}
+    <div className="relative min-h-screen w-full flex items-center justify-center px-4 py-12 overflow-hidden bg-kt-green-950">
+      {/* ========== ARKAPLAN — Landing hero ile aynı ========== */}
+      {/* 1. Ana görsel + ken-burns */}
       <div className="absolute inset-0">
         <img
-          src="/images/a2.jpg"
+          src="/ai-lab-bg.jpg"
           alt=""
           aria-hidden="true"
           className="w-full h-full object-cover animate-ken-burns"
           loading="eager"
         />
-      </div>
-      {/* 2. Kuveyt Türk yeşili gradient overlay (text okunabilirliği için) */}
-      <div className="absolute inset-0 bg-gradient-to-br from-kt-green-950/90 via-kt-green-800/85 to-kt-green-900/95" />
-
-      {/* 3. Animated mesh — altın & yeşil yumuşak orb'lar */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-32 -right-32 w-[600px] h-[600px] bg-kt-gold-500/25 rounded-full blur-3xl animate-mesh-shift" />
-        <div className="absolute -bottom-40 -left-40 w-[600px] h-[600px] bg-kt-green-400/20 rounded-full blur-3xl animate-mesh-shift" style={{ animationDelay: '4s' }} />
-        <div className="absolute top-1/3 left-1/2 w-[420px] h-[420px] bg-kt-gold-600/15 rounded-full blur-3xl animate-float-slow" />
+        {/* 2. Koyu navy gradient overlay — okunabilirlik için */}
+        <div className="absolute inset-0 bg-gradient-to-br from-kt-green-950/65 via-kt-green-900/55 to-kt-green-950/80" />
       </div>
 
-      {/* 4. İnce noktalı pattern (parmak izi gibi) */}
-      <div className="absolute inset-0 opacity-[0.06] pointer-events-none" style={{
-        backgroundImage: 'radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)',
-        backgroundSize: '32px 32px',
-      }} />
+      {/* 3. Neural grid */}
+      <div className="absolute inset-0 bg-neural-grid-dark opacity-25 pointer-events-none" />
+      {/* 4. AI mesh */}
+      <div className="absolute inset-0 bg-ai-mesh animate-mesh-shift pointer-events-none" />
+      {/* 5. Glow orbs */}
+      <div className="absolute top-1/4 left-10 w-96 h-96 bg-kt-gold-400/25 rounded-full blur-[120px] animate-float-slow pointer-events-none" />
+      <div className="absolute bottom-10 right-10 w-[500px] h-[500px] bg-kt-violet-500/20 rounded-full blur-[140px] animate-float-medium pointer-events-none" />
+      <div className="absolute top-10 right-1/3 w-72 h-72 bg-kt-green-600/30 rounded-full blur-[100px] pointer-events-none" />
 
-      {/* ============ İÇERİK ============ */}
-      <header className="relative z-10 px-8 py-6 flex items-center justify-between">
-        <Link to="/" className="group">
-          <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-kt-gold-400/30 p-2.5 transition-all group-hover:shadow-kt-gold group-hover:-translate-y-0.5">
-            <img
-              src="/kt-logo.jpg"
-              alt="Kuveyt Türk"
-              className="h-14 w-auto object-contain"
-              loading="eager"
-              decoding="async"
-            />
-          </div>
+      {/* Üst-sol: Landing hero ile birebir aynı inline logo treatment
+          — 3 katmanlı blur halo (gold/violet/green) + yıldız parıltıları
+          + cyan drop-shadow + duration-700 group-hover:scale-[1.02] */}
+      <header className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between px-6 md:px-10 py-6">
+        <Link to="/" aria-label="Ana sayfa" className="relative inline-block group">
+          {/* Çoklu yumuşak ışık halkaları */}
+          <div className="absolute inset-0 -m-8 bg-kt-gold-400/25 rounded-full blur-[60px] animate-glow-pulse pointer-events-none" />
+          <div className="absolute inset-0 -m-6 bg-kt-violet-500/20 rounded-full blur-[48px] pointer-events-none" />
+          <div className="absolute inset-0 -m-4 bg-kt-green-600/30 rounded-full blur-[36px] pointer-events-none" />
+
+          {/* Yıldız parıltıları */}
+          <svg className="absolute -top-4 -right-5 w-7 h-7 text-kt-gold-300 opacity-70 pointer-events-none" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0 L13.5 8.5 L22 12 L13.5 15.5 L12 24 L10.5 15.5 L2 12 L10.5 8.5 Z" className="animate-pulse-gold" />
+          </svg>
+          <svg className="absolute -bottom-3 -left-4 w-5 h-5 text-kt-gold-300/60 pointer-events-none" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0 L13.5 8.5 L22 12 L13.5 15.5 L12 24 L10.5 15.5 L2 12 L10.5 8.5 Z" />
+          </svg>
+
+          <img
+            src="/ai-lab-logo.png"
+            alt="Kuveyt Türk Yapay Zeka Laboratuvarı"
+            className="relative h-24 md:h-28 w-auto object-contain drop-shadow-[0_0_40px_rgba(34,211,238,0.55)] transition-transform duration-700 group-hover:scale-[1.02]"
+            loading="eager"
+            decoding="async"
+          />
         </Link>
-        <Link to="/" className="text-sm font-semibold text-white/80 hover:text-kt-gold-300 transition-colors">
-          ← Ana sayfaya dön
+        <Link
+          to="/"
+          className="text-sm font-semibold text-white/80 hover:text-kt-gold-300 transition-colors backdrop-blur-sm bg-black/20 px-3 py-1.5 rounded-lg border border-white/10"
+        >
+          ← Ana sayfa
         </Link>
       </header>
 
-      <main className="relative z-10 flex-1 flex items-center justify-center px-6 py-8">
-        <div className="w-full max-w-md animate-slide-up">
-          <div className="rounded-2xl p-8 bg-white/95 backdrop-blur-md shadow-2xl border border-white/40">
-            <div className="mb-6">
-              <h1 className="text-3xl font-extrabold text-kt-green-900 mb-1.5">Giriş Yap</h1>
-              <p className="text-sm text-kt-gray-500">
-                Kullanıcı veya admin hesabınızla aynı yerden giriş yapabilirsiniz.
-              </p>
-            </div>
+      {/* Merkez: glass form card */}
+      <div className="relative z-20 w-full max-w-md animate-fade-in">
+        <LoginPage.LoginForm
+          email={email}
+          password={password}
+          remember={remember}
+          loading={loading}
+          onEmailChange={setEmail}
+          onPasswordChange={setPassword}
+          onRememberChange={setRemember}
+          onSubmit={handleSubmit}
+          onDemoFill={fillDemo}
+          onHomeClick={() => navigate('/')}
+          registerHref="/register"
+        />
 
-            <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
-              <div>
-                <label htmlFor="email" className="label">E-posta</label>
-                <input
-                  id="email"
-                  type="email"
-                  className="input"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoComplete="email"
-                  placeholder="ornek@klab.test"
-                  maxLength={254}
-                  disabled={loading}
-                />
-              </div>
-
-              <div>
-                <label htmlFor="password" className="label">Parola</label>
-                <input
-                  id="password"
-                  type="password"
-                  className="input"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                  placeholder="••••••••••••"
-                  maxLength={128}
-                  disabled={loading}
-                />
-              </div>
-
-              <button type="submit" disabled={loading} className="btn-primary w-full">
-                {loading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
-              </button>
-            </form>
-
-            <div className="mt-5 text-center text-sm text-kt-gray-600">
-              Hesabın yok mu?{' '}
-              <Link to="/register" className="font-semibold text-kt-green-700 hover:text-kt-gold-600">
-                Kayıt ol →
-              </Link>
-            </div>
-
-            <div className="mt-6 pt-6 border-t border-kt-gray-100">
-              <button
-                type="button"
-                onClick={() => setShowDemo((v) => !v)}
-                className="w-full text-xs text-kt-gray-500 hover:text-kt-green-700 font-semibold uppercase tracking-wider flex items-center justify-between"
-              >
-                <span>Demo Hesaplar</span>
-                <svg className={`w-4 h-4 transition-transform ${showDemo ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/>
-                </svg>
-              </button>
-              {showDemo && (
-                <div className="mt-3 space-y-2 text-sm animate-fade-in">
-                  <button
-                    type="button"
-                    onClick={() => { setEmail('user@klab.test'); setPassword('Demo1234!Pass'); }}
-                    className="w-full text-left px-3 py-2 rounded-lg bg-kt-green-50 hover:bg-kt-green-100 border border-kt-green-100 transition-colors"
-                  >
-                    <div className="text-xs font-bold text-kt-green-700 uppercase tracking-wider mb-0.5">Kullanıcı</div>
-                    <div className="font-mono text-kt-green-900 text-xs">user@klab.test</div>
-                    <div className="font-mono text-kt-gray-500 text-xs">Demo1234!Pass</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setEmail('admin@klab.test'); setPassword('Admin1234!Pass'); }}
-                    className="w-full text-left px-3 py-2 rounded-lg bg-kt-gold-50 hover:bg-kt-gold-100 border border-kt-gold-100 transition-colors"
-                  >
-                    <div className="text-xs font-bold text-kt-gold-700 uppercase tracking-wider mb-0.5">Admin</div>
-                    <div className="font-mono text-kt-green-900 text-xs">admin@klab.test</div>
-                    <div className="font-mono text-kt-gray-500 text-xs">Admin1234!Pass</div>
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <p className="text-center text-xs text-kt-gray-500 mt-6">
-            Bu bir demo ortamdır. Gerçek müşteri verisi kullanmayın.
-          </p>
-        </div>
-      </main>
+        <p className="text-center text-xs text-white/60 mt-6 backdrop-blur-sm bg-black/20 px-3 py-1.5 rounded-lg inline-block">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-kt-gold-400 mr-2 align-middle animate-pulse-gold" />
+          Demo ortam · RS256 ile güvenli oturum · Gerçek müşteri verisi kullanmayın
+        </p>
+      </div>
     </div>
   );
 }

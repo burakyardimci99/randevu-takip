@@ -5,10 +5,12 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { requireAdmin, requireAdminRole } from '../middleware/auth.middleware';
 import {
+  adminLicenseRequestsFilterSchema,
   adminUserSearchSchema,
   adminUserUpdateSchema,
   mfaVerifySchema,
   reviewBookingSchema,
+  reviewLicenseRequestSchema,
   similarSearchSchema,
 } from '../validators/schemas';
 import {
@@ -46,7 +48,16 @@ import {
   exportAuditCsv,
   listAuditLog,
 } from '../services/audit-viewer.service';
+import { getLicenseReport, LICENSE_CATALOG } from '../services/license.service';
+import {
+  getThreadMeta,
+  getUnreadCountForAdmin,
+  listMessages,
+  markThreadRead,
+  postMessage,
+} from '../services/messages.service';
 import { listBackups, runBackupOnce } from '../services/backup.service';
+import { csrfProtection } from '../middleware/cookie-auth';
 import { HttpError } from '../middleware/error.middleware';
 import { getDb } from '../db/schema';
 
@@ -54,6 +65,11 @@ const router = Router();
 
 router.use(requireAdmin);
 router.use(requireAdminRole('admin', 'super_admin'));
+
+// CSRF — tüm admin state-changing endpoint'leri korur (booking review,
+// user update/restore/purge, MFA, license review, backup, vb.).
+// GET'ler csrf-csrf `ignoredMethods` ile muaf.
+router.use(csrfProtection);
 
 router.get('/rooms', (_req: Request, res: Response, next: NextFunction) => {
   try {
@@ -307,6 +323,76 @@ router.get('/stats', (_req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+/* ============ MESAJLAR (admin tarafı) ============ */
+
+router.get('/messages/unread', (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ unread: getUnreadCountForAdmin() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get(
+  '/bookings/:id/messages',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id ?? '');
+      if (id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
+      }
+      // Admin tüm booking'lere erişebilir
+      const b = getBookingByIdAdmin(id);
+      if (!b) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+      res.json({
+        messages: listMessages(id),
+        meta: getThreadMeta(id, 'admin'),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/bookings/:id/messages',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id ?? '');
+      const body = String(req.body?.body ?? '');
+      const b = getBookingByIdAdmin(id);
+      if (!b) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+      const adminRow = getDb()
+        .prepare('SELECT full_name FROM admins WHERE id = ?')
+        .get(req.auth!.subjectId) as { full_name: string } | undefined;
+      const message = postMessage({
+        bookingId: id,
+        authorId: req.auth!.subjectId,
+        authorType: 'admin',
+        authorName: adminRow?.full_name ?? 'Yönetici',
+        body,
+      });
+      res.status(201).json({ message });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/bookings/:id/messages/read',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id ?? '');
+      const b = getBookingByIdAdmin(id);
+      if (!b) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+      res.json(markThreadRead(id, 'admin'));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 /* ============ AUDIT LOG VIEWER ============ */
 
 router.get('/audit', (req: Request, res: Response, next: NextFunction) => {
@@ -394,6 +480,29 @@ router.post('/backup', async (req: Request, res: Response, next: NextFunction) =
       details: { action: 'manual_backup', sizeBytes: result.sizeBytes },
     });
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============ LİSANSLAR ============ */
+
+router.get('/licenses', (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(getLicenseReport());
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/licenses/catalog', (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    // UI tarafında "tanınan teknolojiler" gösterimi için
+    const list = Object.entries(LICENSE_CATALOG).map(([key, info]) => ({
+      key,
+      ...info,
+    }));
+    res.json({ catalog: list });
   } catch (err) {
     next(err);
   }
@@ -577,6 +686,49 @@ router.put(
       db.prepare(`UPDATE bookings SET ${sets.join(', ')} WHERE id = ?`).run(...params);
       const updated = getBookingByIdAdmin(id);
       res.json({ booking: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/* ============================================================
+ * LİSANSLAR — admin talep review
+ * ============================================================ */
+
+router.get(
+  '/licenses/requests',
+  requireAdmin,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { status } = adminLicenseRequestsFilterSchema.parse(req.query);
+      const { listAdminLicenseRequests } = await import('../services/license-request.service');
+      const items = listAdminLicenseRequests(status);
+      res.json({ items });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/licenses/requests/:id/review',
+  requireAdmin,
+  requireAdminRole('admin', 'super_admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = reviewLicenseRequestSchema.parse(req.body);
+      const { reviewLicenseRequest } = await import('../services/license-request.service');
+      const updated = reviewLicenseRequest(req.auth!.subjectId, req.params.id, input);
+      recordAudit({
+        eventType: 'license_request.reviewed',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        success: true,
+        details: { requestId: updated.id, action: input.action, status: updated.status },
+      });
+      res.json({ request: updated });
     } catch (err) {
       next(err);
     }

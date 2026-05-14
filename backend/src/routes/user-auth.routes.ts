@@ -18,6 +18,7 @@ import { requireUser } from '../middleware/auth.middleware';
 import { HttpError } from '../middleware/error.middleware';
 import {
   clearRefreshCookie,
+  csrfProtection,
   getRefreshCookie,
   setRefreshCookie,
 } from '../middleware/cookie-auth';
@@ -28,6 +29,7 @@ const router = Router();
 router.post(
   '/login',
   authRateLimit,
+  csrfProtection,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const input = loginSchema.parse(req.body);
@@ -134,7 +136,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
-router.post('/logout', requireUser, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/logout', csrfProtection, requireUser, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const cookieToken = getRefreshCookie(req, 'user');
     if (cookieToken) revokeRefreshToken(cookieToken);

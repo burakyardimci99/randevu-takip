@@ -6,6 +6,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { requireUser } from '../middleware/auth.middleware';
 import {
   createBookingSchema,
+  createLicenseRequestSchema,
   joinWaitlistSchema,
   profileUpdateSchema,
   similarSearchSchema,
@@ -29,13 +30,40 @@ import {
   findSimilarBookings,
 } from '../services/embedding.service';
 import { exportUserData, purgeUser } from '../services/privacy.service';
+import { getUserLicenseUsage } from '../services/license.service';
+import {
+  clearUserProfilePhoto,
+  setUserProfilePhoto,
+} from '../services/profile-photo.service';
+import {
+  getThreadMeta,
+  getUnreadCountForUser,
+  listMessages,
+  markThreadRead,
+  postMessage,
+} from '../services/messages.service';
+import {
+  getLikeStatus,
+  getShowcaseEngagement,
+  listComments,
+  postComment,
+  toggleLike,
+  deleteComment,
+} from '../services/showcase.service';
 import { recordAudit } from '../services/audit.service';
+import { csrfProtection } from '../middleware/cookie-auth';
 import { HttpError } from '../middleware/error.middleware';
 import { getDb } from '../db/schema';
 
 const router = Router();
 
 router.use(requireUser);
+
+// CSRF — tüm state-changing endpoint'leri (POST/PUT/DELETE/PATCH) korur.
+// GET/HEAD/OPTIONS csrf-csrf'in `ignoredMethods` config'i ile muaf.
+// Frontend api.ts mutation isteklerinde X-CSRF-Token header'ını otomatik
+// gönderir; CSRF rotasyonunda 403 alırsa fresh token ile retry yapar.
+router.use(csrfProtection);
 
 /* ============ PROFİL ============ */
 
@@ -259,6 +287,210 @@ router.post('/similar', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
+/* ============ PROFİL FOTOĞRAFI ============ */
+
+router.put('/me/photo', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const dataUrl = req.body?.dataUrl;
+    if (typeof dataUrl !== 'string') {
+      throw new HttpError(400, 'dataUrl eksik.', 'VALIDATION');
+    }
+    setUserProfilePhoto(req.auth!.subjectId, dataUrl);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/me/photo', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    clearUserProfilePhoto(req.auth!.subjectId);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============ MESAJLAR (booking thread) ============ */
+
+router.get('/messages/unread', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ unread: getUnreadCountForUser(req.auth!.subjectId) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get(
+  '/bookings/:id/messages',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id ?? '');
+      if (id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
+      }
+      // IDOR: bu booking user'a ait mi?
+      const own = getBookingByIdForUser(req.auth!.subjectId, id);
+      if (!own) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+      res.json({
+        messages: listMessages(id),
+        meta: getThreadMeta(id, 'user'),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/bookings/:id/messages',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id ?? '');
+      if (id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
+      }
+      const body = String(req.body?.body ?? '');
+      const own = getBookingByIdForUser(req.auth!.subjectId, id);
+      if (!own) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+      const profile = getDb()
+        .prepare('SELECT full_name FROM users WHERE id = ?')
+        .get(req.auth!.subjectId) as { full_name: string } | undefined;
+      const message = postMessage({
+        bookingId: id,
+        authorId: req.auth!.subjectId,
+        authorType: 'user',
+        authorName: profile?.full_name ?? 'Kullanıcı',
+        body,
+      });
+      res.status(201).json({ message });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/bookings/:id/messages/read',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id ?? '');
+      if (id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
+      }
+      const own = getBookingByIdForUser(req.auth!.subjectId, id);
+      if (!own) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+      res.json(markThreadRead(id, 'user'));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/* ============ SHOWCASE — LIKE & COMMENT ============ */
+
+router.get(
+  '/showcase/:id/likes',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id ?? '');
+      res.json(getLikeStatus(id, req.auth!.subjectId));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/showcase/:id/like',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id ?? '');
+      res.json(toggleLike(id, req.auth!.subjectId));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get(
+  '/showcase/:id/comments',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id ?? '');
+      res.json({ comments: listComments(id) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/showcase/:id/comments',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id ?? '');
+      const body = String(req.body?.body ?? '');
+      const profile = getDb()
+        .prepare('SELECT full_name FROM users WHERE id = ?')
+        .get(req.auth!.subjectId) as { full_name: string } | undefined;
+      const comment = postComment({
+        bookingId: id,
+        userId: req.auth!.subjectId,
+        userFullName: profile?.full_name ?? 'Kullanıcı',
+        body,
+      });
+      res.status(201).json({ comment });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.delete(
+  '/showcase/comments/:id',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id ?? '');
+      res.json(deleteComment(id, req.auth!.subjectId));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get('/showcase/engagement', (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ engagement: getShowcaseEngagement() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============ KENDİ LİSANS KULLANIMI ============ */
+
+router.get('/me/licenses', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const usage = getUserLicenseUsage(req.auth!.subjectId);
+    if (!usage) {
+      // Aktif booking yok → boş response
+      res.json({
+        userId: req.auth!.subjectId,
+        userFullName: '',
+        userEmail: '',
+        department: null,
+        licenses: [],
+        totalMonthlyUsd: 0,
+        activeBookingCount: 0,
+      });
+      return;
+    }
+    res.json(usage);
+  } catch (err) {
+    next(err);
+  }
+});
+
 /* ============ KVKK — Veri ihracı + Right to be Forgotten ============ */
 
 /** Kullanıcı kendi verilerini JSON olarak indirir. */
@@ -324,6 +556,55 @@ router.put(
       ).run(visible ? 1 : 0, id, req.auth!.subjectId);
       const updated = getBookingByIdForUser(req.auth!.subjectId, id);
       res.json({ booking: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/* ============================================================
+ * LİSANSLAR — kullanıcı katalog & talep
+ * ============================================================ */
+
+router.get(
+  '/licenses/catalog',
+  requireUser,
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { getLicenseCatalog } = await import('../services/license-request.service');
+      res.json({ items: getLicenseCatalog() });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get(
+  '/licenses/requests',
+  requireUser,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { listUserLicenseRequests } = await import('../services/license-request.service');
+      const items = listUserLicenseRequests(req.auth!.subjectId);
+      res.json({ items });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// NOT: Mevcut state-changing endpoint'ler (bookings, waitlist) henüz CSRF
+// korumalı değil — tutarlılık için bu da öyle. Tüm POST/PUT/DELETE
+// endpoint'lerini CSRF'e geçirmek ayrı bir refactor.
+router.post(
+  '/licenses/requests',
+  requireUser,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = createLicenseRequestSchema.parse(req.body);
+      const { createLicenseRequest } = await import('../services/license-request.service');
+      const created = createLicenseRequest(req.auth!.subjectId, input);
+      res.status(201).json({ request: created });
     } catch (err) {
       next(err);
     }

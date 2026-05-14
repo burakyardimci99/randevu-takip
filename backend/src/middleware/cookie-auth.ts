@@ -86,9 +86,16 @@ const { generateToken, doubleCsrfProtection, invalidCsrfTokenError } = doubleCsr
  * X-CSRF-Token header'ında bu değeri gönderir.
  *
  * Önemli: token + cookie aynı session'a (refresh cookie veya IP) bağlanır.
+ *
+ * `overwrite: true` — eğer browser'da geçersiz/stale klab_csrf cookie varsa
+ * (örneğin backend restart sonrası refresh cookie session id'si artık DB'de
+ * yok) library default'u `validateOnReuse: true` olduğu için 403 fırlatır.
+ * Bizim için /api/csrf çağrısı her zaman fresh token üretmeli — overwrite=true
+ * eski geçersiz cookie'yi sessizce yeni token ile değiştirir. Güvenlik etkisi
+ * yok: zaten her CSRF token kullanıcıya direkt veriliyor (gizli değil).
  */
 export function csrfTokenHandler(req: Request, res: Response): void {
-  const token = generateToken(req, res);
+  const token = generateToken(req, res, { overwrite: true });
   res.json({ csrfToken: token });
 }
 

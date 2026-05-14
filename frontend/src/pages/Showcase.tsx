@@ -11,23 +11,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/Logo';
+import { AppShell } from '../components/AppShell';
+import { ShowcaseCard } from '../components/ShowcaseCard';
+import { EmptyState } from '../components/EmptyState';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
-import type { ShowcaseItem } from '../types';
+import type { ShowcaseEngagement, ShowcaseItem } from '../types';
 
-function fmtRange(start: string, end: string): string {
-  const opts: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short' };
-  return `${new Date(start).toLocaleDateString('tr-TR', opts)} → ${new Date(end).toLocaleDateString('tr-TR', opts)}`;
-}
-
-function initials(name: string): string {
-  return name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
-}
 
 export default function Showcase() {
   const { user, admin } = useAuth();
   const [items, setItems] = useState<ShowcaseItem[]>([]);
   const [techs, setTechs] = useState<Array<{ technology: string; count: number }>>([]);
+  const [engagement, setEngagement] = useState<ShowcaseEngagement>({});
   const [activeTech, setActiveTech] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -35,9 +31,14 @@ export default function Showcase() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, t] = await Promise.all([api.showcase(), api.showcaseTechnologies()]);
+      const [s, t, e] = await Promise.all([
+        api.showcase(),
+        api.showcaseTechnologies(),
+        api.showcaseEngagement(),
+      ]);
       setItems(s.items);
       setTechs(t.technologies);
+      setEngagement(e.engagement);
     } finally {
       setLoading(false);
     }
@@ -64,38 +65,13 @@ export default function Showcase() {
   const isLoggedIn = !!user || !!admin;
   const homeLink = admin ? '/admin' : user ? '/rooms' : '/';
 
-  return (
-    <div className="min-h-screen flex flex-col bg-kt-gray-50">
-      {/* Public minimal header */}
-      <header className="bg-white border-b border-kt-gray-100 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link to={homeLink} className="shrink-0">
-            <Logo size="sm" />
-          </Link>
-          <div className="flex items-center gap-3">
-            {isLoggedIn ? (
-              <Link to={homeLink} className="btn-ghost text-sm">
-                Panele dön →
-              </Link>
-            ) : (
-              <>
-                <Link to="/login" className="btn-ghost text-sm">
-                  Giriş Yap
-                </Link>
-                <Link to="/register" className="btn-primary text-sm">
-                  Kayıt Ol
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-10">
+  // Envanter içeriği — hem AppShell hem public header altında aynı kullanılır.
+  const content = (
+    <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-10">
         {/* Hero */}
         <section className="mb-10">
           <div className="text-xs uppercase tracking-widest text-kt-gold-700 font-bold mb-2">
-            Vibe Coding Galerisi
+            Vibe Coding Envanteri
           </div>
           <h1 className="text-4xl md:text-5xl font-extrabold text-kt-green-900 mb-3">
             AI Lab'da yapılan projeler
@@ -164,78 +140,73 @@ export default function Showcase() {
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="card p-12 text-center">
-            <div className="text-5xl mb-4">🎨</div>
-            <h3 className="text-xl font-bold text-kt-green-800 mb-2">
-              {items.length === 0 ? 'Henüz galeri boş' : 'Eşleşen proje yok'}
-            </h3>
-            <p className="text-kt-gray-500">
-              {items.length === 0
-                ? 'Onaylanan ilk projeler burada gösterilecek.'
-                : 'Filtreleri değiştirip tekrar deneyin.'}
-            </p>
-          </div>
+          <EmptyState
+            icon="showcase"
+            title={items.length === 0 ? 'Envanter henüz boş' : 'Eşleşen proje yok'}
+            description={
+              items.length === 0
+                ? 'Onaylanan ilk projeler burada gösterilecek. Sen de bir oda için randevu alıp projeni paylaşabilirsin.'
+                : 'Filtreleri değiştirip tekrar deneyin.'
+            }
+            tone="violet"
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((item) => (
-              <article
-                key={item.id}
-                className={`card-hover p-5 flex flex-col h-full ${
-                  item.isHighlight ? 'ring-2 ring-kt-gold-400' : ''
-                }`}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <span className="text-[11px] font-bold text-kt-gold-700 tracking-wider">
-                    {item.roomCode} · {item.neighborhood}
-                  </span>
-                  {item.isHighlight && (
-                    <span className="px-2 py-0.5 rounded-md bg-kt-gold-100 text-kt-gold-800 text-[10px] font-bold uppercase tracking-wider">
-                      ⭐ Öne çıkan
-                    </span>
-                  )}
-                </div>
-                <h3 className="text-lg font-bold text-kt-green-900 mb-2 line-clamp-2">
-                  {item.projectName}
-                </h3>
-                <p className="text-sm text-kt-gray-600 line-clamp-3 mb-3 flex-1">
-                  {item.projectDescription}
-                </p>
-                <div className="flex flex-wrap gap-1 mb-3">
-                  {item.technologies.slice(0, 5).map((t) => (
-                    <span
-                      key={t}
-                      className="px-2 py-0.5 rounded-md bg-kt-green-50 text-kt-green-800 text-[11px] font-semibold"
-                    >
-                      {t}
-                    </span>
-                  ))}
-                  {item.technologies.length > 5 && (
-                    <span className="px-2 py-0.5 rounded-md text-kt-gray-400 text-[11px]">
-                      +{item.technologies.length - 5}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 pt-3 border-t border-kt-gray-100">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center font-bold text-xs">
-                    {initials(item.authorFullName)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-semibold text-kt-green-800 truncate">
-                      {item.authorFullName}
-                    </div>
-                    <div className="text-[10px] text-kt-gray-500">
-                      {fmtRange(item.startDate, item.endDate)} · {item.periodMonths} ay
-                    </div>
-                  </div>
-                </div>
-              </article>
-            ))}
+            {filtered.map((item) => {
+              const eng = engagement[item.id] ?? { likes: 0, comments: 0 };
+              return (
+                <ShowcaseCard
+                  key={item.id}
+                  item={item}
+                  authorId={item.authorId}
+                  likes={eng.likes}
+                  comments={eng.comments}
+                />
+              );
+            })}
           </div>
         )}
       </main>
+  );
 
+  // Giriş yapmış kullanıcılar AppShell içinde — sidebar/nav korunur, "Envanter"
+  // aktif highlight ile gözükür. Anonim ziyaretçiler için public header korundu.
+  if (user) {
+    return <AppShell kind="user">{content}</AppShell>;
+  }
+  if (admin) {
+    return <AppShell kind="admin">{content}</AppShell>;
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col bg-ai-light relative">
+      {/* Anonim ziyaretçi için minimal public header */}
+      <header className="bg-white border-b border-kt-gray-100 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+          <Link to={homeLink} className="shrink-0">
+            <Logo size="sm" />
+          </Link>
+          <div className="flex items-center gap-3">
+            {isLoggedIn ? (
+              <Link to={homeLink} className="btn-ghost text-sm">
+                Panele dön →
+              </Link>
+            ) : (
+              <>
+                <Link to="/login" className="btn-ghost text-sm">
+                  Giriş Yap
+                </Link>
+                <Link to="/register" className="btn-primary text-sm">
+                  Kayıt Ol
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
+      </header>
+      {content}
       <footer className="border-t border-kt-gray-100 bg-white py-4 text-center text-xs text-kt-gray-400">
-        Kuveyt Türk AI Lab · Demo · {items.length} proje galeride
+        Kuveyt Türk AI Lab · Demo · {items.length} proje envanterde
       </footer>
     </div>
   );

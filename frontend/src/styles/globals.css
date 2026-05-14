@@ -7,40 +7,61 @@
     height: 100%;
   }
   body {
-    @apply bg-kt-gray-50 text-kt-green-900 font-sans antialiased;
+    @apply bg-white text-kt-green-900 font-sans antialiased;
   }
   *:focus-visible {
-    @apply outline-none ring-2 ring-kt-gold-500 ring-offset-2 ring-offset-white;
+    @apply outline-none ring-2 ring-kt-gold-400 ring-offset-2 ring-offset-white;
   }
+  /* AI feel için scrollbar */
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-track { @apply bg-kt-gray-100; }
+  *::-webkit-scrollbar-thumb { @apply bg-kt-green-700 rounded-full; }
+  *::-webkit-scrollbar-thumb:hover { @apply bg-kt-green-600; }
 }
 
 @layer components {
+  /* ============ BUTONLAR ============ */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold
+           transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-primary {
-    @apply btn bg-kt-green-600 text-white hover:bg-kt-green-700 shadow-kt-green hover:shadow-lg active:scale-[0.98];
+    @apply btn text-white shadow-kt-green hover:shadow-glow-cyan active:scale-[0.98]
+           relative overflow-hidden;
+    background-image: linear-gradient(135deg, #06B6D4 0%, #0EA5E9 50%, #3B82F6 100%);
+  }
+  .btn-primary:hover {
+    background-image: linear-gradient(135deg, #22D3EE 0%, #06B6D4 50%, #0EA5E9 100%);
   }
   .btn-gold {
-    @apply btn bg-kt-gold-500 text-kt-green-900 hover:bg-kt-gold-600 hover:text-white shadow-kt-gold active:scale-[0.98];
+    /* Eski "altın" rolü — şimdi parlak cyan/teal accent */
+    @apply btn bg-kt-gold-400 text-kt-green-950 hover:bg-kt-gold-300 shadow-kt-gold
+           hover:shadow-glow-cyan active:scale-[0.98] font-bold;
   }
   .btn-secondary {
-    @apply btn bg-white text-kt-green-800 border border-kt-gray-200 hover:border-kt-green-600 hover:text-kt-green-700;
+    @apply btn bg-white text-kt-green-700 border border-kt-gray-200
+           hover:border-kt-gold-400 hover:text-kt-gold-600 hover:shadow-kt-soft;
   }
   .btn-ghost {
-    @apply btn bg-transparent text-kt-green-800 hover:bg-kt-gray-100;
+    @apply btn bg-transparent text-kt-green-700 hover:bg-kt-gold-50 hover:text-kt-gold-700;
   }
   .btn-danger {
-    @apply btn bg-red-600 text-white hover:bg-red-700 active:scale-[0.98];
+    @apply btn bg-rose-600 text-white hover:bg-rose-700 active:scale-[0.98] shadow-md;
   }
   .btn-success {
-    @apply btn bg-kt-green-600 text-white hover:bg-kt-green-700 active:scale-[0.98];
+    @apply btn bg-emerald-600 text-white hover:bg-emerald-700 active:scale-[0.98] shadow-md;
   }
 
+  /* ============ INPUT'LAR ============ */
   .input {
     @apply w-full px-4 py-2.5 rounded-xl border border-kt-gray-200 bg-white text-kt-green-900
            placeholder:text-kt-gray-400 transition-all duration-200
-           focus:border-kt-green-600 focus:ring-2 focus:ring-kt-green-600/20 outline-none;
+           focus:border-kt-gold-400 focus:ring-2 focus:ring-kt-gold-400/30 outline-none;
+  }
+  .input-dark {
+    @apply input bg-kt-green-900/40 border-kt-green-700/40 text-white
+           placeholder:text-kt-gray-400 backdrop-blur-sm
+           focus:border-kt-gold-400 focus:ring-kt-gold-400/40;
   }
   .textarea {
     @apply input resize-none min-h-[100px] font-sans;
@@ -49,27 +70,182 @@
     @apply block text-sm font-semibold text-kt-green-800 mb-1.5;
   }
 
+  /* ============ CARD'LAR ============ */
   .card {
     @apply bg-white rounded-2xl shadow-kt-soft border border-kt-gray-100;
   }
   .card-hover {
-    @apply card transition-all duration-300 hover:shadow-kt-card hover:-translate-y-0.5;
+    @apply card transition-all duration-300 hover:shadow-kt-card hover:-translate-y-0.5
+           hover:border-kt-gold-300;
+  }
+  .card-dark {
+    @apply rounded-2xl border border-kt-green-700/40 text-white shadow-kt-card;
+    background-image: linear-gradient(180deg, #1E293B 0%, #0F1E3D 100%);
   }
 
+  /* ============ BADGE'LER ============ */
   .badge {
     @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold;
   }
-  .badge-pending      { @apply badge bg-kt-gold-100 text-kt-gold-800; }
-  .badge-approved     { @apply badge bg-kt-green-100 text-kt-green-800; }
-  .badge-rejected     { @apply badge bg-red-100 text-red-800; }
-  .badge-feedback     { @apply badge bg-blue-100 text-blue-800; }
-  .badge-available    { @apply badge bg-kt-green-100 text-kt-green-700; }
+  .badge-pending      { @apply badge bg-amber-100 text-amber-800; }
+  .badge-approved     { @apply badge bg-emerald-100 text-emerald-800; }
+  .badge-rejected     { @apply badge bg-rose-100 text-rose-800; }
+  .badge-feedback     { @apply badge bg-kt-gold-100 text-kt-gold-800; }
+  .badge-available    { @apply badge bg-emerald-100 text-emerald-700; }
   .badge-unavailable  { @apply badge bg-kt-gray-200 text-kt-gray-600; }
+  .badge-ai           { @apply badge bg-gradient-to-r from-kt-gold-400/20 to-kt-violet-500/20 text-kt-gold-700 border border-kt-gold-300/40; }
 }
 
 @layer utilities {
   .text-balance { text-wrap: balance; }
   .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
-  .scrollbar-thin::-webkit-scrollbar-thumb { @apply bg-kt-gray-200 rounded-full; }
-  .scrollbar-thin::-webkit-scrollbar-thumb:hover { @apply bg-kt-gray-300; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { @apply bg-kt-green-700/40 rounded-full; }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover { @apply bg-kt-green-600/60; }
+
+  /* ============ AI UTILITY'LER ============ */
+
+  /* Neural grid background */
+  .bg-neural-grid {
+    background-image:
+      linear-gradient(rgba(34, 211, 238, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(34, 211, 238, 0.08) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .bg-neural-grid-dark {
+    background-image:
+      linear-gradient(rgba(34, 211, 238, 0.10) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(34, 211, 238, 0.10) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* Hexagon / circuit dot pattern */
+  .bg-circuit-dots {
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(34, 211, 238, 0.18) 1px, transparent 0);
+    background-size: 28px 28px;
+  }
+
+  /* Animated shimmer text (gradient slide) */
+  .text-shimmer {
+    background: linear-gradient(
+      90deg,
+      #06B6D4 0%,
+      #22D3EE 25%,
+      #67E8F9 50%,
+      #22D3EE 75%,
+      #06B6D4 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    animation: shimmer 4s linear infinite;
+  }
+
+  /* Glow text - accent edebilmek için */
+  .text-glow-cyan {
+    color: #67E8F9;
+    text-shadow:
+      0 0 8px rgba(34, 211, 238, 0.55),
+      0 0 18px rgba(34, 211, 238, 0.30);
+  }
+
+  /* Glass / frosted card */
+  .glass {
+    @apply bg-white/10 backdrop-blur-md border border-white/15;
+  }
+  .glass-dark {
+    @apply bg-kt-green-950/55 backdrop-blur-md border border-kt-gold-400/15;
+  }
+
+  /* Inner border glow for cards (AI-themed accent) */
+  .ring-glow {
+    box-shadow:
+      0 0 0 1px rgba(34, 211, 238, 0.40),
+      0 0 18px rgba(34, 211, 238, 0.25);
+  }
+
+  /* Animated horizontal scan line — kullanım: .scan-overlay > div ile inside */
+  .scan-overlay::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(34, 211, 238, 0.15) 50%,
+      transparent 100%
+    );
+    pointer-events: none;
+    animation: scanLine 4s linear infinite;
+  }
+
+  /* Holographic gradient border (use as wrapper) */
+  .holo-border {
+    position: relative;
+    background:
+      linear-gradient(#0F1E3D, #0F1E3D) padding-box,
+      linear-gradient(135deg, #06B6D4, #A855F7, #67E8F9) border-box;
+    border: 1px solid transparent;
+  }
+
+  /* Subtle glow for hover'da */
+  .hover-glow:hover {
+    box-shadow: 0 0 24px rgba(34, 211, 238, 0.40);
+  }
+
+  /* "AI Lab" gold ring — eski .btn-primary ring */
+  .ring-ai {
+    box-shadow:
+      inset 0 0 0 1px rgba(34, 211, 238, 0.55),
+      0 0 14px rgba(34, 211, 238, 0.30);
+  }
+
+  /* ============================================================
+   * BEYAZ FÜTÜRİSTİK ARKA PLAN (login sonrası sayfalar için)
+   * ============================================================
+   * Logo'nun arka planındaki AI temasının AÇIK RENK versiyonu —
+   * `/public/ai-lab-bg-light.jpg` (circuit board + neural mesh,
+   * cyan/blue tonda, beyaz dominant). Sayfanın tamamına fixed olarak
+   * uygulanır → scroll'da hareket etmez, sade dural bir vibe verir.
+   *
+   * Üzerine: yumuşak floating orb'lar (animate edilir) + yarı şeffaf
+   * beyaz veil (içerik okunabilirliği için).
+   */
+  .bg-ai-light {
+    position: relative;
+    background-color: #f7faff; /* görselin yüklenmediği saniyeler için fallback */
+    background-image: url('/ai-lab-bg-light.jpg');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+  }
+
+  /* Yarı şeffaf beyaz veil — circuit pattern hafif kalır, içerik öne çıkar */
+  .bg-ai-light::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.40) 50%, rgba(255, 255, 255, 0.55) 100%),
+      radial-gradient(ellipse 900px 600px at 15% 10%, rgba(34, 211, 238, 0.06) 0%, transparent 55%),
+      radial-gradient(ellipse 800px 500px at 85% 90%, rgba(168, 85, 247, 0.05) 0%, transparent 55%);
+  }
+
+  /* Animated floating orbs — sade fütüristik canlılık */
+  .bg-ai-light::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      radial-gradient(ellipse 380px 280px at 22% 25%, rgba(34, 211, 238, 0.10) 0%, transparent 55%),
+      radial-gradient(ellipse 320px 260px at 78% 75%, rgba(168, 85, 247, 0.08) 0%, transparent 55%);
+    animation: meshShift 22s ease-in-out infinite;
+  }
 }

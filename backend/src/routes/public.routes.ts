@@ -13,6 +13,8 @@
  */
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { getDb } from '../db/schema';
+import { getPublicProfile } from '../services/public-profile.service';
+import { getShowcaseEngagement } from '../services/showcase.service';
 
 const router = Router();
 
@@ -26,6 +28,7 @@ interface ShowcaseItem {
   district: string;
   neighborhood: string;
   theme: string;
+  authorId: string;
   authorFullName: string;
   periodMonths: number;
   startDate: string;
@@ -44,6 +47,7 @@ interface ShowcaseRow {
   district: string;
   neighborhood: string;
   theme: string;
+  user_id: string;
   full_name: string;
   period_months: number;
   start_date: string;
@@ -69,7 +73,7 @@ router.get('/showcase', (_req: Request, res: Response, next: NextFunction) => {
       .prepare(
         `SELECT b.id, b.project_name, b.project_description, b.technologies,
                 b.period_months, b.start_date, b.end_date, b.showcase_highlight,
-                b.reviewed_at,
+                b.reviewed_at, b.user_id,
                 r.code AS room_code, r.name AS room_name, r.district, r.neighborhood, r.theme,
                 u.full_name
          FROM bookings b
@@ -91,6 +95,7 @@ router.get('/showcase', (_req: Request, res: Response, next: NextFunction) => {
       district: r.district,
       neighborhood: r.neighborhood,
       theme: r.theme,
+      authorId: r.user_id,
       authorFullName: r.full_name,
       periodMonths: r.period_months,
       startDate: r.start_date,
@@ -129,6 +134,31 @@ router.get('/showcase/technologies', (_req: Request, res: Response, next: NextFu
       .sort((a, b) => b.count - a.count)
       .slice(0, 30);
     res.json({ technologies: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============ PUBLIC USER PROFILE ============ */
+
+router.get('/users/:id', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id ?? '');
+    if (id.length < 8 || id.length > 40) {
+      next(new (require('../middleware/error.middleware').HttpError)(400, 'Geçersiz id.', 'INVALID_ID'));
+      return;
+    }
+    res.json({ profile: getPublicProfile(id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============ SHOWCASE ENGAGEMENT (public) ============ */
+
+router.get('/showcase/engagement', (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ engagement: getShowcaseEngagement() });
   } catch (err) {
     next(err);
   }

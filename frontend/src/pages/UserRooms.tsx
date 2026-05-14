@@ -100,7 +100,7 @@ export default function UserRooms() {
     setSubmitting(true);
     try {
       await api.createBooking(payload);
-      toast.push('success', 'Kiralama talebiniz admin onayına gönderildi.');
+      toast.push('success', 'Randevu talebiniz admin onayına gönderildi.');
       setSelectedRoom(null);
       await loadRooms();
     } catch (err) {
@@ -233,7 +233,7 @@ export default function UserRooms() {
                     onClick={() => setSelectedRoom(room)}
                     className="btn-primary w-full text-sm"
                   >
-                    Kirala
+                    Randevu Al
                   </button>
                 ) : (
                   <button

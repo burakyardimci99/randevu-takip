@@ -15,7 +15,7 @@ export const openApiDocument = {
     title: 'Kuveyt Türk AI Lab — Randevu Sistemi API',
     version: '1.1.0',
     description:
-      'AI Lab oda kiralama sistemi API. RS256 JWT auth, ayrı user/admin keypair, ' +
+      'AI Lab oda randevu sistemi API. RS256 JWT auth, ayrı user/admin keypair, ' +
       'cookie tabanlı refresh token rotation, refresh token reuse detection.',
   },
   servers: [

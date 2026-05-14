@@ -14,22 +14,55 @@ import { config } from '../config/env';
 import { recordAudit } from '../services/audit.service';
 import { logger } from '../utils/logger';
 
+/**
+ * CSP direktifleri (app_security §6) — env-aware.
+ *
+ * style-src 'unsafe-inline' tasarım kararı:
+ *   - DEV'de Vite dev server <style> tag'lerini runtime'da inject ediyor;
+ *     unsafe-inline olmadan dev sayfası beyaz ekran olur.
+ *   - PROD'da Vite build CSS'i extracted bundle'lara çıkardığı için <style>
+ *     injection olmaz. React'ın style={{...}} attribute'ları kalır
+ *     (7 noktada, hepsi data-driven width/color) ve CSP3 style-src-attr
+ *     ile yönetilir.
+ *
+ * script-src tüm ortamlarda 'self' (unsafe-inline YOK — kritik koruma).
+ */
+const cspDirectives = (() => {
+  const base = {
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'"],
+    imgSrc: ["'self'", 'data:'],
+    connectSrc: ["'self'", config.frontendOrigin],
+    fontSrc: ["'self'", 'data:'],
+    objectSrc: ["'none'"],
+    frameAncestors: ["'none'"],
+    formAction: ["'self'"],
+    baseUri: ["'self'"],
+    upgradeInsecureRequests: config.isProduction ? [] : null,
+  };
+
+  if (config.isProduction) {
+    // Production: sıkı CSP. style-src 'self' + style-src-attr 'unsafe-inline'
+    // (React style={{...}} için minimum; <style> injection bloklanır).
+    return {
+      ...base,
+      styleSrc: ["'self'"],
+      styleSrcElem: ["'self'"],
+      styleSrcAttr: ["'unsafe-inline'"], // CSP3: sadece HTML style="" attr'ı
+    };
+  }
+
+  // Dev: Vite HMR <style> injection'ı için unsafe-inline gerekli.
+  return {
+    ...base,
+    styleSrc: ["'self'", "'unsafe-inline'"],
+  };
+})();
+
 export const helmetMiddleware = helmet({
   contentSecurityPolicy: {
     useDefaults: true,
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", 'data:'],
-      connectSrc: ["'self'", config.frontendOrigin],
-      fontSrc: ["'self'", 'data:'],
-      objectSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-      formAction: ["'self'"],
-      baseUri: ["'self'"],
-      upgradeInsecureRequests: config.isProduction ? [] : null,
-    },
+    directives: cspDirectives,
   },
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: { policy: 'same-site' },
@@ -41,9 +74,31 @@ export const helmetMiddleware = helmet({
   noSniff: true,
 });
 
+/**
+ * Allowed origins: ana FRONTEND_ORIGIN + dev için 127.0.0.1/localhost twin'i.
+ * Vite host'u 127.0.0.1 olduğunda tarayıcı Origin'ı 127.0.0.1 gönderir;
+ * localhost ile yazılmış FRONTEND_ORIGIN ile eşleşmediği için CORS reddederdi.
+ * Production'da config.frontendOrigin (HTTPS prod domain) tek başına yeterli.
+ */
+const allowedOrigins = new Set<string>([config.frontendOrigin]);
+if (!config.isProduction) {
+  try {
+    const fe = new URL(config.frontendOrigin);
+    const twin =
+      fe.hostname === 'localhost'
+        ? `${fe.protocol}//127.0.0.1${fe.port ? ':' + fe.port : ''}`
+        : fe.hostname === '127.0.0.1'
+          ? `${fe.protocol}//localhost${fe.port ? ':' + fe.port : ''}`
+          : null;
+    if (twin) allowedOrigins.add(twin);
+  } catch {
+    /* invalid URL — skip */
+  }
+}
+
 export const corsMiddleware = cors({
   origin: (origin, callback) => {
-    if (!origin || origin === config.frontendOrigin) {
+    if (!origin || allowedOrigins.has(origin)) {
       return callback(null, true);
     }
     logger.warn('cors_rejected', { origin });

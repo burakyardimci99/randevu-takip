@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import type { Booking, ReviewBookingPayload, SimilarBooking } from '../types';
 import { SimilarProjectsPanel } from './SimilarProjectsPanel';
 import { StatusBadge } from './StatusBadge';
+import { BookingThread } from './BookingThread';
 
 interface BookingDetailModalProps {
   booking: Booking | null;
@@ -107,7 +108,7 @@ export function BookingDetailModal({ booking, open, loading, onClose, onReview }
           <div className="flex items-start justify-between gap-4">
             <div>
               <div className="text-xs font-semibold uppercase tracking-wider opacity-80 mb-1">
-                Kiralama Talebi · {booking.roomCode}
+                Randevu Talebi · {booking.roomCode}
               </div>
               <h2 className="text-2xl font-bold mb-2">{booking.projectName}</h2>
               <StatusBadge status={booking.status} />
@@ -194,6 +195,11 @@ export function BookingDetailModal({ booking, open, loading, onClose, onReview }
               <SimilarProjectsPanel results={similar} loading={similarLoading} />
             </section>
           )}
+
+          {/* Booking conversation thread (admin ↔ user) */}
+          <section>
+            <BookingThread bookingId={booking.id} viewerKind="admin" compact />
+          </section>
 
           {booking.adminFeedback && (
             <section>

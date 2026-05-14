@@ -211,6 +211,107 @@ const MIGRATIONS: Migration[] = [
       db.exec(`CREATE INDEX IF NOT EXISTS idx_bookings_showcase ON bookings(status, showcase_visible) WHERE status = 'approved';`);
     },
   },
+  {
+    id: '0007',
+    name: 'profile_photo',
+    up: (db) => {
+      // users.profile_photo: küçük base64 data URL (JPEG, max 200KB).
+      // PII (data_security §1): sadece kullanıcı kendisi yükler, public profilde gösterilir.
+      db.exec(`
+        ALTER TABLE users ADD COLUMN profile_photo TEXT;
+      `);
+    },
+  },
+  {
+    id: '0008',
+    name: 'booking_messages',
+    up: (db) => {
+      // Admin <-> User mesajlaşma thread'i (her booking için).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS booking_messages (
+          id TEXT PRIMARY KEY,
+          booking_id TEXT NOT NULL,
+          author_id TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK(author_type IN ('user', 'admin')),
+          author_name TEXT NOT NULL,
+          body TEXT NOT NULL,
+          read_by_recipient INTEGER NOT NULL DEFAULT 0,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_booking_messages_booking ON booking_messages(booking_id, created_at);
+      `);
+    },
+  },
+  {
+    id: '0009',
+    name: 'showcase_likes_comments',
+    up: (db) => {
+      // Galeride beğeni + yorum.
+      // showcase_likes: user_id + booking_id UNIQUE → bir user bir projeye 1 beğeni.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS showcase_likes (
+          id TEXT PRIMARY KEY,
+          booking_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          UNIQUE(booking_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_showcase_likes_booking ON showcase_likes(booking_id);
+
+        CREATE TABLE IF NOT EXISTS showcase_comments (
+          id TEXT PRIMARY KEY,
+          booking_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          user_full_name TEXT NOT NULL,
+          body TEXT NOT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_showcase_comments_booking ON showcase_comments(booking_id, created_at);
+      `);
+    },
+  },
+  {
+    id: '0010',
+    name: 'license_requests',
+    up: (db) => {
+      // Kullanıcılar Cursor/Claude/Copilot vb. lisans talebi gönderir,
+      // admin onaylar/reddeder/revize ister (booking iş akışıyla aynı).
+      //
+      // license_key: LICENSE_CATALOG'tan normalize key (örn. 'cursor', 'claude')
+      //              veya 'custom' (kullanıcı serbest yazdıysa).
+      // license_name: görüntü adı (katalogdan veya kullanıcı girdisi).
+      // vendor / category: katalogdan gelir; custom için kullanıcı doldurabilir.
+      // duration_months: 1/3/6/12 — abonelik periyodu.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS license_requests (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          license_key TEXT NOT NULL,
+          license_name TEXT NOT NULL,
+          vendor TEXT,
+          category TEXT,
+          reason TEXT NOT NULL,
+          duration_months INTEGER NOT NULL CHECK(duration_months IN (1, 3, 6, 12)),
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending', 'approved', 'rejected', 'feedback_requested')),
+          admin_feedback TEXT,
+          reviewed_by TEXT,
+          reviewed_at DATETIME,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+          FOREIGN KEY (reviewed_by) REFERENCES admins(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_license_requests_user ON license_requests(user_id);
+        CREATE INDEX IF NOT EXISTS idx_license_requests_status ON license_requests(status);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): { applied: string[] } {

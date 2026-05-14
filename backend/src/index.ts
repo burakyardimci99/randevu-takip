@@ -1,5 +1,5 @@
 /**
- * Kuveyt Türk AI Lab - Randevu/Oda Kiralama Sistemi
+ * Kuveyt Türk AI Lab - Randevu Sistemi (AI Lab oda randevu)
  * Backend entrypoint.
  *
  * Güvenlik: helmet, CORS whitelist, rate limit, audit log, RS256 JWT (User+Admin ayrı).
@@ -44,7 +44,7 @@ function buildApp(): express.Express {
 
   app.use(helmetMiddleware);
   app.use(corsMiddleware);
-  app.use(express.json({ limit: '64kb' }));
+  app.use(express.json({ limit: '512kb' })); // profil fotoğrafı (200KB JPEG + base64 overhead) için
   app.use(cookieParser());
   app.use(requestLogger);
   app.use(globalRateLimit);

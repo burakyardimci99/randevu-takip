@@ -134,13 +134,19 @@ export async function login(
 /**
  * Yeni kullanıcı kaydı (yalnızca 'user' rolü).
  *
- * Güvenlik:
+ * Güvenlik (app_security §8 — account enumeration):
  * - Admin kaydı bu endpoint üzerinden YAPILAMAZ — sadece users tablosuna yazar.
- * - Aynı e-posta hem users hem admins tablosunda **bulunmamalıdır** (e-posta çakışması).
+ * - Aynı e-posta hem users hem admins tablosunda bulunmamalıdır.
  * - Argon2id ile hash; parola politikası schema tarafında uygulanır.
  * - Transaction içinde unique kontrol + insert (race condition koruması).
- * - E-posta varsa generic hata döner (account enumeration korumas tam değil ama bilinçli tercih).
+ * - **E-posta zaten alınmışsa GENERIC hata döner** (saldırgan hangi e-postaların
+ *   sistemde olduğunu enum edemez). Gerçek sebep (EMAIL_TAKEN) HttpError.code'unda
+ *   kalır — audit log'a yazılır ama kullanıcıya gönderilen mesajda yer almaz.
+ * - Timing leak'i azaltmak için e-posta var olsa bile decoy argon2 hesabı yapılır.
  */
+const GENERIC_REGISTER_ERROR =
+  'Kayıt tamamlanamadı. Mevcut hesabınız varsa lütfen giriş yapın.';
+
 export async function registerUser(input: RegisterInput): Promise<{ id: string; email: string; fullName: string }> {
   const db = getDb();
   const normalizedEmail = input.email.trim().toLowerCase();
@@ -149,14 +155,15 @@ export async function registerUser(input: RegisterInput): Promise<{ id: string; 
   const existingAdmin = db
     .prepare('SELECT id FROM admins WHERE email = ? LIMIT 1')
     .get(normalizedEmail);
-  if (existingAdmin) {
-    throw new HttpError(409, 'Bu e-posta adresi zaten kullanılıyor.', 'EMAIL_TAKEN');
-  }
-  const existingUser = db
-    .prepare('SELECT id FROM users WHERE email = ? LIMIT 1')
-    .get(normalizedEmail);
-  if (existingUser) {
-    throw new HttpError(409, 'Bu e-posta adresi zaten kullanılıyor.', 'EMAIL_TAKEN');
+  const existingUser = !existingAdmin
+    ? db.prepare('SELECT id FROM users WHERE email = ? LIMIT 1').get(normalizedEmail)
+    : null;
+
+  if (existingAdmin || existingUser) {
+    // Timing protection: yeni kayıt sırasında argon2 hash çalışır; e-posta zaten
+    // alınmış durumda da aynı süreyi tüketmek için decoy hash çalıştır.
+    await argon2.hash('decoy_for_timing_protection_' + normalizedEmail, ARGON2_OPTIONS);
+    throw new HttpError(409, GENERIC_REGISTER_ERROR, 'EMAIL_TAKEN');
   }
 
   // 2) Parola hash
@@ -170,9 +177,9 @@ export async function registerUser(input: RegisterInput): Promise<{ id: string; 
        VALUES (?, ?, ?, ?, 'user', 1)`
     ).run(id, normalizedEmail, passwordHash, input.fullName.trim());
   } catch (err) {
-    // UNIQUE constraint çakışması (yarış durumu)
+    // UNIQUE constraint çakışması (yarış durumu) — yine generic mesaj
     if ((err as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
-      throw new HttpError(409, 'Bu e-posta adresi zaten kullanılıyor.', 'EMAIL_TAKEN');
+      throw new HttpError(409, GENERIC_REGISTER_ERROR, 'EMAIL_TAKEN');
     }
     throw err;
   }

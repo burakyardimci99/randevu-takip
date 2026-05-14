@@ -22,6 +22,7 @@ export interface UserProfileDto {
   phone: string | null;
   bio: string | null;
   projectIdea: string | null;
+  profilePhoto: string | null;
   status: number;
   createdAt: string;
   updatedAt: string;
@@ -45,6 +46,7 @@ interface UserRow {
   phone: string | null;
   bio: string | null;
   project_idea: string | null;
+  profile_photo: string | null;
   status: number;
   created_at: string;
   updated_at: string;
@@ -62,6 +64,7 @@ function toDto(r: UserRow): UserProfileDto {
     phone: r.phone,
     bio: r.bio,
     projectIdea: r.project_idea,
+    profilePhoto: r.profile_photo,
     status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -69,7 +72,7 @@ function toDto(r: UserRow): UserProfileDto {
 }
 
 const PROFILE_COLUMNS =
-  'id, email, full_name, role, department, title, manager, phone, bio, project_idea, status, created_at, updated_at';
+  'id, email, full_name, role, department, title, manager, phone, bio, project_idea, profile_photo, status, created_at, updated_at';
 
 export function getUserProfile(userId: string): UserProfileDto {
   const row = getDb()

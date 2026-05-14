@@ -1,8 +1,8 @@
 /**
  * Her oda için tematik AI/teknoloji illüstrasyonu (inline SVG).
  *
- * Tüm SVG'ler brand renklerinde (kt-green + kt-gold) tasarlandı.
- * Stil: abstrakt, gradient zemin + merkezi sembolik figür.
+ * Renkler: AI Lab teması — deep navy + electric blue + cyan glow + violet accent.
+ * Stil: fütüristik, gradient zemin + circuit pattern + glow + merkezi sembolik figür.
  * Card header'ında arka plan olarak kullanılır.
  */
 import type { RoomTheme } from '../types';
@@ -22,29 +22,60 @@ export function RoomIllustration({ theme, className = '' }: Props) {
       aria-hidden="true"
     >
       <defs>
-        {/* Brand-uyumlu gradient zeminler (her tema için bir renk kayması) */}
+        {/* AI tema gradient zeminleri */}
         <linearGradient id={`bg-${theme}`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor={GRADIENTS[theme].from} />
           <stop offset="100%" stopColor={GRADIENTS[theme].to} />
         </linearGradient>
+        {/* Cyan glow */}
         <radialGradient id={`glow-${theme}`} cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#C89B2F" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="#C89B2F" stopOpacity="0" />
+          <stop offset="0%" stopColor="#22D3EE" stopOpacity="0.45" />
+          <stop offset="100%" stopColor="#22D3EE" stopOpacity="0" />
+        </radialGradient>
+        {/* Violet glow (sağ alt) */}
+        <radialGradient id={`glow2-${theme}`} cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#A855F7" stopOpacity="0.30" />
+          <stop offset="100%" stopColor="#A855F7" stopOpacity="0" />
         </radialGradient>
       </defs>
 
       {/* Arka plan */}
       <rect width="400" height="200" fill={`url(#bg-${theme})`} />
-      {/* Hafif altın parıltı */}
-      <circle cx="280" cy="60" r="120" fill={`url(#glow-${theme})`} />
-      {/* Noktalı pattern */}
-      <g opacity="0.08" fill="#fff">
-        {Array.from({ length: 40 }).map((_, i) => {
-          const x = (i % 10) * 40 + 20;
-          const y = Math.floor(i / 10) * 50 + 25;
-          return <circle key={i} cx={x} cy={y} r="1.2" />;
-        })}
+
+      {/* Cyan glow — sağ üst */}
+      <circle cx="320" cy="40" r="110" fill={`url(#glow-${theme})`} />
+      {/* Violet glow — sol alt */}
+      <circle cx="60" cy="170" r="100" fill={`url(#glow2-${theme})`} />
+
+      {/* Circuit grid pattern */}
+      <g opacity="0.10" stroke="#67E8F9" strokeWidth="0.4" fill="none">
+        {Array.from({ length: 10 }).map((_, i) => (
+          <line key={`v-${i}`} x1={i * 40} y1="0" x2={i * 40} y2="200" />
+        ))}
+        {Array.from({ length: 5 }).map((_, i) => (
+          <line key={`h-${i}`} x1="0" y1={i * 40} x2="400" y2={i * 40} />
+        ))}
       </g>
+
+      {/* Glowing nodes (circuit junction'ları) */}
+      <g fill="#22D3EE" opacity="0.55">
+        {[
+          [40, 40], [120, 80], [80, 160],
+          [320, 120], [360, 60], [280, 170],
+        ].map(([x, y], i) => (
+          <circle key={i} cx={x} cy={y} r="1.5" />
+        ))}
+      </g>
+
+      {/* İnce diagonal scan line (fütüristik vibe) */}
+      <line
+        x1="0" y1="20" x2="400" y2="80"
+        stroke="#67E8F9" strokeWidth="0.5" opacity="0.18"
+      />
+      <line
+        x1="0" y1="180" x2="400" y2="120"
+        stroke="#A855F7" strokeWidth="0.5" opacity="0.15"
+      />
 
       {/* Tema spesifik illüstrasyon */}
       <g transform="translate(200 100)">{RENDERERS[theme]()}</g>
@@ -52,21 +83,29 @@ export function RoomIllustration({ theme, className = '' }: Props) {
   );
 }
 
+/**
+ * AI tema gradient'leri — her oda için karakteristik bir cyan/blue/violet kayması.
+ * Tümü deep navy ana zeminle başlar, electric blue veya violet ile sonlanır.
+ */
 const GRADIENTS: Record<RoomTheme, { from: string; to: string }> = {
-  robot:   { from: '#00472a', to: '#005a35' },
-  pc:      { from: '#005a35', to: '#003721' },
-  neural:  { from: '#003721', to: '#00673f' },
-  chatbot: { from: '#00472a', to: '#0d8541' },
-  data:    { from: '#005a35', to: '#82621a' },
-  brain:   { from: '#00673f', to: '#00472a' },
-  code:    { from: '#003721', to: '#005a35' },
-  cloud:   { from: '#00472a', to: '#00673f' },
-  vector:  { from: '#005a35', to: '#a8801f' },
-  agent:   { from: '#003721', to: '#0d8541' },
+  robot:   { from: '#0A1628', to: '#1E40AF' }, // navy → electric blue
+  pc:      { from: '#0F1E3D', to: '#0EA5E9' }, // deep navy → cyan
+  neural:  { from: '#1E1B4B', to: '#6D28D9' }, // indigo → violet (neural net)
+  chatbot: { from: '#0A1628', to: '#06B6D4' }, // navy → bright cyan
+  data:    { from: '#0F1E3D', to: '#22D3EE' }, // deep navy → glow cyan
+  brain:   { from: '#1E1B4B', to: '#A855F7' }, // indigo → violet (akıllı sistem)
+  code:    { from: '#0A1628', to: '#3B82F6' }, // navy → blue
+  cloud:   { from: '#0369A1', to: '#22D3EE' }, // mid blue → glow cyan
+  vector:  { from: '#1E1B4B', to: '#7C3AED' }, // indigo → deep violet (embeddings)
+  agent:   { from: '#0A1628', to: '#0EA5E9' }, // navy → electric blue
 };
 
-const GOLD = '#dfb952';
-const GOLD_DARK = '#a8801f';
+/**
+ * Aksent renkler — eski "altın" yerine AI cyan glow.
+ * (İllüstrasyon kodları bunları kullanıyor — değişken adları geriye uyum için aynı.)
+ */
+const GOLD = '#22D3EE';      // bright cyan glow (eski parlak altın)
+const GOLD_DARK = '#06B6D4'; // primary cyan (eski koyu altın)
 const WHITE = '#ffffff';
 
 /* ============================================================

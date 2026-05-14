@@ -1,8 +1,12 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Logo } from './Logo';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from './Toast';
+import { NotificationCenter } from './NotificationCenter';
+import { CommandPalette } from './CommandPalette';
+import { OnboardingTour } from './OnboardingTour';
 import type { SubjectKind } from '../types';
 
 interface AppShellProps {
@@ -48,10 +52,28 @@ const USER_NAV: NavItem[] = [
   },
   {
     to: '/showcase',
-    label: 'Galeri',
+    label: 'Envanter',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/licenses',
+    label: 'Lisanslarım',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/yardim',
+    label: 'Yardım',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
       </svg>
     ),
   },
@@ -113,6 +135,15 @@ const ADMIN_NAV: NavItem[] = [
     ),
   },
   {
+    to: '/admin/licenses',
+    label: 'Lisanslar',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+      </svg>
+    ),
+  },
+  {
     to: '/admin/audit',
     label: 'Audit',
     icon: (
@@ -150,9 +181,13 @@ export function AppShell({ kind, children, nav }: AppShellProps) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-kt-gray-50">
-      <header className="bg-white border-b border-kt-gray-100 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
+    <div className="min-h-screen flex flex-col bg-ai-light relative">
+      <header className="bg-gradient-to-r from-kt-green-950 via-kt-green-900 to-kt-green-950 border-b border-kt-gold-400/20 sticky top-0 z-40 shadow-glow-blue">
+        {/* AI neural overlay */}
+        <div className="absolute inset-0 bg-neural-grid-dark opacity-30 pointer-events-none" />
+        <div className="absolute -top-10 left-1/4 w-72 h-32 bg-kt-gold-400/15 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
           <Link to={items[0].to} className="shrink-0">
             <Logo size="sm" />
           </Link>
@@ -165,10 +200,10 @@ export function AppShell({ kind, children, nav }: AppShellProps) {
                 to={item.to}
                 end={item.to === '/admin' || item.to === '/rooms'}
                 className={({ isActive }) =>
-                  `px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-colors ${
+                  `px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-all ${
                     isActive
-                      ? 'bg-kt-green-50 text-kt-green-800'
-                      : 'text-kt-gray-500 hover:text-kt-green-700 hover:bg-kt-gray-50'
+                      ? 'bg-kt-gold-400/15 text-kt-gold-300 ring-1 ring-kt-gold-400/40 shadow-glow-cyan'
+                      : 'text-white/70 hover:text-kt-gold-300 hover:bg-white/5'
                   }`
                 }
               >
@@ -180,37 +215,57 @@ export function AppShell({ kind, children, nav }: AppShellProps) {
 
           <div className="flex items-center gap-2 md:gap-3 shrink-0">
             {nav}
+            <button
+              onClick={() => {
+                const evt = new KeyboardEvent('keydown', { key: 'k', metaKey: true });
+                window.dispatchEvent(evt);
+              }}
+              className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-kt-gold-300 text-xs transition-all"
+              title="Komut paleti (⌘K)"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <span>Ara</span>
+              <kbd className="text-[10px] bg-white/10 px-1 py-0.5 rounded">⌘K</kbd>
+            </button>
+            <NotificationCenter kind={kind} />
             <Link
               to={kind === 'user' ? '/profile' : '/admin'}
-              className="hidden md:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-kt-gray-50 hover:bg-kt-gray-100 transition-colors"
+              className="hidden md:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-kt-gold-400/30 transition-all"
               title={kind === 'user' ? 'Profilim' : 'Admin'}
             >
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-kt-gold-500 to-kt-gold-700 text-white flex items-center justify-center font-bold text-xs">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-kt-gold-400 to-kt-gold-600 text-kt-green-950 flex items-center justify-center font-bold text-xs shadow-glow-cyan">
                 {me?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('') ?? '??'}
               </div>
               <div className="text-xs">
-                <div className="font-semibold text-kt-green-800 leading-tight">{me?.fullName}</div>
-                <div className="text-kt-gray-500 leading-tight">
+                <div className="font-semibold text-white leading-tight">{me?.fullName}</div>
+                <div className="text-kt-gold-300/80 leading-tight">
                   {kind === 'admin' ? 'Yönetici' : 'Kullanıcı'}
                 </div>
               </div>
             </Link>
-            <button onClick={handleLogout} className="btn-ghost text-sm">
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white/70 hover:text-white hover:bg-rose-500/20 transition-colors"
+            >
               Çıkış
             </button>
           </div>
         </div>
 
         {/* Mobile nav */}
-        <nav className="md:hidden border-t border-kt-gray-100 px-6 py-2 flex items-center gap-1 overflow-x-auto scrollbar-thin">
+        <nav className="md:hidden border-t border-kt-gold-400/15 px-6 py-2 flex items-center gap-1 overflow-x-auto scrollbar-thin relative">
           {items.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === '/admin' || item.to === '/rooms'}
               className={({ isActive }) =>
-                `px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap ${
-                  isActive ? 'bg-kt-green-50 text-kt-green-800' : 'text-kt-gray-500'
+                `px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-colors ${
+                  isActive
+                    ? 'bg-kt-gold-400/15 text-kt-gold-300 ring-1 ring-kt-gold-400/40'
+                    : 'text-white/60 hover:text-kt-gold-300'
                 }`
               }
             >
@@ -221,13 +276,21 @@ export function AppShell({ kind, children, nav }: AppShellProps) {
         </nav>
       </header>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 animate-fade-in">
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-6 py-8 animate-fade-in">
         {children}
       </main>
 
-      <footer className="border-t border-kt-gray-100 bg-white py-4 text-center text-xs text-kt-gray-400">
-        Kuveyt Türk AI Lab · Demo Ortam · v1.0
+      <footer className="relative z-10 border-t border-kt-gray-200 bg-gradient-to-r from-kt-green-950 to-kt-green-900 py-4 text-center text-xs text-white/50">
+        <span className="text-kt-gold-400 font-semibold">Kuveyt Türk</span>
+        <span className="mx-2 text-kt-gold-400/40">·</span>
+        Yapay Zeka Laboratuvarı
+        <span className="mx-2 text-kt-gold-400/40">·</span>
+        Demo Ortam
       </footer>
+
+      {/* Global overlays */}
+      <CommandPalette kind={kind} />
+      <OnboardingTour kind={kind} />
     </div>
   );
 }

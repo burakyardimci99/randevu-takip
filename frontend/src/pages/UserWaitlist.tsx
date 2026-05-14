@@ -88,7 +88,7 @@ export default function UserWaitlist() {
         <h1 className="text-3xl font-extrabold text-kt-green-900 mb-1">Bekleme Listem</h1>
         <p className="text-kt-gray-500">
           Dolu olan odalar için sıraya yazıldığınız talepler. Oda boşalınca otomatik
-          kiralama oluşturulur.
+          randevu oluşturulur.
         </p>
       </div>
 
@@ -107,7 +107,7 @@ export default function UserWaitlist() {
           </div>
           <h3 className="text-xl font-bold text-kt-green-800 mb-2">Sırada kaydınız yok</h3>
           <p className="text-kt-gray-500">
-            Dolu bir odayı kiralamak istediğinizde "Sıraya gir" butonunu kullanabilirsiniz.
+            Dolu bir odaya randevu almak istediğinizde "Sıraya gir" butonunu kullanabilirsiniz.
           </p>
         </div>
       ) : (

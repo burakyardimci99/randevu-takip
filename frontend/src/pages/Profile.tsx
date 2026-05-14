@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
+import { ProfilePhotoUpload } from '../components/ProfilePhotoUpload';
 import { useToast } from '../components/Toast';
 import { api } from '../services/api';
 import type { ProfileUpdatePayload, UserProfile } from '../types';
@@ -100,11 +101,21 @@ export default function Profile() {
           {/* Sol: Profil özet kartı */}
           <aside className="lg:col-span-1 space-y-4">
             <div className="card p-6 text-center">
-              <div className="w-24 h-24 mx-auto rounded-3xl bg-gradient-to-br from-kt-green-600 via-kt-green-700 to-kt-green-900 text-white flex items-center justify-center text-3xl font-extrabold shadow-kt-green mb-4">
-                {initials(profile.fullName)}
-              </div>
-              <h2 className="text-xl font-bold text-kt-green-900">{profile.fullName}</h2>
+              <ProfilePhotoUpload
+                current={profile.profilePhoto}
+                fullName={profile.fullName}
+                onChanged={(p) =>
+                  setProfile((prev) => (prev ? { ...prev, profilePhoto: p } : prev))
+                }
+              />
+              <h2 className="text-xl font-bold text-kt-green-900 mt-4">{profile.fullName}</h2>
               <p className="text-sm text-kt-gray-500 break-all mb-3">{profile.email}</p>
+              <a
+                href={`/u/${profile.id}`}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-kt-gold-700 hover:text-kt-gold-800 mb-2"
+              >
+                Public profilimi gör →
+              </a>
               <div className="flex items-center justify-center gap-1.5">
                 <span className="px-2.5 py-0.5 rounded-full bg-kt-gold-100 text-kt-gold-800 text-xs font-semibold uppercase tracking-wider">
                   {profile.role === 'user' ? 'Kullanıcı' : profile.role}

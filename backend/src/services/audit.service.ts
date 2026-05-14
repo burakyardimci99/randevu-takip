@@ -30,6 +30,10 @@ export type AuditEventType =
   | 'user.update'
   | 'user.delete'
   | 'user.restore'
+  | 'user.photo_uploaded'
+  | 'message.sent'
+  | 'showcase.liked'
+  | 'showcase.commented'
   | 'rate_limit.exceeded'
   | 'csrf.failure';
 

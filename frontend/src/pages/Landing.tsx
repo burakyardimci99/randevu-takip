@@ -1,219 +1,151 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/Logo';
-import { Lightbox } from '../components/Lightbox';
-
-const GALLERY = [
-  { src: '/images/a1.jpg', caption: 'Açık çalışma alanı — lounge ve toplantı bölgeleri' },
-  { src: '/images/a2.jpg', caption: 'Karşılama lounge ve kafe alanı' },
-  { src: '/images/a3.jpg', caption: 'Akıllı bireysel çalışma kapsülleri' },
-  { src: '/images/a4.jpg', caption: 'Cam pod ve workstations' },
-  { src: '/images/a5.jpg', caption: 'Toplantı odası ve zen köşesi' },
-  { src: '/images/a6.jpg', caption: 'Kütüphane ve amfi alanı' },
-  { src: '/images/a7.jpg', caption: 'AI tanıtım amfisi' },
-];
-
-const PLAN = { src: '/images/plan.jpg', caption: 'AI Lab kat planı' };
 
 export default function Landing() {
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-  const allImages = [...GALLERY, PLAN];
-
   return (
-    <div className="min-h-screen bg-kt-cream text-kt-green-900">
+    <div className="min-h-screen bg-kt-green-950 text-white">
       {/* ============== HERO ============== */}
-      <section className="relative min-h-screen flex flex-col overflow-hidden">
+      <section className="relative min-h-screen flex flex-col overflow-hidden bg-kt-green-950">
+        {/* Arkaplan görseli — logo'nun arkasındaki tema */}
         <div className="absolute inset-0">
           <img
-            src="/images/hero.jpg"
-            alt="Kuveyt Türk AI Lab"
-            className="w-full h-full object-cover"
+            src="/ai-lab-bg.jpg"
+            alt=""
+            aria-hidden="true"
+            className="w-full h-full object-cover animate-ken-burns"
             loading="eager"
           />
-          <div className="absolute inset-0 bg-gradient-to-br from-kt-green-900/85 via-kt-green-800/70 to-kt-green-950/90" />
-          <div className="absolute inset-0" style={{
-            backgroundImage: 'radial-gradient(circle at 80% 20%, rgba(200,155,47,0.15) 0%, transparent 50%)',
-          }} />
+          <div className="absolute inset-0 bg-gradient-to-br from-kt-green-950/55 via-kt-green-900/45 to-kt-green-950/70" />
         </div>
 
-        <header className="relative z-10 px-8 pt-16 pb-6 flex justify-center">
-          <Logo variant="light" framed size="xl" />
-        </header>
+        {/* Neural grid backdrop */}
+        <div className="absolute inset-0 bg-neural-grid-dark opacity-25 pointer-events-none" />
+        {/* Animated mesh */}
+        <div className="absolute inset-0 bg-ai-mesh animate-mesh-shift pointer-events-none" />
+        {/* Glow orbs */}
+        <div className="absolute top-1/4 left-10 w-96 h-96 bg-kt-gold-400/25 rounded-full blur-[120px] animate-float-slow" />
+        <div className="absolute bottom-10 right-10 w-[500px] h-[500px] bg-kt-violet-500/20 rounded-full blur-[140px] animate-float-medium" />
+        <div className="absolute top-10 right-1/3 w-72 h-72 bg-kt-green-600/30 rounded-full blur-[100px]" />
 
-        <div className="relative z-10 flex-1 flex items-center justify-center px-8 pb-16">
+        {/* Scan line overlay */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          <div
+            className="absolute left-0 right-0 h-32 bg-gradient-to-b from-transparent via-kt-gold-400/8 to-transparent"
+            style={{ animation: 'scanLine 6s linear infinite' }}
+          />
+        </div>
+
+        {/* SVG Neural Network Particles */}
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none opacity-30"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <defs>
+            <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#22D3EE" stopOpacity="0" />
+              <stop offset="50%" stopColor="#22D3EE" stopOpacity="0.8" />
+              <stop offset="100%" stopColor="#22D3EE" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {[...Array(8)].map((_, i) => (
+            <circle
+              key={i}
+              cx={`${10 + i * 12}%`}
+              cy={`${20 + (i % 3) * 25}%`}
+              r="3"
+              fill="#22D3EE"
+              opacity="0.6"
+            >
+              <animate
+                attributeName="opacity"
+                values="0.2;0.8;0.2"
+                dur={`${3 + (i % 4)}s`}
+                repeatCount="indefinite"
+              />
+            </circle>
+          ))}
+          {[...Array(5)].map((_, i) => (
+            <line
+              key={`l-${i}`}
+              x1={`${15 + i * 18}%`}
+              y1={`${30 + (i % 2) * 25}%`}
+              x2={`${30 + i * 12}%`}
+              y2={`${50 + (i % 2) * 15}%`}
+              stroke="url(#lineGrad)"
+              strokeWidth="1"
+            />
+          ))}
+        </svg>
+
+        <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-8 pt-10 pb-16">
+          {/* ============ LOGO — HERO İLE ENTEGRE ============ */}
+          {/* `mix-blend-screen`: JPEG'in dark navy alanları sayfa arka planıyla
+              eşitlenir → sadece parlak kuş figürü + "YAPAY ZEKA LABORATUVARI"
+              text görünür. Etrafa soft cyan + violet glow aura ile imza gibi durur. */}
+          <div className="relative mb-8 group">
+            {/* Çoklu yumuşak ışık halkaları — arka planla bağlantı */}
+            <div className="absolute inset-0 -m-16 bg-kt-gold-400/25 rounded-full blur-[100px] animate-glow-pulse" />
+            <div className="absolute inset-0 -m-12 bg-kt-violet-500/20 rounded-full blur-[80px]" />
+            <div className="absolute inset-0 -m-8 bg-kt-green-600/30 rounded-full blur-[60px]" />
+
+            {/* Yıldız parıltıları (logodaki yıldız temasını yansıtan) */}
+            <svg className="absolute -top-8 -right-12 w-14 h-14 text-kt-gold-300 opacity-70" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0 L13.5 8.5 L22 12 L13.5 15.5 L12 24 L10.5 15.5 L2 12 L10.5 8.5 Z" className="animate-pulse-gold" />
+            </svg>
+            <svg className="absolute -bottom-6 -left-10 w-10 h-10 text-kt-gold-300/60" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0 L13.5 8.5 L22 12 L13.5 15.5 L12 24 L10.5 15.5 L2 12 L10.5 8.5 Z" />
+            </svg>
+
+            <img
+              src="/ai-lab-logo.png"
+              alt="Kuveyt Türk Yapay Zeka Laboratuvarı"
+              className="relative h-64 md:h-80 w-auto object-contain drop-shadow-[0_0_60px_rgba(34,211,238,0.55)] transition-transform duration-700 group-hover:scale-[1.02]"
+              loading="eager"
+              decoding="async"
+            />
+          </div>
+
           <div className="max-w-5xl text-center animate-fade-in">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-kt-gold-500/15 text-kt-gold-200 text-sm font-semibold mb-6 border border-kt-gold-500/30 backdrop-blur-sm">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-kt-gold-400/15 text-kt-gold-300 text-sm font-semibold mb-6 border border-kt-gold-400/40 backdrop-blur-sm shadow-glow-cyan">
               <span className="w-2 h-2 rounded-full bg-kt-gold-400 animate-pulse-gold" />
-              Demo Ortam · Kuveyt Türk AI Lab
+              YAPAY ZEKA LABORATUVARI · DEMO
             </div>
-            <h1 className="text-5xl md:text-7xl font-extrabold text-white mb-6 text-balance leading-tight">
-              AI Lab <span className="text-kt-gold-400">odalarını</span><br />
-              ekibinle birlikte kullan.
+            <h1 className="text-5xl md:text-7xl font-extrabold mb-6 text-balance leading-tight">
+              <span className="text-white">AI Lab </span>
+              <span className="text-shimmer">odalarını</span><br />
+              <span className="text-white">ekibinle birlikte kullan.</span>
             </h1>
-            <p className="text-xl text-white/85 max-w-2xl mx-auto text-balance mb-10">
+            <p className="text-xl text-white/75 max-w-2xl mx-auto text-balance mb-10 leading-relaxed">
               Merkez binamızdaki 10 oda — İstanbul ilçe ve mahalle isimleriyle adlandırıldı.
-              Uygun olanı seç, projenin detaylarını paylaş, kiralama talebini gönder.
+              Uygun olanı seç, projenin detaylarını paylaş, randevu talebini gönder.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
               <Link
                 to="/login"
-                className="group inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-kt-gold-500 hover:bg-kt-gold-400 text-kt-green-900 font-bold shadow-kt-gold hover:shadow-2xl transition-all hover:-translate-y-0.5"
+                className="group relative inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-ai-glow-btn text-white font-bold shadow-glow-cyan hover:shadow-2xl transition-all hover:-translate-y-0.5 overflow-hidden"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
+                <svg className="w-5 h-5 relative" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
                 </svg>
-                Giriş Yap
+                <span className="relative">Giriş Yap</span>
               </Link>
               <Link
                 to="/register"
-                className="inline-flex items-center gap-2 px-6 py-4 rounded-2xl bg-white/15 hover:bg-white/25 backdrop-blur text-white font-semibold border border-white/30 transition-all"
+                className="inline-flex items-center gap-2 px-6 py-4 rounded-2xl glass text-white font-semibold border-white/25 hover:border-kt-gold-400/60 hover:shadow-glow-cyan transition-all"
               >
                 Kayıt Ol
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7zM20 8v6m-3-3h6"/>
                 </svg>
               </Link>
-              <a
-                href="#mekan"
-                className="inline-flex items-center gap-2 px-6 py-4 rounded-2xl bg-transparent text-white/80 hover:text-white font-semibold transition-all"
-              >
-                Mekanı keşfet ↓
-              </a>
             </div>
           </div>
         </div>
 
       </section>
 
-      {/* ============== İSTATİSTİKLER ============== */}
-      <section className="bg-kt-green-900 text-white py-12 px-8 border-y border-kt-gold-500/20">
-        <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
-          {[
-            { n: '10', t: 'AI Lab odası' },
-            { n: '1-3', t: 'Aylık periyot' },
-            { n: '4-8', t: 'Kişi kapasitesi' },
-            { n: 'RS256', t: 'Güvenli oturum' },
-          ].map((f) => (
-            <div key={f.t}>
-              <div className="text-4xl md:text-5xl font-extrabold text-kt-gold-400 mb-1">{f.n}</div>
-              <div className="text-white/70 text-sm uppercase tracking-wider">{f.t}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ============== MEKANIMIZ GALERI ============== */}
-      <section id="mekan" className="py-20 px-8 bg-kt-cream">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-12">
-            <div className="text-sm font-bold text-kt-gold-700 uppercase tracking-widest mb-3">
-              Mekanımız
-            </div>
-            <h2 className="text-4xl md:text-5xl font-extrabold text-kt-green-900 mb-4 text-balance">
-              Tek çatı altında <span className="text-kt-gold-600">10 oda</span>
-            </h2>
-            <p className="text-lg text-kt-gray-500 max-w-2xl mx-auto">
-              Açık çalışma alanları, akıllı kapsüller, toplantı odaları, amfi ve kütüphane —
-              hepsi aynı binada, ekiplerin akıcı geçişi için tasarlandı.
-            </p>
-          </div>
-
-          {/* Gallery grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-12">
-            {GALLERY.map((img, i) => (
-              <button
-                key={img.src}
-                onClick={() => setLightboxIndex(i)}
-                className={`group relative overflow-hidden rounded-2xl shadow-kt-soft hover:shadow-kt-card transition-all duration-300 hover:-translate-y-1 ${
-                  i === 0 ? 'md:col-span-2 md:row-span-2 aspect-[16/10]' : 'aspect-[4/3]'
-                }`}
-              >
-                <img
-                  src={img.src}
-                  alt={img.caption}
-                  loading="lazy"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-kt-green-950/80 via-transparent to-transparent opacity-70 group-hover:opacity-90 transition-opacity" />
-                <div className="absolute bottom-0 left-0 right-0 p-4 text-left">
-                  <div className="text-white text-sm font-semibold drop-shadow-lg">{img.caption}</div>
-                </div>
-                <div className="absolute top-3 right-3 w-9 h-9 rounded-full bg-white/15 backdrop-blur text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m-3-3h6"/>
-                  </svg>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {/* Plan section */}
-          <div className="bg-white rounded-3xl shadow-kt-soft overflow-hidden border border-kt-gold-100">
-            <div className="grid md:grid-cols-5">
-              <div className="md:col-span-3 relative aspect-[4/3] md:aspect-auto bg-kt-gray-100 cursor-pointer group" onClick={() => setLightboxIndex(GALLERY.length)}>
-                <img
-                  src={PLAN.src}
-                  alt={PLAN.caption}
-                  loading="lazy"
-                  className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                />
-                <div className="absolute inset-0 bg-kt-green-950/0 group-hover:bg-kt-green-950/20 transition-colors" />
-              </div>
-              <div className="md:col-span-2 p-8 md:p-10 flex flex-col justify-center">
-                <div className="text-xs font-bold text-kt-gold-700 uppercase tracking-widest mb-2">
-                  Kat Planı
-                </div>
-                <h3 className="text-2xl md:text-3xl font-extrabold text-kt-green-900 mb-4">
-                  Tek katta, 10 oda
-                </h3>
-                <p className="text-kt-gray-500 mb-6 leading-relaxed">
-                  Açık merkez bölgenin etrafında kapsüller, toplantı odaları, çalışma istasyonları
-                  ve ortak alanlar. Her oda kendi karakterine sahip — adı bir İstanbul mahallesinden
-                  esinlenildi.
-                </p>
-                <button
-                  onClick={() => setLightboxIndex(GALLERY.length)}
-                  className="btn-secondary self-start"
-                >
-                  Planı büyüt
-                  <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-5v4m0-4h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/></svg>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ============== CTA ============== */}
-      <section className="bg-kt-green-900 py-16 px-8 text-white">
-        <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl md:text-4xl font-extrabold mb-4 text-balance">
-            Hazırsan, <span className="text-kt-gold-400">odanı seç.</span>
-          </h2>
-          <p className="text-white/70 mb-8 max-w-xl mx-auto">
-            Giriş yap, müsait odalara göz at, projenin detayını paylaş, talebini gönder.
-            Admin onayından sonra oda senin.
-          </p>
-          <div className="flex justify-center">
-            <Link to="/login" className="btn-gold inline-flex text-base px-8 py-4">
-              Giriş Yap
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      <footer className="bg-kt-green-950 py-6 px-8 text-center text-white/40 text-xs">
-        Kuveyt Türk AI Lab · Demo · Tüm aksiyonlar audit log'a kaydedilir.
-      </footer>
-
-      <Lightbox
-        images={allImages}
-        index={lightboxIndex}
-        onClose={() => setLightboxIndex(null)}
-        onNavigate={setLightboxIndex}
-      />
     </div>
   );
 }

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { BookingModal } from '../components/BookingModal';
+import { BookingThread } from '../components/BookingThread';
+import { EmptyState } from '../components/EmptyState';
 import { StatusBadge } from '../components/StatusBadge';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
@@ -21,6 +23,7 @@ export default function UserBookings() {
   const [submitting, setSubmitting] = useState(false);
   const [withdrawing, setWithdrawing] = useState<string | null>(null);
   const [confirmWithdraw, setConfirmWithdraw] = useState<Booking | null>(null);
+  const [openThread, setOpenThread] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -104,7 +107,7 @@ export default function UserBookings() {
     <AppShell kind="user">
       <div className="mb-8">
         <h1 className="text-3xl font-extrabold text-kt-green-900 mb-1">Taleplerim</h1>
-        <p className="text-kt-gray-500">Gönderdiğiniz kiralama talepleri ve durumları.</p>
+        <p className="text-kt-gray-500">Gönderdiğiniz randevu talepleri ve durumları.</p>
       </div>
 
       {loading ? (
@@ -114,16 +117,17 @@ export default function UserBookings() {
           ))}
         </div>
       ) : bookings.length === 0 ? (
-        <div className="card p-12 text-center">
-          <div className="text-5xl mb-4">📭</div>
-          <h3 className="text-xl font-bold text-kt-green-800 mb-2">Henüz bir talebiniz yok</h3>
-          <p className="text-kt-gray-500 mb-6">
-            AI Lab odalarımızdan birini seçip ilk kiralama talebinizi gönderin.
-          </p>
-          <Link to="/rooms" className="btn-primary inline-flex">
-            Odaları Görüntüle
-          </Link>
-        </div>
+        <EmptyState
+          icon="bookings"
+          title="Henüz bir talebiniz yok"
+          description="AI Lab odalarımızdan birini seçip ilk randevu talebinizi gönderin. Admin onayından sonra oda sizin olur."
+          tone="cyan"
+          action={
+            <Link to="/rooms" className="btn-primary inline-flex">
+              Odaları Görüntüle
+            </Link>
+          }
+        />
       ) : (
         <div className="space-y-4">
           {bookings.map((b) => {
@@ -182,6 +186,18 @@ export default function UserBookings() {
                   <div className="text-xs text-kt-gray-400 flex items-center gap-3 flex-wrap">
                     <span>Gönderildi: {fmtDate(b.createdAt)}</span>
                     {b.reviewedAt && <span>İncelendi: {fmtDate(b.reviewedAt)}</span>}
+                    <button
+                      type="button"
+                      onClick={() => setOpenThread(openThread === b.id ? null : b.id)}
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold transition-colors ${
+                        openThread === b.id ? 'text-kt-gold-700' : 'text-kt-green-700 hover:text-kt-gold-700'
+                      }`}
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                      {openThread === b.id ? 'Mesajları gizle' : 'Mesajlaşma'}
+                    </button>
                   </div>
                   {modifiable && (
                     <div className="flex items-center gap-2">
@@ -215,6 +231,13 @@ export default function UserBookings() {
                     </span>
                   )}
                 </div>
+
+                {/* Booking conversation thread (admin ↔ user) */}
+                {openThread === b.id && (
+                  <div className="mt-4 animate-fade-in">
+                    <BookingThread bookingId={b.id} viewerKind="user" compact />
+                  </div>
+                )}
               </article>
             );
           })}
