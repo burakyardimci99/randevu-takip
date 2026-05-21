@@ -29,6 +29,7 @@ export default function AdminWaitlist() {
   const toast = useToast();
   const [entries, setEntries] = useState<WaitlistEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [moving, setMoving] = useState(false);
   const [filter, setFilter] = useState<'all' | 'waiting' | 'promoted' | 'expired'>('waiting');
 
   const load = useCallback(async () => {
@@ -42,6 +43,21 @@ export default function AdminWaitlist() {
       setLoading(false);
     }
   }, [toast]);
+
+  /** Bir kaydı sırada öne al / yukarı / aşağı taşır. */
+  async function handleMove(id: string, move: 'up' | 'down' | 'top') {
+    if (moving) return;
+    setMoving(true);
+    try {
+      const res = await api.adminMoveWaitlist(id, move);
+      setEntries(res.entries);
+      toast.push('success', move === 'top' ? 'Kayıt sıranın başına alındı.' : 'Sıra güncellendi.');
+    } catch (err) {
+      toast.push('error', (err as Error).message);
+    } finally {
+      setMoving(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -65,6 +81,10 @@ export default function AdminWaitlist() {
       const key = e.roomId;
       if (!map.has(key)) map.set(key, { code: e.roomCode, name: e.roomName, entries: [] });
       map.get(key)!.entries.push(e);
+    }
+    // Her oda içinde position'a göre sırala (öncelik sırası).
+    for (const g of map.values()) {
+      g.entries.sort((a, b) => a.position - b.position);
     }
     return [...map.values()].sort((a, b) => b.entries.length - a.entries.length);
   }, [filtered]);
@@ -132,34 +152,74 @@ export default function AdminWaitlist() {
                   {g.entries.length} kayıt
                 </span>
               </header>
-              <ul className="divide-y divide-kt-gray-100">
-                {g.entries.map((e) => {
-                  const s = statusInfo(e.status);
-                  return (
-                    <li key={e.id} className="py-3 flex items-start gap-4">
-                      <div className="w-8 h-8 rounded-full bg-kt-gold-100 text-kt-gold-700 flex items-center justify-center font-bold text-xs shrink-0">
-                        #{e.position}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${s.cls}`}>
-                            {s.label}
-                          </span>
-                          <span className="text-xs text-kt-gray-600 truncate">
-                            {e.userFullName ?? e.userEmail}
-                          </span>
-                        </div>
-                        <div className="font-semibold text-kt-green-900 truncate">
-                          {e.projectName}
-                        </div>
-                        <div className="text-xs text-kt-gray-500 mt-0.5">
-                          {fmtDate(e.desiredStartDate)} · {e.periodMonths} ay
-                        </div>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+              {(() => {
+                const waitingIds = g.entries
+                  .filter((e) => e.status === 'waiting')
+                  .map((e) => e.id);
+                return (
+                  <ul className="divide-y divide-kt-gray-100">
+                    {g.entries.map((e) => {
+                      const s = statusInfo(e.status);
+                      const wIdx = waitingIds.indexOf(e.id);
+                      const isWaiting = e.status === 'waiting';
+                      return (
+                        <li key={e.id} className="py-3 flex items-start gap-4">
+                          <div className="w-8 h-8 rounded-full bg-kt-gold-100 text-kt-gold-700 flex items-center justify-center font-bold text-xs shrink-0">
+                            #{e.position}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${s.cls}`}>
+                                {s.label}
+                              </span>
+                              <span className="text-xs text-kt-gray-600 truncate">
+                                {e.userFullName ?? e.userEmail}
+                              </span>
+                            </div>
+                            <div className="font-semibold text-kt-green-900 truncate">
+                              {e.projectName}
+                            </div>
+                            <div className="text-xs text-kt-gray-500 mt-0.5">
+                              {fmtDate(e.desiredStartDate)} · {e.periodMonths} ay
+                            </div>
+                          </div>
+                          {isWaiting && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleMove(e.id, 'top')}
+                                disabled={moving || wIdx === 0}
+                                title="Sıranın başına al"
+                                className="text-[11px] font-bold px-2 py-1 rounded-md bg-kt-gold-50 text-kt-gold-700 hover:bg-kt-gold-100 disabled:opacity-40 transition-colors"
+                              >
+                                Öne Al
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMove(e.id, 'up')}
+                                disabled={moving || wIdx === 0}
+                                title="Yukarı taşı"
+                                className="w-7 h-7 rounded-md bg-kt-gray-100 text-kt-gray-600 hover:bg-kt-gray-200 disabled:opacity-40 transition-colors font-bold"
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMove(e.id, 'down')}
+                                disabled={moving || wIdx === waitingIds.length - 1}
+                                title="Aşağı taşı"
+                                className="w-7 h-7 rounded-md bg-kt-gray-100 text-kt-gray-600 hover:bg-kt-gray-200 disabled:opacity-40 transition-colors font-bold"
+                              >
+                                ↓
+                              </button>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                );
+              })()}
             </section>
           ))}
         </div>

@@ -106,39 +106,54 @@ export default function Landing() {
           </div>
 
           <div className="max-w-5xl text-center animate-fade-in">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-kt-gold-400/15 text-kt-gold-300 text-sm font-semibold mb-6 border border-kt-gold-400/40 backdrop-blur-sm shadow-glow-cyan">
+            <div className="badge-glass-gold mb-6">
               <span className="w-2 h-2 rounded-full bg-kt-gold-400 animate-pulse-gold" />
               YAPAY ZEKA LABORATUVARI · DEMO
             </div>
-            <h1 className="text-5xl md:text-7xl font-extrabold mb-6 text-balance leading-tight">
+            <h1 className="h-hero mb-6">
               <span className="text-white">AI Lab </span>
-              <span className="text-shimmer">odalarını</span><br />
-              <span className="text-white">ekibinle birlikte kullan.</span>
+              <span className="text-shimmer">pod'larını</span><br />
+              <span className="text-white">projen için planla.</span>
             </h1>
-            <p className="text-xl text-white/75 max-w-2xl mx-auto text-balance mb-10 leading-relaxed">
-              Merkez binamızdaki 10 oda — İstanbul ilçe ve mahalle isimleriyle adlandırıldı.
-              Uygun olanı seç, projenin detaylarını paylaş, randevu talebini gönder.
+            <p className="h-hero-sub text-white/75 mb-6">
+              Genel Müdürlük <strong className="text-white">-1D</strong> kat AILAB zone'unda{' '}
+              <strong className="text-white">NVIDIA DGX SPARK</strong> ve{' '}
+              <strong className="text-white">MAC STUDIO</strong> donanımlı 18 pod + 15 kişilik
+              AI Deneyim Alanı. Projeni anlat, oda izni al, geleceğin gününe randevunu oluştur.
             </p>
+            <div className="flex flex-wrap justify-center items-center gap-3 mb-10 text-sm">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-100 border border-cyan-400/40 backdrop-blur-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-300" />
+                6× NVIDIA DGX SPARK
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-500/20 text-violet-100 border border-violet-400/40 backdrop-blur-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-violet-300" />
+                13× MAC STUDIO
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-kt-gold-400/20 text-kt-gold-100 border border-kt-gold-400/40 backdrop-blur-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-kt-gold-300" />
+                AI Deneyim Alanı (15 kişi)
+              </span>
+            </div>
 
             <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
-              <Link
-                to="/login"
-                className="group relative inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-ai-glow-btn text-white font-bold shadow-glow-cyan hover:shadow-2xl transition-all hover:-translate-y-0.5 overflow-hidden"
-              >
-                <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
-                <svg className="w-5 h-5 relative" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
-                </svg>
-                <span className="relative">Giriş Yap</span>
+              <Link to="/login" className="btn-pill-primary btn-pill-lg">
+                <span className="btn-pill-shimmer" />
+                <span className="relative z-10 flex items-center gap-2">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
+                  </svg>
+                  Giriş Yap
+                </span>
               </Link>
-              <Link
-                to="/register"
-                className="inline-flex items-center gap-2 px-6 py-4 rounded-2xl glass text-white font-semibold border-white/25 hover:border-kt-gold-400/60 hover:shadow-glow-cyan transition-all"
-              >
-                Kayıt Ol
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7zM20 8v6m-3-3h6"/>
-                </svg>
+              <Link to="/register" className="btn-pill-outline-dark btn-pill-lg">
+                <span className="btn-pill-shimmer" />
+                <span className="relative z-10 flex items-center gap-2">
+                  Kayıt Ol
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7zM20 8v6m-3-3h6"/>
+                  </svg>
+                </span>
               </Link>
             </div>
           </div>

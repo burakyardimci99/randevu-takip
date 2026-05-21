@@ -1,10 +1,15 @@
-export type SubjectKind = 'user' | 'admin';
+export type SubjectKind = 'user' | 'admin' | 'danisman' | 'arge';
+
+/** Kullanıcı için seçimli yönetişim rolü. NULL = sıradan kullanıcı. */
+export type UserGovernanceRole = 'analitik_danisman' | 'yz_arge';
 
 export interface AuthUser {
   id: string;
   email: string;
   fullName: string;
   role: string;
+  /** Sadece user'lar için anlamlı; admin'ler için undefined. */
+  governanceRole?: UserGovernanceRole | null;
 }
 
 export interface UserProfile {
@@ -12,6 +17,7 @@ export interface UserProfile {
   email: string;
   fullName: string;
   role: 'user';
+  governanceRole?: UserGovernanceRole | null;
   department: string | null;
   title: string | null;
   manager: string | null;
@@ -43,6 +49,7 @@ export interface ProfileUpdatePayload {
 
 export interface AdminUserUpdatePayload extends ProfileUpdatePayload {
   status?: 1 | 3;
+  governanceRole?: UserGovernanceRole | null;
 }
 
 export interface AuthTokens {
@@ -62,8 +69,29 @@ export interface Room {
   capacity: number;
   description: string | null;
   theme: RoomTheme;
+  /** Resmi cihaz adı — örn. "NVIDIA DGX SPARK", "2x MAC STUDIO", "AI Deneyim Alanı". */
+  equipment: string;
   isAvailable: boolean;
   nextAvailableDate: string | null;
+}
+
+/** Admin "Odalar" görünümü — bir odadaki aktif booking. */
+export interface RoomOccupant {
+  bookingId: string;
+  userId: string;
+  userFullName: string;
+  userEmail: string;
+  projectName: string;
+  periodMonths: number;
+  startDate: string;
+  endDate: string;
+  status: 'approved' | 'pending' | 'feedback_requested';
+}
+
+export interface RoomWithOccupancy extends Room {
+  bookings: RoomOccupant[];
+  approvedCount: number;
+  pendingCount: number;
 }
 
 export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'feedback_requested';
@@ -87,6 +115,38 @@ export interface Booking {
   adminFeedback: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  /** Yaşam döngüsü aşaması — application → development → stage → production → live. */
+  lifecycleStage: LifecycleStage;
+  /** Mevcut aşamaya girilme zamanı. */
+  stageEnteredAt: string;
+  /** Review akışı: standard ya da swat (fast-track). */
+  reviewTrack: 'standard' | 'swat';
+  /** Kullanıcı bir sonraki aşamaya geçmek için talep oluşturduysa timestamp. */
+  stageAdvanceRequestedAt: string | null;
+  /** Kullanıcının talep notu (opsiyonel). */
+  stageAdvanceNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Günlük randevu (appointment) — onaylı booking üzerine eklenir. */
+export type AppointmentStatus = 'scheduled' | 'cancelled' | 'completed';
+
+export interface Appointment {
+  id: string;
+  bookingId: string;
+  userId: string;
+  userFullName?: string;
+  roomId: string;
+  roomCode: string;
+  roomName: string;
+  roomEquipment: string;
+  /** ISO 8601 datetime. */
+  startAt: string;
+  endAt: string;
+  title: string;
+  notes: string;
+  status: AppointmentStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -438,19 +498,145 @@ export type LicenseRequestStatus =
   | 'rejected'
   | 'feedback_requested';
 
-export interface LicenseRequest {
+export type ProjectType = 'poc' | 'integration';
+export type ReviewTrack = 'standard' | 'swat';
+
+/* ============================================================
+ * YÖNETİŞİM — yaşam döngüsü (AI Lab Vibe Coding Kılavuzu v2.1)
+ * ============================================================ */
+
+export type LifecycleStage =
+  | 'application'
+  | 'development'
+  | 'stage'
+  | 'production'
+  | 'live';
+
+export type GovernanceLevel = 'basic' | 'full';
+export type GovernanceRole = 'analitik_danisman' | 'lab_muhendisi' | 'yz_arge';
+export type GateKey =
+  | 'build'
+  | 'code_review'
+  | 'architecture'
+  | 'framework'
+  | 'security';
+export type GateStatus = 'pending' | 'passed' | 'failed';
+export type ApprovalType = 'stage' | 'production';
+export type ApprovalDecision = 'pending' | 'approved' | 'rejected';
+
+export interface SlaInfo {
+  checkpoint: string;
+  deadline: string;
+  slaHours: number;
+  remainingHours: number;
+  overdue: boolean;
+}
+
+export interface QualityGate {
   id: string;
-  userId: string;
+  requestId: string;
+  gateKey: GateKey;
+  label: string;
+  agent: string;
+  threshold: number | null;
+  thresholdUnit: string | null;
+  referenceMd: string;
+  status: GateStatus;
+  score: number | null;
+  detail: string | null;
+  evaluatedAt: string | null;
+}
+
+export interface HumanApproval {
+  id: string;
+  requestId: string;
+  approvalType: ApprovalType;
+  decision: ApprovalDecision;
+  approverId: string | null;
+  approverName: string | null;
+  releaseNote: string | null;
+  riskAssessment: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+}
+
+export interface StageEvent {
+  id: string;
+  requestId: string;
+  fromStage: string | null;
+  toStage: string;
+  actorId: string | null;
+  actorType: 'user' | 'admin' | 'system' | null;
+  actorName: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface GovernanceBundle {
+  request: LicenseRequest | LicenseRequestWithUser;
+  gates: QualityGate[];
+  approvals: HumanApproval[];
+  stageEvents: StageEvent[];
+}
+
+export interface GovernanceDashboard {
+  generatedAt: string;
+  stageDistribution: Array<{ stage: LifecycleStage; count: number }>;
+  activeProjects: number;
+  liveProjects: number;
+  swatQueueCount: number;
+  pendingApprovals: number;
+  slaBreaches: number;
+  gateStats: { passed: number; failed: number; pending: number };
+}
+
+export interface GovernanceAdmin {
+  id: string;
+  fullName: string;
+  role: string;
+  governanceRole: GovernanceRole | null;
+}
+
+export interface LicenseRequestItem {
   licenseKey: string;
   licenseName: string;
   vendor: string | null;
   category: string | null;
-  reason: string;
+}
+
+export interface LicenseRequest {
+  id: string;
+  userId: string;
+  // PNG "Başvuru Formu" alanları (eski kayıtlarda nullable)
+  requestTitle: string | null;
+  reason: string; // Kullanım amacı
+  expectedBenefit: string | null;
+  successCriteria: string | null;
+  projectType: ProjectType | null;
+  estimatedDurationDays: number | null;
+  dataToUse: string | null;
+  technicalStack: string | null;
+  items: LicenseRequestItem[];
   durationMonths: 1 | 3 | 6 | 12;
+  // Geriye dönük: tek-lisans alanları (ilk item ile aynı değer)
+  licenseKey: string;
+  licenseName: string;
+  vendor: string | null;
+  category: string | null;
+  // Review akışı
   status: LicenseRequestStatus;
+  reviewTrack: ReviewTrack;
   adminFeedback: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  // Yönetişim yaşam döngüsü
+  lifecycleStage: LifecycleStage;
+  governanceLevel: GovernanceLevel;
+  usesExternalApi: boolean | null;
+  involvesRealData: boolean | null;
+  stageEnteredAt: string | null;
+  assignedEngineerId: string | null;
+  sla: SlaInfo | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -460,4 +646,53 @@ export interface LicenseRequestWithUser extends LicenseRequest {
   userEmail: string;
   userDepartment: string | null;
   reviewerName: string | null;
+  assignedEngineerName: string | null;
+}
+
+/* ============================================================
+ * BİLDİRİM MERKEZİ — kalıcı in-app bildirimler
+ * ============================================================ */
+
+export type NotificationCategory =
+  | 'booking'
+  | 'license'
+  | 'waitlist'
+  | 'message'
+  | 'system';
+
+export interface AppNotification {
+  id: string;
+  category: NotificationCategory;
+  title: string;
+  body: string;
+  link: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
+/* ============================================================
+ * LİSANS BÜTÇE ANALİZİ
+ * ============================================================ */
+
+export interface LicenseBudgetReport {
+  generatedAt: string;
+  approvedMonthlyUsd: number;
+  approvedAnnualUsd: number;
+  approvedCommitmentUsd: number;
+  approvedRequestCount: number;
+  pendingMonthlyUsd: number;
+  pendingRequestCount: number;
+  byProjectType: Array<{
+    projectType: 'poc' | 'integration' | 'unspecified';
+    requestCount: number;
+    monthlyUsd: number;
+  }>;
+  byTool: Array<{
+    name: string;
+    tier: string;
+    unitMonthlyUsd: number;
+    approvedCount: number;
+    monthlyUsd: number;
+  }>;
+  unpricedItemCount: number;
 }

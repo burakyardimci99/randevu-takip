@@ -3,31 +3,60 @@
  * Path: /api/admin/*
  */
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { requireAdmin, requireAdminRole } from '../middleware/auth.middleware';
+import {
+  requireAdmin,
+  requireAdminRole,
+  requireGovernanceRole,
+} from '../middleware/auth.middleware';
 import {
   adminLicenseRequestsFilterSchema,
+  adminResetUserPasswordSchema,
   adminUserSearchSchema,
   adminUserUpdateSchema,
+  advanceLifecycleSchema,
+  assignEngineerSchema,
+  changeAdminPasswordSchema,
+  decideApprovalSchema,
+  gateResultSchema,
   mfaVerifySchema,
+  reassignRoomSchema,
+  reassignUserSchema,
+  rejectStageAdvanceSchema,
   reviewBookingSchema,
   reviewLicenseRequestSchema,
+  setReviewTrackSchema,
   similarSearchSchema,
+  waitlistMoveSchema,
 } from '../validators/schemas';
 import {
   getBookingByIdAdmin,
   listAllBookings,
+  reassignBookingRoom,
+  reassignBookingUser,
+  adminDeleteBooking,
   reviewBooking,
+  advanceBookingLifecycle,
+  regressBookingLifecycle,
+  setBookingReviewTrack,
+  rejectStageAdvanceRequest,
 } from '../services/booking.service';
-import { listRooms } from '../services/room.service';
+import {
+  cancelAppointment as adminCancelAppointment,
+  listAllAppointments,
+  listBookingAppointments,
+} from '../services/appointment.service';
+import { listRooms, getRoomsWithOccupancy } from '../services/room.service';
 import {
   adminDeleteUser,
+  adminResetUserPassword,
   adminRestoreUser,
   adminUpdateUser,
   getUserByIdAdmin,
   listAllUsers,
   listDepartments,
 } from '../services/user.service';
-import { listAllWaitlist } from '../services/waitlist.service';
+import { changeAdminPassword } from '../services/auth.service';
+import { listAllWaitlist, moveWaitlistEntry } from '../services/waitlist.service';
 import { getAnalytics } from '../services/analytics.service';
 import {
   backfillEmbeddings,
@@ -115,7 +144,7 @@ router.post('/bookings/:id/review', (req: Request, res: Response, next: NextFunc
       throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
     }
     const input = reviewBookingSchema.parse(req.body);
-    const booking = reviewBooking(req.auth!.subjectId, id, input);
+    const result = reviewBooking(req.auth!.subjectId, id, input);
 
     recordAudit({
       eventType: 'booking.reviewed',
@@ -124,13 +153,18 @@ router.post('/bookings/:id/review', (req: Request, res: Response, next: NextFunc
       ipAddress: req.ip,
       success: true,
       details: {
-        bookingId: booking.id,
+        bookingId: result.booking.id,
         action: input.action,
-        newStatus: booking.status,
+        newStatus: result.booking.status,
+        autoWaitlisted: result.autoWaitlisted ?? false,
       },
     });
 
-    res.json({ booking });
+    res.json({
+      booking: result.booking,
+      autoWaitlisted: result.autoWaitlisted ?? false,
+      waitlistPosition: result.waitlistPosition,
+    });
   } catch (err) {
     next(err);
   }
@@ -318,6 +352,268 @@ router.get('/stats', (_req: Request, res: Response, next: NextFunction) => {
       feedback_requested: all.filter((b) => b.status === 'feedback_requested').length,
     };
     res.json({ stats });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Admin: bir kullanıcının parolasını sıfırlar. */
+router.post(
+  '/users/:id/reset-password',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
+      }
+      const { password } = adminResetUserPasswordSchema.parse(req.body);
+      await adminResetUserPassword(id, password);
+      recordAudit({
+        eventType: 'admin.password_reset',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        success: true,
+        details: { targetUserId: id },
+      });
+      res.json({ message: 'Kullanıcının parolası sıfırlandı.' });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Admin kendi parolasını değiştirir. */
+router.post(
+  '/auth/change-password',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = changeAdminPasswordSchema.parse(req.body);
+      await changeAdminPassword(
+        req.auth!.subjectId,
+        input.currentPassword,
+        input.newPassword
+      );
+      recordAudit({
+        eventType: 'admin.password_changed',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        success: true,
+      });
+      res.json({ message: 'Parolan güncellendi.' });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/* ============ ODALAR — doluluk + atama ============ */
+
+/** Admin "Odalar" görünümü — her oda + içindeki kullanıcılar. */
+router.get('/rooms/occupancy', (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ rooms: getRoomsWithOccupancy() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Admin: bir booking'i başka odaya taşır. */
+router.post('/bookings/:id/reassign', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rawId = req.params.id;
+    const id = typeof rawId === 'string' ? rawId : '';
+    if (!id || id.length < 8 || id.length > 40) {
+      throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
+    }
+    const { roomId } = reassignRoomSchema.parse(req.body);
+    const booking = reassignBookingRoom(req.auth!.subjectId, id, roomId);
+    res.json({ booking });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Admin: bir booking'in kullanıcısını değiştirir (oda kullanıcısını "değiştir"). */
+router.post(
+  '/bookings/:id/reassign-user',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
+      }
+      const { userId } = reassignUserSchema.parse(req.body);
+      const booking = reassignBookingUser(req.auth!.subjectId, id, userId);
+      res.json({ booking });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Admin: bir booking'i tamamen siler (oda kullanıcısını "çıkar"). */
+router.delete('/bookings/:id', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rawId = req.params.id;
+    const id = typeof rawId === 'string' ? rawId : '';
+    if (!id || id.length < 8 || id.length > 40) {
+      throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
+    }
+    const result = adminDeleteBooking(req.auth!.subjectId, id);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Admin: bir booking'i yaşam döngüsünde bir sonraki aşamaya ilerlet. */
+router.post(
+  '/bookings/:id/advance-stage',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
+      }
+      const booking = advanceBookingLifecycle(req.auth!.subjectId, id);
+      res.json({ booking });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Admin: bir booking'i yaşam döngüsünde bir önceki aşamaya geri al. */
+router.post(
+  '/bookings/:id/regress-stage',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
+      }
+      const booking = regressBookingLifecycle(req.auth!.subjectId, id);
+      res.json({ booking });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Admin: SWAT (fast-track) inceleme akışına al/çıkar. */
+router.post(
+  '/bookings/:id/review-track',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
+      }
+      const { track } = setReviewTrackSchema.parse(req.body);
+      const booking = setBookingReviewTrack(req.auth!.subjectId, id, track);
+      res.json({ booking });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Admin: kullanıcının aşama ilerletme talebini reddet (ilerletmeden iptal). */
+router.delete(
+  '/bookings/:id/advance-request',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
+      }
+      // Body opsiyonel — DELETE üzerinde JSON body olabilir/olmayabilir.
+      const note = rejectStageAdvanceSchema.parse(req.body ?? {}).note;
+      const booking = rejectStageAdvanceRequest(req.auth!.subjectId, id, note);
+      res.json({ booking });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/* ============ APPOINTMENTS (admin) ============ */
+
+/** Admin: tüm randevuları listele (yönetim takvimi). */
+router.get('/appointments', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const fromRaw = req.query.from;
+    const toRaw = req.query.to;
+    const includeCancelled = req.query.includeCancelled === 'true';
+    const appointments = listAllAppointments({
+      from: typeof fromRaw === 'string' ? fromRaw : undefined,
+      to: typeof toRaw === 'string' ? toRaw : undefined,
+      includeCancelled,
+    });
+    res.json({ appointments });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Admin: bir booking'in randevuları. */
+router.get(
+  '/bookings/:id/appointments',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
+      }
+      const appointments = listBookingAppointments(id, { includeCancelled: true });
+      res.json({ appointments });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Admin: bir randevuyu iptal et. */
+router.delete(
+  '/appointments/:id',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz randevu id.', 'INVALID_ID');
+      }
+      const result = adminCancelAppointment(req.auth!.subjectId, id, {
+        ownerCheck: false,
+        callerType: 'admin',
+      });
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Admin: waitlist sırası değiştirme (öncelik verme). */
+router.post('/waitlist/:id/move', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rawId = req.params.id;
+    const id = typeof rawId === 'string' ? rawId : '';
+    if (!id || id.length < 8 || id.length > 40) {
+      throw new HttpError(400, 'Geçersiz waitlist id.', 'INVALID_ID');
+    }
+    const { move } = waitlistMoveSchema.parse(req.body);
+    moveWaitlistEntry(id, move);
+    res.json({ entries: listAllWaitlist() });
   } catch (err) {
     next(err);
   }
@@ -711,15 +1007,33 @@ router.get(
   }
 );
 
+router.get(
+  '/licenses/budget',
+  requireAdmin,
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { getLicenseBudgetReport } = await import('../services/license-request.service');
+      res.json(getLicenseBudgetReport());
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 router.post(
   '/licenses/requests/:id/review',
   requireAdmin,
   requireAdminRole('admin', 'super_admin'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
+      }
       const input = reviewLicenseRequestSchema.parse(req.body);
       const { reviewLicenseRequest } = await import('../services/license-request.service');
-      const updated = reviewLicenseRequest(req.auth!.subjectId, req.params.id, input);
+      const updated = reviewLicenseRequest(req.auth!.subjectId, id, input);
       recordAudit({
         eventType: 'license_request.reviewed',
         subjectId: req.auth!.subjectId,
@@ -729,6 +1043,324 @@ router.post(
         details: { requestId: updated.id, action: input.action, status: updated.status },
       });
       res.json({ request: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/* ============================================================
+ * YÖNETİŞİM — yaşam döngüsü, kalite kapıları, onaylar
+ * ============================================================ */
+
+/** id parametresini doğrular. */
+function readRequestId(req: Request): string {
+  const raw = req.params.id;
+  const id = typeof raw === 'string' ? raw : '';
+  if (!id || id.length < 8 || id.length > 40) {
+    throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
+  }
+  return id;
+}
+
+/** Başvuru/proje detayı — yönetişim demeti dahil. */
+router.get(
+  '/licenses/requests/:id',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = readRequestId(req);
+      const { getAdminLicenseRequestById } = await import(
+        '../services/license-request.service'
+      );
+      const request = getAdminLicenseRequestById(id);
+      if (!request) {
+        throw new HttpError(404, 'Talep bulunamadı.', 'LICENSE_REQUEST_NOT_FOUND');
+      }
+      const { listGatesForRequest } = await import('../services/quality-gate.service');
+      const { listApprovalsForRequest } = await import('../services/human-approval.service');
+      const { listStageEvents } = await import('../services/governance.service');
+      res.json({
+        request,
+        gates: listGatesForRequest(id),
+        approvals: listApprovalsForRequest(id),
+        stageEvents: listStageEvents(id),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Yönetişim dashboard metrikleri. */
+router.get(
+  '/licenses/governance/dashboard',
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { getGovernanceDashboard } = await import('../services/governance.service');
+      res.json(getGovernanceDashboard());
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Lab Mühendisi atama için admin listesi. */
+router.get(
+  '/governance/admins',
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rows = getDb()
+        .prepare(
+          `SELECT id, full_name, role, governance_role
+           FROM admins WHERE status = 1 ORDER BY full_name`
+        )
+        .all() as Array<{
+        id: string;
+        full_name: string;
+        role: string;
+        governance_role: string | null;
+      }>;
+      res.json({
+        admins: rows.map((r) => ({
+          id: r.id,
+          fullName: r.full_name,
+          role: r.role,
+          governanceRole: r.governance_role,
+        })),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Projeyi bir sonraki yaşam döngüsü aşamasına ilerlet. */
+router.post(
+  '/licenses/requests/:id/advance',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = readRequestId(req);
+      const input = advanceLifecycleSchema.parse(req.body);
+      const { advanceLifecycle } = await import('../services/governance.service');
+      const { getAdminLicenseRequestById } = await import(
+        '../services/license-request.service'
+      );
+      const result = advanceLifecycle(id, req.auth!.subjectId, input.note);
+      const request = getAdminLicenseRequestById(id)!;
+
+      recordAudit({
+        eventType: 'license_request.updated',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        success: true,
+        details: { requestId: id, action: 'advance', from: result.fromStage, to: result.toStage },
+      });
+
+      const { pushNotification } = await import('../services/notification-center.service');
+      const { STAGE_LABEL } = await import('../services/governance-data');
+      pushNotification({
+        recipientId: request.userId,
+        recipientType: 'user',
+        category: 'license',
+        title: `Projen ${STAGE_LABEL[result.toStage]} aşamasına geçti`,
+        body: `"${request.requestTitle ?? request.licenseName}" — yaşam döngüsü ilerledi.`,
+        link: '/licenses',
+      });
+
+      res.json({ request, transition: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Lab Mühendisi ata. */
+router.post(
+  '/licenses/requests/:id/assign-engineer',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = readRequestId(req);
+      const input = assignEngineerSchema.parse(req.body);
+      const { assignEngineer } = await import('../services/governance.service');
+      const { getAdminLicenseRequestById } = await import(
+        '../services/license-request.service'
+      );
+      assignEngineer(id, input.engineerId);
+      recordAudit({
+        eventType: 'license_request.updated',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        success: true,
+        details: { requestId: id, action: 'assign_engineer', engineerId: input.engineerId },
+      });
+      res.json({ request: getAdminLicenseRequestById(id) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Proje türünü Kuruma Entegre'ye yükselt. */
+router.post(
+  '/licenses/requests/:id/upgrade-type',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = readRequestId(req);
+      const { upgradeProjectType } = await import('../services/governance.service');
+      const { getAdminLicenseRequestById } = await import(
+        '../services/license-request.service'
+      );
+      upgradeProjectType(id, req.auth!.subjectId);
+      recordAudit({
+        eventType: 'license_request.updated',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        success: true,
+        details: { requestId: id, action: 'upgrade_type' },
+      });
+      res.json({ request: getAdminLicenseRequestById(id) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Kalite kapısı sonucunu kaydet/güncelle. */
+router.put(
+  '/licenses/requests/:id/gates',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = readRequestId(req);
+      const input = gateResultSchema.parse(req.body);
+      const { setGateResult } = await import('../services/quality-gate.service');
+      const gate = setGateResult(id, input.gateKey, {
+        status: input.status,
+        score: input.score ?? null,
+        detail: input.detail ?? null,
+      });
+      recordAudit({
+        eventType: 'license_request.updated',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        success: true,
+        details: { requestId: id, action: 'gate_result', gate: input.gateKey, status: input.status },
+      });
+      res.json({ gate });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Stage / Production insan onayı kararı — YZ/Ar-Ge Mühendisi yetkisi. */
+router.post(
+  '/licenses/requests/:id/approval',
+  requireGovernanceRole('yz_arge'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = readRequestId(req);
+      const input = decideApprovalSchema.parse(req.body);
+      const { decideApproval } = await import('../services/human-approval.service');
+      const { getAdminLicenseRequestById } = await import(
+        '../services/license-request.service'
+      );
+      const approval = decideApproval(id, input.approvalType, req.auth!.subjectId, {
+        decision: input.decision,
+        releaseNote: input.releaseNote,
+        riskAssessment: input.riskAssessment,
+      });
+      const request = getAdminLicenseRequestById(id)!;
+
+      recordAudit({
+        eventType: 'license_request.reviewed',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        success: true,
+        details: {
+          requestId: id,
+          action: 'approval',
+          approvalType: input.approvalType,
+          decision: input.decision,
+        },
+      });
+
+      const { pushNotification } = await import('../services/notification-center.service');
+      const typeLabel = input.approvalType === 'stage' ? 'Stage' : 'Production';
+      pushNotification({
+        recipientId: request.userId,
+        recipientType: 'user',
+        category: 'license',
+        title: `${typeLabel} onayı ${input.decision === 'approved' ? 'verildi' : 'reddedildi'}`,
+        body: `"${request.requestTitle ?? request.licenseName}" — ${typeLabel} insan onay noktası.`,
+        link: '/licenses',
+      });
+
+      res.json({ request, approval });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/* ============================================================
+ * BİLDİRİM MERKEZİ — admin
+ * ============================================================ */
+
+router.get(
+  '/notifications',
+  requireAdmin,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { listNotifications, countUnreadNotifications } = await import(
+        '../services/notification-center.service'
+      );
+      const aid = req.auth!.subjectId;
+      res.json({
+        items: listNotifications(aid, 'admin'),
+        unread: countUnreadNotifications(aid, 'admin'),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/notifications/:id/read',
+  requireAdmin,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz bildirim id.', 'INVALID_ID');
+      }
+      const { markNotificationRead } = await import(
+        '../services/notification-center.service'
+      );
+      markNotificationRead(req.auth!.subjectId, 'admin', id);
+      res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/notifications/read-all',
+  requireAdmin,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { markAllNotificationsRead } = await import(
+        '../services/notification-center.service'
+      );
+      const changed = markAllNotificationsRead(req.auth!.subjectId, 'admin');
+      res.json({ marked: changed });
     } catch (err) {
       next(err);
     }

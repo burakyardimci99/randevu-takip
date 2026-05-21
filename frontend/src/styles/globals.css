@@ -6,6 +6,11 @@
   html, body, #root {
     height: 100%;
   }
+  /* Yatay overflow'a karşı global güvenlik ağı — ken-burns animasyonu,
+     sığmayan nav vs. yan-scroll beyaz boşluk yaratmasın. */
+  html, body {
+    overflow-x: hidden;
+  }
   body {
     @apply bg-white text-kt-green-900 font-sans antialiased;
   }
@@ -50,6 +55,112 @@
   }
   .btn-success {
     @apply btn bg-emerald-600 text-white hover:bg-emerald-700 active:scale-[0.98] shadow-md;
+  }
+
+  /* ============ PILL BUTONLAR (modern variant — referans: ethereal-beams-hero) ============
+     Mevcut .btn-* class'ları korunuyor (geri uyumluluk). Yeni .btn-pill-* class'ları
+     hero CTA, login submit, landing eylem butonları gibi öne çıkan yerlerde kullanılır.
+     Tüm variant'lar shimmer sweep efekti taşır (hover → soldan sağa parlak ışık geçişi).
+     Renkler bizim cyan/navy/violet paletimizden — siyah/beyaz değil. */
+  .btn-pill {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-full
+           font-medium tracking-tight transition-all duration-200
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kt-gold-400/40
+           disabled:pointer-events-none disabled:opacity-50 overflow-hidden;
+  }
+  /* Filled — primary brand glow (cyan→blue gradient) */
+  .btn-pill-primary {
+    @apply btn-pill text-white shadow-glow-cyan hover:shadow-2xl
+           hover:-translate-y-0.5 active:translate-y-0;
+    background-image: linear-gradient(135deg, #06B6D4 0%, #0EA5E9 50%, #3B82F6 100%);
+  }
+  .btn-pill-primary:hover {
+    background-image: linear-gradient(135deg, #22D3EE 0%, #06B6D4 50%, #0EA5E9 100%);
+  }
+  /* Filled — gold accent (highlight CTA) */
+  .btn-pill-gold {
+    @apply btn-pill bg-kt-gold-400 text-kt-green-950 shadow-kt-gold
+           hover:bg-kt-gold-300 hover:shadow-glow-cyan hover:-translate-y-0.5;
+  }
+  /* Outline glass — dark theme (hero, landing, login bg üstünde) */
+  .btn-pill-outline-dark {
+    @apply btn-pill text-white border border-white/20 bg-white/5 backdrop-blur-xl
+           hover:bg-white/10 hover:border-kt-gold-400/60 hover:shadow-glow-cyan;
+  }
+  /* Outline solid — light theme (white bg üstünde) */
+  .btn-pill-outline-light {
+    @apply btn-pill text-kt-green-800 border border-kt-gray-200 bg-white
+           hover:border-kt-gold-400 hover:text-kt-gold-700 hover:shadow-kt-soft;
+  }
+  /* Ghost — dark theme */
+  .btn-pill-ghost-dark {
+    @apply btn-pill text-white/90 hover:text-white hover:bg-white/10;
+  }
+  /* Ghost — light theme */
+  .btn-pill-ghost-light {
+    @apply btn-pill text-kt-green-700 hover:bg-kt-gold-50 hover:text-kt-gold-700;
+  }
+  /* Sizes — sm default; md (orta); lg (hero) */
+  .btn-pill-sm { @apply h-9 px-4 text-sm; }
+  .btn-pill-md { @apply h-11 px-6 text-base; }
+  .btn-pill-lg { @apply h-14 px-8 text-lg font-semibold; }
+
+  /* Shimmer sweep — pill içerisinde absolute span olarak konur.
+     Parent .btn-pill:hover ile tetiklenir (descendant selector — group class'ına gerek yok).
+     Kullanım: <button class="btn-pill-primary btn-pill-lg">
+                 <span class="btn-pill-shimmer" />
+                 <span class="relative z-10">İçerik</span>
+               </button> */
+  .btn-pill-shimmer {
+    @apply absolute inset-0 -top-2 -bottom-2 pointer-events-none
+           bg-gradient-to-r from-transparent via-white/25 to-transparent
+           skew-x-12;
+    transform: translateX(-100%);
+    transition: transform 1000ms ease-out;
+  }
+  .btn-pill:hover .btn-pill-shimmer {
+    transform: translateX(100%);
+  }
+
+  /* ============ GLASS NAV PILL (multi-link pill container) ============
+     Kullanım: <nav class="nav-glass-pills"> <a class="nav-glass-pill">…</a> </nav>
+     Hero/landing'de "Home / Components / Templates / Docs" tarzı dark-mode menü için. */
+  .nav-glass-pills {
+    @apply inline-flex items-center gap-1 rounded-full bg-white/5
+           backdrop-blur-xl border border-white/10 p-1;
+  }
+  .nav-glass-pill {
+    @apply rounded-full px-4 py-2 text-sm font-medium text-white/85
+           transition-all hover:bg-white/10 hover:text-white;
+  }
+  .nav-glass-pill-active {
+    @apply nav-glass-pill bg-white/15 text-white shadow-inner;
+  }
+
+  /* ============ GLASS BADGE (dark theme — landing/hero için) ============
+     Mevcut .badge-* (rounded-full pill, light-theme) yan yana yaşar.
+     Glass variant koyu/saydam zeminlerde kullanılır. */
+  .badge-glass-dark {
+    @apply inline-flex items-center gap-2 rounded-full bg-white/5
+           backdrop-blur-xl border border-white/10 px-4 py-2 text-sm text-white/90;
+  }
+  .badge-glass-gold {
+    @apply inline-flex items-center gap-2 rounded-full
+           bg-kt-gold-400/15 text-kt-gold-200
+           border border-kt-gold-400/40 backdrop-blur-sm
+           px-4 py-2 text-sm font-semibold shadow-glow-cyan;
+  }
+
+  /* ============ HERO TYPOGRAPHY ============
+     Büyük başlıklar için tutarlı bir base. Renkleri override etmek için Tailwind
+     class'larıyla birleştirilir; .text-shimmer ile vurgu kelimesi öne çıkarılır. */
+  .h-hero {
+    @apply text-4xl sm:text-5xl md:text-6xl lg:text-7xl
+           font-extrabold tracking-tight leading-[1.05] text-balance;
+  }
+  .h-hero-sub {
+    @apply text-base sm:text-lg md:text-xl
+           leading-relaxed text-balance max-w-3xl mx-auto;
   }
 
   /* ============ INPUT'LAR ============ */

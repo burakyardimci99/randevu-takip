@@ -25,10 +25,13 @@ export default function AdminUsers() {
   const [filter, setFilter] = useState<'all' | 'active' | 'disabled'>('all');
   const [department, setDepartment] = useState<string>('');
   const [hasBookings, setHasBookings] = useState<'any' | 'yes' | 'no'>('any');
+  const [govFilter, setGovFilter] = useState<'all' | 'normal' | 'analitik_danisman' | 'yz_arge'>('all');
   const [departments, setDepartments] = useState<string[]>([]);
   const [editing, setEditing] = useState<UserListItem | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<UserListItem | null>(null);
+  const [resetUser, setResetUser] = useState<UserListItem | null>(null);
   const [saving, setSaving] = useState(false);
+  const [resetSaving, setResetSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const debounceRef = useRef<number | null>(null);
 
@@ -80,9 +83,15 @@ export default function AdminUsers() {
   }, [load, search, filter, department, hasBookings]);
 
   // Client-side hesaplar (counter UX için)
-  const filtered = users;
+  const filtered = users.filter((u) => {
+    if (govFilter === 'all') return true;
+    if (govFilter === 'normal') return !u.governanceRole;
+    return u.governanceRole === govFilter;
+  });
   const activeCount = users.filter((u) => u.status === 1).length;
   const disabledCount = users.length - activeCount;
+  const danismanCount = users.filter((u) => u.governanceRole === 'analitik_danisman').length;
+  const argeCount = users.filter((u) => u.governanceRole === 'yz_arge').length;
 
   async function handleSave(input: AdminUserUpdatePayload) {
     if (!editing) return;
@@ -126,6 +135,20 @@ export default function AdminUsers() {
     }
   }
 
+  async function handleResetPassword(password: string) {
+    if (!resetUser) return;
+    setResetSaving(true);
+    try {
+      await api.adminResetUserPassword(resetUser.id, password);
+      toast.push('success', `${resetUser.fullName} için parola sıfırlandı.`);
+      setResetUser(null);
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Parola sıfırlanamadı.');
+    } finally {
+      setResetSaving(false);
+    }
+  }
+
   return (
     <AppShell kind="admin">
       <div className="mb-6">
@@ -163,6 +186,57 @@ export default function AdminUsers() {
         >
           <div className="text-3xl font-extrabold">{disabledCount}</div>
           <div className="text-xs uppercase tracking-wider opacity-80 mt-1">Devre dışı</div>
+        </button>
+      </div>
+
+      {/* Yönetişim rolü filter chip'leri */}
+      <div className="flex gap-2 flex-wrap mb-4 text-sm">
+        <span className="text-xs text-kt-gray-500 self-center font-semibold uppercase tracking-wider mr-1">
+          Rol:
+        </span>
+        <button
+          type="button"
+          onClick={() => setGovFilter('all')}
+          className={`px-3 py-1.5 rounded-lg font-semibold transition border ${
+            govFilter === 'all'
+              ? 'bg-kt-green-700 text-white border-kt-green-700 shadow-kt-green'
+              : 'bg-white text-kt-gray-700 border-kt-gray-200 hover:border-kt-gray-300'
+          }`}
+        >
+          Tümü ({users.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setGovFilter('normal')}
+          className={`px-3 py-1.5 rounded-lg font-semibold transition border ${
+            govFilter === 'normal'
+              ? 'bg-kt-gray-700 text-white border-kt-gray-700'
+              : 'bg-white text-kt-gray-700 border-kt-gray-200 hover:border-kt-gray-300'
+          }`}
+        >
+          Normal ({users.length - danismanCount - argeCount})
+        </button>
+        <button
+          type="button"
+          onClick={() => setGovFilter('analitik_danisman')}
+          className={`px-3 py-1.5 rounded-lg font-semibold transition border ${
+            govFilter === 'analitik_danisman'
+              ? 'bg-cyan-600 text-white border-cyan-600'
+              : 'bg-cyan-50 text-cyan-800 border-cyan-200 hover:border-cyan-300'
+          }`}
+        >
+          ◆ Analitik Danışman ({danismanCount})
+        </button>
+        <button
+          type="button"
+          onClick={() => setGovFilter('yz_arge')}
+          className={`px-3 py-1.5 rounded-lg font-semibold transition border ${
+            govFilter === 'yz_arge'
+              ? 'bg-violet-600 text-white border-violet-600'
+              : 'bg-violet-50 text-violet-800 border-violet-200 hover:border-violet-300'
+          }`}
+        >
+          ◆ YZ / Ar-Ge ({argeCount})
         </button>
       </div>
 
@@ -249,6 +323,16 @@ export default function AdminUsers() {
                             Devre dışı
                           </span>
                         )}
+                        {u.governanceRole === 'analitik_danisman' && (
+                          <span className="px-2 py-0.5 rounded-md bg-cyan-100 text-cyan-800 border border-cyan-300 text-[10px] font-bold uppercase tracking-wider">
+                            ◆ Analitik Danışman
+                          </span>
+                        )}
+                        {u.governanceRole === 'yz_arge' && (
+                          <span className="px-2 py-0.5 rounded-md bg-violet-100 text-violet-800 border border-violet-300 text-[10px] font-bold uppercase tracking-wider">
+                            ◆ YZ / Ar-Ge
+                          </span>
+                        )}
                       </div>
                       <div className="text-sm text-kt-gray-600 break-all">{u.email}</div>
                       <div className="text-xs text-kt-gray-500 flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
@@ -279,6 +363,18 @@ export default function AdminUsers() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                         </svg>
                         Düzenle
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setResetUser(u)}
+                        disabled={isLoadingThis}
+                        className="btn text-xs bg-kt-gold-50 text-kt-gold-800 hover:bg-kt-gold-100 border border-kt-gold-200"
+                        title="Parola sıfırla"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+                        </svg>
+                        Şifre
                       </button>
                       {isDisabled ? (
                         <button
@@ -357,7 +453,151 @@ export default function AdminUsers() {
           </div>
         </div>
       )}
+
+      {/* Parola Sıfırlama */}
+      {resetUser && (
+        <ResetPasswordModal
+          user={resetUser}
+          loading={resetSaving}
+          onClose={() => !resetSaving && setResetUser(null)}
+          onSubmit={handleResetPassword}
+        />
+      )}
     </AppShell>
+  );
+}
+
+/* ============================================================
+ * PAROLA SIFIRLAMA MODALI
+ * ============================================================ */
+
+interface ResetPasswordModalProps {
+  user: UserListItem;
+  loading: boolean;
+  onClose: () => void;
+  onSubmit: (password: string) => Promise<void>;
+}
+
+function ResetPasswordModal({ user, loading, onClose, onSubmit }: ResetPasswordModalProps) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+
+  const checks = {
+    length: password.length >= 12,
+    upper: /[A-Z]/.test(password),
+    lower: /[a-z]/.test(password),
+    digit: /[0-9]/.test(password),
+    special: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password),
+  };
+  const score = Object.values(checks).filter(Boolean).length;
+  const allValid = score === 5;
+  const matches = password.length > 0 && password === confirm;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (loading || !allValid || !matches) return;
+    await onSubmit(password);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-kt-card max-w-md w-full p-6 animate-slide-up"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-bold text-kt-green-900 mb-1">Parola Sıfırla</h3>
+        <p className="text-sm text-kt-gray-600 mb-4">
+          <span className="font-semibold">{user.fullName}</span> ({user.email}) için yeni
+          bir parola belirle. Kullanıcının açık oturumları kapatılır.
+        </p>
+
+        <form onSubmit={submit} className="space-y-3" autoComplete="off">
+          <div>
+            <label htmlFor="reset-pw" className="label">Yeni parola</label>
+            <input
+              id="reset-pw"
+              type="password"
+              className="input"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              placeholder="En az 12 karakter, karmaşık"
+              maxLength={128}
+              disabled={loading}
+            />
+            {password.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div
+                      key={i}
+                      className={`h-1 flex-1 rounded-full transition-colors ${
+                        i <= score
+                          ? score === 5
+                            ? 'bg-kt-green-500'
+                            : score >= 3
+                              ? 'bg-kt-gold-400'
+                              : 'bg-red-400'
+                          : 'bg-kt-gray-200'
+                      }`}
+                    />
+                  ))}
+                </div>
+                <ul className="text-xs space-y-0.5 text-kt-gray-600">
+                  <li className={checks.length ? 'text-kt-green-700' : ''}>
+                    {checks.length ? '✓' : '○'} En az 12 karakter
+                  </li>
+                  <li className={checks.upper ? 'text-kt-green-700' : ''}>
+                    {checks.upper ? '✓' : '○'} Büyük harf
+                  </li>
+                  <li className={checks.lower ? 'text-kt-green-700' : ''}>
+                    {checks.lower ? '✓' : '○'} Küçük harf
+                  </li>
+                  <li className={checks.digit ? 'text-kt-green-700' : ''}>
+                    {checks.digit ? '✓' : '○'} Rakam
+                  </li>
+                  <li className={checks.special ? 'text-kt-green-700' : ''}>
+                    {checks.special ? '✓' : '○'} Özel karakter (!@#$ vb.)
+                  </li>
+                </ul>
+              </div>
+            )}
+          </div>
+          <div>
+            <label htmlFor="reset-pw-confirm" className="label">Yeni parola (tekrar)</label>
+            <input
+              id="reset-pw-confirm"
+              type="password"
+              className="input"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              placeholder="••••••••••••"
+              maxLength={128}
+              disabled={loading}
+            />
+            {confirm.length > 0 && !matches && (
+              <p className="text-xs text-red-600 mt-1">Parolalar eşleşmiyor.</p>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} disabled={loading} className="btn-ghost">
+              Vazgeç
+            </button>
+            <button
+              type="submit"
+              disabled={loading || !allValid || !matches}
+              className="btn-primary"
+            >
+              {loading ? 'Sıfırlanıyor...' : 'Parolayı Sıfırla'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -382,6 +622,7 @@ function EditUserModal({ user, loading, onClose, onSave }: EditUserModalProps) {
     bio: user.bio ?? '',
     projectIdea: user.projectIdea ?? '',
     status: user.status === 1 ? 1 : 3,
+    governanceRole: user.governanceRole ?? null,
   });
 
   function setField<K extends keyof AdminUserUpdatePayload>(key: K, value: AdminUserUpdatePayload[K]) {
@@ -449,6 +690,34 @@ function EditUserModal({ user, loading, onClose, onSave }: EditUserModalProps) {
                 <option value="1">Aktif</option>
                 <option value="3">Devre dışı</option>
               </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label htmlFor="edit-gov-role" className="label">
+                Yönetişim Rolü{' '}
+                <span className="font-normal text-kt-gray-500">
+                  (kullanıcıya özel görev paneli açar)
+                </span>
+              </label>
+              <select
+                id="edit-gov-role"
+                className="input"
+                value={form.governanceRole ?? ''}
+                onChange={(e) =>
+                  setField(
+                    'governanceRole',
+                    e.target.value === ''
+                      ? null
+                      : (e.target.value as 'analitik_danisman' | 'yz_arge')
+                  )
+                }
+              >
+                <option value="">Normal Kullanıcı (varsayılan)</option>
+                <option value="analitik_danisman">Analitik Danışman — Başvuru değerlendirme</option>
+                <option value="yz_arge">YZ / Ar-Ge Mühendisi — Stage + Production onayı</option>
+              </select>
+              <p className="text-[11px] text-kt-gray-500 mt-1">
+                Rol değişince kullanıcı bir sonraki girişte ilgili dashboard'a yönlendirilir.
+              </p>
             </div>
             <div>
               <label htmlFor="edit-department" className="label">Bölüm</label>

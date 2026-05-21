@@ -18,12 +18,24 @@ import type {
   AdminUserSearchFilters,
   AnalyticsResponse,
   ApiError,
+  ApprovalType,
+  AppNotification,
   AuthTokens,
   AuthUser,
+  Appointment,
   Booking,
+  GateKey,
+  GateStatus,
+  GovernanceAdmin,
+  GovernanceBundle,
+  GovernanceDashboard,
+  HumanApproval,
+  QualityGate,
+  RoomWithOccupancy,
   BookingMessage,
   CreateBookingPayload,
   JoinWaitlistPayload,
+  LicenseBudgetReport,
   LicenseReport,
   LicenseRequest,
   LicenseRequestStatus,
@@ -262,6 +274,7 @@ export const api = {
     password: string;
     passwordConfirm: string;
     fullName: string;
+    governanceRole?: 'analitik_danisman' | 'yz_arge';
   }) {
     return request<{
       accessToken: string;
@@ -281,6 +294,26 @@ export const api = {
     }>('/user/auth/login', {
       method: 'POST',
       body: { email, password },
+      kind: 'user',
+      auth: false,
+    });
+  },
+
+  /* ============ ŞİFRE SIFIRLAMA ============ */
+
+  async forgotPassword(email: string) {
+    return request<{ message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: { email },
+      kind: 'user',
+      auth: false,
+    });
+  },
+
+  async resetPassword(token: string, password: string, passwordConfirm: string) {
+    return request<{ message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: { token, password, passwordConfirm },
       kind: 'user',
       auth: false,
     });
@@ -357,6 +390,60 @@ export const api = {
     );
   },
 
+  /* ============ APPOINTMENTS — günlük randevular ============ */
+
+  async listUserAppointments(opts: {
+    from?: string;
+    to?: string;
+    includeCancelled?: boolean;
+  } = {}) {
+    const qs = new URLSearchParams();
+    if (opts.from) qs.set('from', opts.from);
+    if (opts.to) qs.set('to', opts.to);
+    if (opts.includeCancelled) qs.set('includeCancelled', 'true');
+    const query = qs.toString() ? `?${qs.toString()}` : '';
+    return request<{ appointments: Appointment[] }>(
+      `/user/appointments${query}`,
+      { kind: 'user' }
+    );
+  },
+
+  async listBookingAppointments(bookingId: string) {
+    return request<{ appointments: Appointment[] }>(
+      `/user/bookings/${encodeURIComponent(bookingId)}/appointments`,
+      { kind: 'user' }
+    );
+  },
+
+  async createAppointment(payload: {
+    bookingId: string;
+    startAt: string;
+    endAt: string;
+    title?: string;
+    notes?: string;
+  }) {
+    return request<{ appointment: Appointment }>('/user/appointments', {
+      method: 'POST',
+      body: payload,
+      kind: 'user',
+    });
+  },
+
+  async cancelAppointment(id: string) {
+    return request<{ cancelled: boolean }>(
+      `/user/appointments/${encodeURIComponent(id)}`,
+      { method: 'DELETE', kind: 'user' }
+    );
+  },
+
+  /** Kullanıcı admin'den proje aşamasının ilerletilmesini talep eder. */
+  async requestStageAdvance(bookingId: string, note?: string) {
+    return request<{ booking: Booking }>(
+      `/user/bookings/${encodeURIComponent(bookingId)}/request-advance`,
+      { method: 'POST', body: { note }, kind: 'user' }
+    );
+  },
+
   /* ============ WAITLIST ============ */
 
   async listUserWaitlist() {
@@ -386,7 +473,11 @@ export const api = {
   },
 
   async reviewBooking(id: string, payload: ReviewBookingPayload) {
-    return request<{ booking: Booking }>(`/admin/bookings/${id}/review`, {
+    return request<{
+      booking: Booking;
+      autoWaitlisted: boolean;
+      waitlistPosition?: number;
+    }>(`/admin/bookings/${id}/review`, {
       method: 'POST',
       body: payload,
       kind: 'admin',
@@ -405,12 +496,193 @@ export const api = {
     return request<LicenseReport>('/admin/licenses', { kind: 'admin' });
   },
 
+  async adminLicenseBudget() {
+    return request<LicenseBudgetReport>('/admin/licenses/budget', { kind: 'admin' });
+  },
+
   async myLicenseUsage() {
     return request<UserLicenseUsage>('/user/me/licenses', { kind: 'user' });
   },
 
   async adminListWaitlist() {
     return request<{ entries: WaitlistEntry[] }>('/admin/waitlist', { kind: 'admin' });
+  },
+
+  /** Admin: waitlist sırası değiştirme (öncelik verme). */
+  async adminMoveWaitlist(id: string, move: 'up' | 'down' | 'top') {
+    return request<{ entries: WaitlistEntry[] }>(
+      `/admin/waitlist/${encodeURIComponent(id)}/move`,
+      { method: 'POST', body: { move }, kind: 'admin' }
+    );
+  },
+
+  /* ============ ODALAR — admin doluluk + atama ============ */
+
+  async adminRoomsOccupancy() {
+    return request<{ rooms: RoomWithOccupancy[] }>('/admin/rooms/occupancy', {
+      kind: 'admin',
+    });
+  },
+
+  async adminReassignBooking(bookingId: string, roomId: string) {
+    return request<{ booking: Booking }>(
+      `/admin/bookings/${encodeURIComponent(bookingId)}/reassign`,
+      { method: 'POST', body: { roomId }, kind: 'admin' }
+    );
+  },
+
+  async adminReassignBookingUser(bookingId: string, userId: string) {
+    return request<{ booking: Booking }>(
+      `/admin/bookings/${encodeURIComponent(bookingId)}/reassign-user`,
+      { method: 'POST', body: { userId }, kind: 'admin' }
+    );
+  },
+
+  async adminDeleteBooking(bookingId: string) {
+    return request<{
+      deleted: boolean;
+      roomId: string;
+      userId: string;
+      wasApproved: boolean;
+    }>(`/admin/bookings/${encodeURIComponent(bookingId)}`, {
+      method: 'DELETE',
+      kind: 'admin',
+    });
+  },
+
+  async adminAdvanceBookingStage(bookingId: string) {
+    return request<{ booking: Booking }>(
+      `/admin/bookings/${encodeURIComponent(bookingId)}/advance-stage`,
+      { method: 'POST', kind: 'admin' }
+    );
+  },
+
+  async adminRegressBookingStage(bookingId: string) {
+    return request<{ booking: Booking }>(
+      `/admin/bookings/${encodeURIComponent(bookingId)}/regress-stage`,
+      { method: 'POST', kind: 'admin' }
+    );
+  },
+
+  async adminSetBookingReviewTrack(bookingId: string, track: 'standard' | 'swat') {
+    return request<{ booking: Booking }>(
+      `/admin/bookings/${encodeURIComponent(bookingId)}/review-track`,
+      { method: 'POST', body: { track }, kind: 'admin' }
+    );
+  },
+
+  async adminRejectStageAdvanceRequest(bookingId: string, note?: string) {
+    return request<{ booking: Booking }>(
+      `/admin/bookings/${encodeURIComponent(bookingId)}/advance-request`,
+      { method: 'DELETE', body: { note }, kind: 'admin' }
+    );
+  },
+
+  /* ============ YÖNETIŞIM — DANIŞMAN ============ */
+
+  async danismanInbox() {
+    return request<{
+      licenseRequests: LicenseRequestWithUser[];
+      bookings: Booking[];
+      counts: { licenseRequestsPending: number; bookingsPending: number };
+    }>('/governance/danisman/inbox', { kind: 'danisman' });
+  },
+
+  async danismanReviewBooking(bookingId: string, payload: ReviewBookingPayload) {
+    return request<{
+      booking: Booking;
+      autoWaitlisted: boolean;
+      waitlistPosition?: number;
+    }>(`/governance/danisman/bookings/${encodeURIComponent(bookingId)}/review`, {
+      method: 'POST',
+      body: payload,
+      kind: 'danisman',
+    });
+  },
+
+  async danismanReviewLicense(
+    licenseId: string,
+    payload: { action: 'approve' | 'reject' | 'request_feedback' | 'swat'; feedback?: string }
+  ) {
+    return request<{ request: LicenseRequest }>(
+      `/governance/danisman/license-requests/${encodeURIComponent(licenseId)}/review`,
+      { method: 'POST', body: payload, kind: 'danisman' }
+    );
+  },
+
+  /* ============ YÖNETIŞIM — AR-GE ============ */
+
+  async argeProjects() {
+    return request<{
+      projects: Booking[];
+      counts: {
+        total: number;
+        withAdvanceRequest: number;
+        inStage: number;
+        inProduction: number;
+      };
+    }>('/governance/arge/projects', { kind: 'arge' });
+  },
+
+  async argeAdvanceStage(bookingId: string) {
+    return request<{ booking: Booking }>(
+      `/governance/arge/bookings/${encodeURIComponent(bookingId)}/advance-stage`,
+      { method: 'POST', kind: 'arge' }
+    );
+  },
+
+  async argeRegressStage(bookingId: string) {
+    return request<{ booking: Booking }>(
+      `/governance/arge/bookings/${encodeURIComponent(bookingId)}/regress-stage`,
+      { method: 'POST', kind: 'arge' }
+    );
+  },
+
+  async argeRejectAdvanceRequest(bookingId: string) {
+    return request<{ booking: Booking }>(
+      `/governance/arge/bookings/${encodeURIComponent(bookingId)}/advance-request`,
+      { method: 'DELETE', kind: 'arge' }
+    );
+  },
+
+  async adminListAppointments(opts: {
+    from?: string;
+    to?: string;
+    includeCancelled?: boolean;
+  } = {}) {
+    const qs = new URLSearchParams();
+    if (opts.from) qs.set('from', opts.from);
+    if (opts.to) qs.set('to', opts.to);
+    if (opts.includeCancelled) qs.set('includeCancelled', 'true');
+    const query = qs.toString() ? `?${qs.toString()}` : '';
+    return request<{ appointments: Appointment[] }>(
+      `/admin/appointments${query}`,
+      { kind: 'admin' }
+    );
+  },
+
+  async adminCancelAppointment(id: string) {
+    return request<{ cancelled: boolean }>(
+      `/admin/appointments/${encodeURIComponent(id)}`,
+      { method: 'DELETE', kind: 'admin' }
+    );
+  },
+
+  /* ============ PAROLA — admin ============ */
+
+  async adminResetUserPassword(userId: string, password: string) {
+    return request<{ message: string }>(
+      `/admin/users/${encodeURIComponent(userId)}/reset-password`,
+      { method: 'POST', body: { password }, kind: 'admin' }
+    );
+  },
+
+  async adminChangePassword(currentPassword: string, newPassword: string) {
+    return request<{ message: string }>('/admin/auth/change-password', {
+      method: 'POST',
+      body: { currentPassword, newPassword },
+      kind: 'admin',
+    });
   },
 
   async toggleAdminShowcase(id: string, payload: { visible?: boolean; highlight?: boolean }) {
@@ -531,6 +803,29 @@ export const api = {
 
   async adminUnreadCount() {
     return request<{ unread: number }>('/admin/messages/unread', { kind: 'admin' });
+  },
+
+  /* ============ BİLDİRİM MERKEZİ ============ */
+
+  async listNotifications(kind: SubjectKind) {
+    return request<{ items: AppNotification[]; unread: number }>(
+      `/${kind}/notifications`,
+      { kind }
+    );
+  },
+
+  async markNotificationRead(kind: SubjectKind, id: string) {
+    return request<void>(`/${kind}/notifications/${encodeURIComponent(id)}/read`, {
+      method: 'POST',
+      kind,
+    });
+  },
+
+  async markAllNotificationsRead(kind: SubjectKind) {
+    return request<{ marked: number }>(`/${kind}/notifications/read-all`, {
+      method: 'POST',
+      kind,
+    });
   },
 
   async userListMessages(bookingId: string) {
@@ -696,19 +991,27 @@ export const api = {
     return request<{ items: LicenseRequest[] }>('/user/licenses/requests', { kind: 'user' });
   },
 
-  async createLicenseRequest(payload: {
-    licenseKey: string;
-    licenseName: string;
-    vendor?: string | null;
-    category?: string | null;
-    reason: string;
-    durationMonths: 1 | 3 | 6 | 12;
-  }) {
+  async createLicenseRequest(payload: LicenseRequestPayload) {
     return request<{ request: LicenseRequest }>('/user/licenses/requests', {
       method: 'POST',
       body: payload,
       kind: 'user',
     });
+  },
+
+  async updateLicenseRequest(requestId: string, payload: LicenseRequestPayload) {
+    return request<{ request: LicenseRequest }>(
+      `/user/licenses/requests/${encodeURIComponent(requestId)}`,
+      { method: 'PUT', body: payload, kind: 'user' }
+    );
+  },
+
+  /** Kullanıcının kendi başvuru/proje detayı — yönetişim demeti dahil. */
+  async userLicenseRequestDetail(requestId: string) {
+    return request<GovernanceBundle>(
+      `/user/licenses/requests/${encodeURIComponent(requestId)}`,
+      { kind: 'user' }
+    );
   },
 
   async adminListLicenseRequests(statusFilter?: LicenseRequestStatus) {
@@ -721,11 +1024,107 @@ export const api = {
 
   async adminReviewLicenseRequest(
     requestId: string,
-    payload: { action: 'approve' | 'reject' | 'request_feedback'; adminFeedback?: string | null }
+    payload: {
+      action: 'approve' | 'reject' | 'request_feedback' | 'swat';
+      adminFeedback?: string | null;
+    }
   ) {
     return request<{ request: LicenseRequestWithUser }>(
       `/admin/licenses/requests/${encodeURIComponent(requestId)}/review`,
       { method: 'POST', body: payload, kind: 'admin' }
     );
   },
+
+  /* ============ YÖNETİŞİM ============ */
+
+  async adminLicenseRequestDetail(requestId: string) {
+    return request<GovernanceBundle>(
+      `/admin/licenses/requests/${encodeURIComponent(requestId)}`,
+      { kind: 'admin' }
+    );
+  },
+
+  async adminGovernanceDashboard() {
+    return request<GovernanceDashboard>('/admin/licenses/governance/dashboard', {
+      kind: 'admin',
+    });
+  },
+
+  async adminGovernanceAdmins() {
+    return request<{ admins: GovernanceAdmin[] }>('/admin/governance/admins', {
+      kind: 'admin',
+    });
+  },
+
+  async adminAdvanceLifecycle(requestId: string, note?: string | null) {
+    return request<{ request: LicenseRequestWithUser; transition: { fromStage: string; toStage: string } }>(
+      `/admin/licenses/requests/${encodeURIComponent(requestId)}/advance`,
+      { method: 'POST', body: { note: note ?? null }, kind: 'admin' }
+    );
+  },
+
+  async adminAssignEngineer(requestId: string, engineerId: string) {
+    return request<{ request: LicenseRequestWithUser }>(
+      `/admin/licenses/requests/${encodeURIComponent(requestId)}/assign-engineer`,
+      { method: 'POST', body: { engineerId }, kind: 'admin' }
+    );
+  },
+
+  async adminUpgradeProjectType(requestId: string) {
+    return request<{ request: LicenseRequestWithUser }>(
+      `/admin/licenses/requests/${encodeURIComponent(requestId)}/upgrade-type`,
+      { method: 'POST', kind: 'admin' }
+    );
+  },
+
+  async adminSetGateResult(
+    requestId: string,
+    payload: {
+      gateKey: GateKey;
+      status: GateStatus;
+      score?: number | null;
+      detail?: string | null;
+    }
+  ) {
+    return request<{ gate: QualityGate }>(
+      `/admin/licenses/requests/${encodeURIComponent(requestId)}/gates`,
+      { method: 'PUT', body: payload, kind: 'admin' }
+    );
+  },
+
+  async adminDecideApproval(
+    requestId: string,
+    payload: {
+      approvalType: ApprovalType;
+      decision: 'approved' | 'rejected';
+      releaseNote?: string | null;
+      riskAssessment?: string | null;
+    }
+  ) {
+    return request<{ request: LicenseRequestWithUser; approval: HumanApproval }>(
+      `/admin/licenses/requests/${encodeURIComponent(requestId)}/approval`,
+      { method: 'POST', body: payload, kind: 'admin' }
+    );
+  },
 };
+
+/** createLicenseRequest / updateLicenseRequest ortak gövdesi. */
+export interface LicenseRequestPayload {
+  requestTitle: string;
+  reason: string;
+  expectedBenefit: string;
+  successCriteria: string;
+  items: Array<{
+    licenseKey: string;
+    licenseName: string;
+    vendor?: string | null;
+    category?: string | null;
+  }>;
+  projectType: 'poc' | 'integration';
+  estimatedDurationDays?: number | null;
+  dataToUse: string;
+  technicalStack?: string | null;
+  durationMonths: 1 | 3 | 6 | 12;
+  usesExternalApi: boolean;
+  involvesRealData: boolean;
+}

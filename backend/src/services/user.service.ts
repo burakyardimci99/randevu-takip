@@ -10,12 +10,18 @@
 import { getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import type { AdminUserUpdateInput, ProfileUpdateInput } from '../validators/schemas';
+import { hashPassword } from './auth.service';
+import { revokeAllForSubject } from './token.service';
+
+export type UserGovernanceRole = 'analitik_danisman' | 'yz_arge';
 
 export interface UserProfileDto {
   id: string;
   email: string;
   fullName: string;
   role: 'user';
+  /** İsteğe bağlı yönetişim rolü — admin atar. NULL = sıradan kullanıcı. */
+  governanceRole: UserGovernanceRole | null;
   department: string | null;
   title: string | null;
   manager: string | null;
@@ -40,6 +46,7 @@ interface UserRow {
   email: string;
   full_name: string;
   role: 'user';
+  governance_role: UserGovernanceRole | null;
   department: string | null;
   title: string | null;
   manager: string | null;
@@ -58,6 +65,7 @@ function toDto(r: UserRow): UserProfileDto {
     email: r.email,
     fullName: r.full_name,
     role: r.role,
+    governanceRole: r.governance_role,
     department: r.department,
     title: r.title,
     manager: r.manager,
@@ -72,7 +80,7 @@ function toDto(r: UserRow): UserProfileDto {
 }
 
 const PROFILE_COLUMNS =
-  'id, email, full_name, role, department, title, manager, phone, bio, project_idea, profile_photo, status, created_at, updated_at';
+  'id, email, full_name, role, governance_role, department, title, manager, phone, bio, project_idea, profile_photo, status, created_at, updated_at';
 
 export function getUserProfile(userId: string): UserProfileDto {
   const row = getDb()
@@ -254,6 +262,7 @@ export function adminUpdateUser(id: string, input: AdminUserUpdateInput): UserPr
     ['bio', 'bio'],
     ['projectIdea', 'project_idea'],
     ['status', 'status'],
+    ['governanceRole', 'governance_role'],
   ];
 
   for (const [k, col] of fieldMap) {
@@ -315,4 +324,30 @@ export function adminRestoreUser(id: string): UserProfileDto {
     `UPDATE users SET status = 1, failed_login_count = 0, locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
   ).run(id);
   return getUserByIdAdmin(id);
+}
+
+/**
+ * Admin: bir kullanıcının parolasını sıfırlar.
+ * Hesabın kilidini açar (failed_login sıfırlanır) ve tüm oturumları
+ * (refresh token) iptal eder — kullanıcı yeni parolayla giriş yapmalı.
+ */
+export async function adminResetUserPassword(
+  id: string,
+  newPassword: string
+): Promise<void> {
+  const db = getDb();
+  const user = db
+    .prepare(`SELECT id FROM users WHERE id = ? AND status != 3`)
+    .get(id) as { id: string } | undefined;
+  if (!user) throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
+
+  const passwordHash = await hashPassword(newPassword);
+  db.prepare(
+    `UPDATE users SET
+       password_hash = ?, failed_login_count = 0, locked_until = NULL,
+       updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`
+  ).run(passwordHash, id);
+
+  revokeAllForSubject('user', id);
 }

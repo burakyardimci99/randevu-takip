@@ -1,15 +1,22 @@
 /**
- * Lisans TALEP iş akışı.
+ * Lisans / proje BAŞVURU iş akışı.
  *
- * Bu servis booking iş akışıyla aynı paterni izler:
- *   pending → approved | rejected | feedback_requested
+ * Başvuru onaylandığında bir "proje"ye dönüşür ve 4 aşamalı yönetişim
+ * yaşam döngüsüne girer (governance.service):
+ *   application → development → stage → production → live
  *
- * Kullanıcı talep oluşturur (önerilen katalogdan veya custom),
- * admin review eder (onay / red / revize iste).
+ * Başvuru değerlendirme sonuçları (kılavuz §2.1):
+ *   approve | reject | request_feedback | swat
  *
- * Bu servis read-only `license.service.ts`'ten AYRI — o servis booking
- * `technologies` alanından kullanım analizi türetir, bu ise gerçek talep
- * akışı (kuyruğa giren, admin tarafından review edilen kayıtlar).
+ * Form modeli (PNG "Başvuru Formu" + kılavuz alanları):
+ *   - request_title / reason / expected_benefit / success_criteria
+ *   - items (junction)   : talep edilen AI araç/lisans listesi (1+)
+ *   - project_type       : 'poc' | 'integration' → governance_level
+ *   - estimated_duration_days / data_to_use / technical_stack
+ *   - duration_months    : lisans kullanım süresi
+ *   - uses_external_api  : dış servis/API erişimi var mı
+ *   - involves_real_data : gerçek banka verisi/üretim/AD-LDAP beyanı
+ *                          (true ise OTOMATİK RED — kılavuz §5)
  *
  * Güvenlik (app_security.md):
  * - SQL parameterized (§3)
@@ -20,6 +27,23 @@ import { nanoid } from 'nanoid';
 import { getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { LICENSE_CATALOG, type LicenseInfo } from './license.service';
+import {
+  enqueueEmail,
+  licenseRequestedAdminEmail,
+  licenseReviewedEmail,
+} from './notification.service';
+import {
+  pushNotification,
+  pushNotificationBulk,
+} from './notification-center.service';
+import {
+  computeSla,
+  governanceLevelForProjectType,
+  onApplicationApproved,
+  recordStageEvent,
+  type SlaInfo,
+} from './governance.service';
+import type { GovernanceLevel, LifecycleStage } from './governance-data';
 
 export type LicenseRequestStatus =
   | 'pending'
@@ -27,19 +51,56 @@ export type LicenseRequestStatus =
   | 'rejected'
   | 'feedback_requested';
 
-export interface LicenseRequest {
-  id: string;
-  userId: string;
+export type ProjectType = 'poc' | 'integration';
+export type ReviewTrack = 'standard' | 'swat';
+
+/** involves_real_data=true → bu mesajla otomatik reddedilir (kılavuz §5). */
+const AUTO_REJECT_FEEDBACK =
+  'Otomatik red: Gerçek banka verisi, üretim sistemi veya AD/LDAP erişimi ' +
+  'içeren başvurular AI Lab\'da yürütülemez (Vibe Coding Yönetişim Kılavuzu §5). ' +
+  'Yalnızca sentetik veya kamuya açık veri ile yeniden başvurabilirsin.';
+
+export interface LicenseRequestItem {
   licenseKey: string;
   licenseName: string;
   vendor: string | null;
   category: string | null;
-  reason: string;
+}
+
+export interface LicenseRequest {
+  id: string;
+  userId: string;
+  // PNG "Başvuru Formu" alanları
+  requestTitle: string | null;
+  reason: string; // Kullanım amacı
+  expectedBenefit: string | null;
+  successCriteria: string | null;
+  projectType: ProjectType | null;
+  estimatedDurationDays: number | null;
+  dataToUse: string | null;
+  technicalStack: string | null;
+  items: LicenseRequestItem[];
   durationMonths: 1 | 3 | 6 | 12;
+  // Geriye dönük: tek-lisans alanları (eski kayıtlar + ilk item ile sync)
+  licenseKey: string;
+  licenseName: string;
+  vendor: string | null;
+  category: string | null;
+  // Review akışı
   status: LicenseRequestStatus;
+  reviewTrack: ReviewTrack;
   adminFeedback: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  // Yönetişim yaşam döngüsü
+  lifecycleStage: LifecycleStage;
+  governanceLevel: GovernanceLevel;
+  usesExternalApi: boolean | null;
+  involvesRealData: boolean | null;
+  stageEnteredAt: string | null;
+  assignedEngineerId: string | null;
+  /** O an beklenen SLA kontrol noktası (yoksa null). */
+  sla: SlaInfo | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,6 +110,7 @@ export interface LicenseRequestWithUser extends LicenseRequest {
   userEmail: string;
   userDepartment: string | null;
   reviewerName: string | null;
+  assignedEngineerName: string | null;
 }
 
 interface DbRow {
@@ -60,10 +122,24 @@ interface DbRow {
   category: string | null;
   reason: string;
   duration_months: 1 | 3 | 6 | 12;
+  request_title: string | null;
+  expected_benefit: string | null;
+  success_criteria: string | null;
+  project_type: ProjectType | null;
+  estimated_duration_days: number | null;
+  data_to_use: string | null;
+  technical_stack: string | null;
   status: LicenseRequestStatus;
+  review_track: ReviewTrack;
   admin_feedback: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  lifecycle_stage: LifecycleStage;
+  governance_level: GovernanceLevel;
+  uses_external_api: number | null;
+  involves_real_data: number | null;
+  stage_entered_at: string | null;
+  assigned_engineer_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -73,36 +149,116 @@ interface DbRowWithUser extends DbRow {
   user_email: string;
   user_department: string | null;
   reviewer_name: string | null;
+  assigned_engineer_name: string | null;
 }
 
-function rowToLicenseRequest(row: DbRow): LicenseRequest {
+interface ItemRow {
+  request_id: string;
+  license_key: string;
+  license_name: string;
+  vendor: string | null;
+  category: string | null;
+  item_order: number;
+}
+
+function loadItemsForRequests(requestIds: string[]): Map<string, LicenseRequestItem[]> {
+  const map = new Map<string, LicenseRequestItem[]>();
+  if (requestIds.length === 0) return map;
+  const db = getDb();
+  const placeholders = requestIds.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT request_id, license_key, license_name, vendor, category, item_order
+       FROM license_request_items
+       WHERE request_id IN (${placeholders})
+       ORDER BY request_id, item_order ASC`
+    )
+    .all(...requestIds) as ItemRow[];
+  for (const r of rows) {
+    const list = map.get(r.request_id) ?? [];
+    list.push({
+      licenseKey: r.license_key,
+      licenseName: r.license_name,
+      vendor: r.vendor,
+      category: r.category,
+    });
+    map.set(r.request_id, list);
+  }
+  return map;
+}
+
+function intToBool(v: number | null): boolean | null {
+  return v == null ? null : v === 1;
+}
+
+function rowToLicenseRequest(row: DbRow, items: LicenseRequestItem[]): LicenseRequest {
   return {
     id: row.id,
     userId: row.user_id,
+    requestTitle: row.request_title,
+    reason: row.reason,
+    expectedBenefit: row.expected_benefit,
+    successCriteria: row.success_criteria,
+    projectType: row.project_type,
+    estimatedDurationDays: row.estimated_duration_days,
+    dataToUse: row.data_to_use,
+    technicalStack: row.technical_stack,
+    items,
+    durationMonths: row.duration_months,
     licenseKey: row.license_key,
     licenseName: row.license_name,
     vendor: row.vendor,
     category: row.category,
-    reason: row.reason,
-    durationMonths: row.duration_months,
     status: row.status,
+    reviewTrack: row.review_track,
     adminFeedback: row.admin_feedback,
     reviewedBy: row.reviewed_by,
     reviewedAt: row.reviewed_at,
+    lifecycleStage: row.lifecycle_stage,
+    governanceLevel: row.governance_level,
+    usesExternalApi: intToBool(row.uses_external_api),
+    involvesRealData: intToBool(row.involves_real_data),
+    stageEnteredAt: row.stage_entered_at,
+    assignedEngineerId: row.assigned_engineer_id,
+    sla: computeSla({
+      id: row.id,
+      lifecycleStage: row.lifecycle_stage,
+      status: row.status,
+      reviewTrack: row.review_track,
+      createdAt: row.created_at,
+    }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-function rowToLicenseRequestWithUser(row: DbRowWithUser): LicenseRequestWithUser {
+function rowToLicenseRequestWithUser(
+  row: DbRowWithUser,
+  items: LicenseRequestItem[]
+): LicenseRequestWithUser {
   return {
-    ...rowToLicenseRequest(row),
+    ...rowToLicenseRequest(row, items),
     userFullName: row.user_full_name,
     userEmail: row.user_email,
     userDepartment: row.user_department,
     reviewerName: row.reviewer_name,
+    assignedEngineerName: row.assigned_engineer_name,
   };
 }
+
+/** Admin tarafı zenginleştirilmiş SELECT (user + reviewer + engineer join). */
+const SELECT_ADMIN_REQUEST = `
+  SELECT lr.*,
+         u.full_name AS user_full_name,
+         u.email AS user_email,
+         u.department AS user_department,
+         a.full_name AS reviewer_name,
+         eng.full_name AS assigned_engineer_name
+  FROM license_requests lr
+  INNER JOIN users u ON u.id = lr.user_id
+  LEFT JOIN admins a ON a.id = lr.reviewed_by
+  LEFT JOIN admins eng ON eng.id = lr.assigned_engineer_id
+`;
 
 /* ============================================================
  * KATALOG ENDPOINT — popüler araçlar listesi (frontend dropdown)
@@ -161,20 +317,155 @@ export function getLicenseCatalog(): CatalogEntry[] {
 }
 
 /* ============================================================
+ * BÜTÇE ANALİZİ — onaylı/bekleyen lisans taleplerinin maliyeti
+ * ============================================================ */
+
+export interface LicenseBudgetReport {
+  generatedAt: string;
+  approvedMonthlyUsd: number;
+  approvedAnnualUsd: number;
+  approvedCommitmentUsd: number;
+  approvedRequestCount: number;
+  pendingMonthlyUsd: number;
+  pendingRequestCount: number;
+  byProjectType: Array<{
+    projectType: 'poc' | 'integration' | 'unspecified';
+    requestCount: number;
+    monthlyUsd: number;
+  }>;
+  byTool: Array<{
+    name: string;
+    tier: string;
+    unitMonthlyUsd: number;
+    approvedCount: number;
+    monthlyUsd: number;
+  }>;
+  unpricedItemCount: number;
+}
+
+/**
+ * Lisans taleplerinden bütçe raporu üretir.
+ * Maliyet katalog (LICENSE_CATALOG) aylık fiyatlarından hesaplanır;
+ * custom / katalogda olmayan araçlar fiyatsız sayılır (unpricedItemCount).
+ */
+export function getLicenseBudgetReport(): LicenseBudgetReport {
+  const all = listAdminLicenseRequests();
+
+  let approvedMonthlyUsd = 0;
+  let approvedCommitmentUsd = 0;
+  let approvedRequestCount = 0;
+  let pendingMonthlyUsd = 0;
+  let pendingRequestCount = 0;
+  let unpricedItemCount = 0;
+
+  const projectTypeAgg = new Map<
+    'poc' | 'integration' | 'unspecified',
+    { requestCount: number; monthlyUsd: number }
+  >();
+  const toolAgg = new Map<
+    string,
+    { name: string; tier: string; unitMonthlyUsd: number; approvedCount: number; monthlyUsd: number }
+  >();
+
+  for (const r of all) {
+    let requestMonthly = 0;
+    for (const it of r.items) {
+      const info = LICENSE_CATALOG[it.licenseKey];
+      if (info && info.monthlyUsd > 0) {
+        requestMonthly += info.monthlyUsd;
+        if (r.status === 'approved') {
+          const existing = toolAgg.get(info.name) ?? {
+            name: info.name,
+            tier: info.tier,
+            unitMonthlyUsd: info.monthlyUsd,
+            approvedCount: 0,
+            monthlyUsd: 0,
+          };
+          existing.approvedCount += 1;
+          existing.monthlyUsd += info.monthlyUsd;
+          toolAgg.set(info.name, existing);
+        }
+      } else {
+        unpricedItemCount += 1;
+      }
+    }
+
+    if (r.status === 'approved') {
+      approvedMonthlyUsd += requestMonthly;
+      approvedCommitmentUsd += requestMonthly * r.durationMonths;
+      approvedRequestCount += 1;
+
+      const pt = r.projectType ?? 'unspecified';
+      const agg = projectTypeAgg.get(pt) ?? { requestCount: 0, monthlyUsd: 0 };
+      agg.requestCount += 1;
+      agg.monthlyUsd += requestMonthly;
+      projectTypeAgg.set(pt, agg);
+    } else if (r.status === 'pending' || r.status === 'feedback_requested') {
+      pendingMonthlyUsd += requestMonthly;
+      pendingRequestCount += 1;
+    }
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    approvedMonthlyUsd,
+    approvedAnnualUsd: approvedMonthlyUsd * 12,
+    approvedCommitmentUsd,
+    approvedRequestCount,
+    pendingMonthlyUsd,
+    pendingRequestCount,
+    byProjectType: (['poc', 'integration', 'unspecified'] as const)
+      .map((pt) => ({
+        projectType: pt,
+        requestCount: projectTypeAgg.get(pt)?.requestCount ?? 0,
+        monthlyUsd: projectTypeAgg.get(pt)?.monthlyUsd ?? 0,
+      }))
+      .filter((b) => b.requestCount > 0),
+    byTool: [...toolAgg.values()].sort((a, b) => b.monthlyUsd - a.monthlyUsd),
+    unpricedItemCount,
+  };
+}
+
+/* ============================================================
  * USER — talep oluştur + kendi taleplerini listele
  * ============================================================ */
 
 export interface CreateLicenseRequestInput {
-  /** Katalog key'i (örn. 'cursor') veya 'custom'. */
-  licenseKey: string;
-  /** Görüntü adı — katalogdan veya custom için kullanıcı yazısı. */
-  licenseName: string;
-  /** Custom için kullanıcı doldurabilir; katalog için frontend gönderebilir. */
-  vendor?: string | null;
-  category?: string | null;
-  /** Talep gerekçesi (zorunlu). */
+  requestTitle: string;
   reason: string;
+  expectedBenefit: string;
+  successCriteria: string;
+  items: Array<{
+    licenseKey: string;
+    licenseName: string;
+    vendor?: string | null;
+    category?: string | null;
+  }>;
+  projectType: ProjectType;
+  estimatedDurationDays?: number | null;
+  dataToUse: string;
+  technicalStack?: string | null;
   durationMonths: 1 | 3 | 6 | 12;
+  /** Dış servis / API erişimi var mı (yönetişim kapsamı). */
+  usesExternalApi: boolean;
+  /** Gerçek banka verisi / üretim / AD-LDAP beyanı — true ise otomatik red. */
+  involvesRealData: boolean;
+}
+
+/**
+ * Item için defense-in-depth: katalogdan vendor/category fill et.
+ */
+function normalizeItem(
+  raw: CreateLicenseRequestInput['items'][number]
+): LicenseRequestItem {
+  const key = raw.licenseKey.trim().toLowerCase();
+  const fromCatalog = LICENSE_CATALOG[key];
+  return {
+    licenseKey: key,
+    licenseName: fromCatalog?.name ?? raw.licenseName.trim(),
+    vendor: fromCatalog?.vendor ?? raw.vendor?.trim() ?? null,
+    category: fromCatalog?.category ?? raw.category?.trim() ?? null,
+  };
 }
 
 export function createLicenseRequest(
@@ -182,51 +473,225 @@ export function createLicenseRequest(
   input: CreateLicenseRequestInput
 ): LicenseRequest {
   const db = getDb();
-
-  // Custom değilse katalogdan vendor/category fill et (frontend zaten yollar
-  // ama backend defense-in-depth: katalog key'i geçerli ise oradan al).
-  const fromCatalog = LICENSE_CATALOG[input.licenseKey.trim().toLowerCase()];
-  const vendor = fromCatalog?.vendor ?? input.vendor?.trim() ?? null;
-  const category = fromCatalog?.category ?? input.category?.trim() ?? null;
-  const licenseName = fromCatalog?.name ?? input.licenseName.trim();
-
   const id = nanoid();
-  db.prepare(
-    `INSERT INTO license_requests
-       (id, user_id, license_key, license_name, vendor, category,
-        reason, duration_months, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
-  ).run(
-    id,
-    userId,
-    input.licenseKey.trim().toLowerCase(),
-    licenseName,
-    vendor,
-    category,
-    input.reason.trim(),
-    input.durationMonths
-  );
 
-  const row = db
+  const items = input.items.map(normalizeItem);
+  const primary = items[0]!; // schema min(1) garantili
+
+  const governanceLevel = governanceLevelForProjectType(input.projectType);
+  // Kılavuz §5: gerçek veri beyanı → otomatik red.
+  const autoRejected = input.involvesRealData === true;
+  const status: LicenseRequestStatus = autoRejected ? 'rejected' : 'pending';
+  const adminFeedback = autoRejected ? AUTO_REJECT_FEEDBACK : null;
+  const reviewedAt = autoRejected ? new Date().toISOString() : null;
+
+  const txn = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO license_requests
+         (id, user_id, license_key, license_name, vendor, category,
+          reason, duration_months,
+          request_title, expected_benefit, success_criteria,
+          project_type, estimated_duration_days, data_to_use, technical_stack,
+          uses_external_api, involves_real_data, governance_level,
+          status, admin_feedback, reviewed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      userId,
+      primary.licenseKey,
+      primary.licenseName,
+      primary.vendor,
+      primary.category,
+      input.reason.trim(),
+      input.durationMonths,
+      input.requestTitle.trim(),
+      input.expectedBenefit.trim(),
+      input.successCriteria.trim(),
+      input.projectType,
+      input.estimatedDurationDays ?? null,
+      input.dataToUse.trim(),
+      input.technicalStack?.trim() || null,
+      input.usesExternalApi ? 1 : 0,
+      input.involvesRealData ? 1 : 0,
+      governanceLevel,
+      status,
+      adminFeedback,
+      reviewedAt
+    );
+
+    const insertItem = db.prepare(
+      `INSERT INTO license_request_items
+         (id, request_id, license_key, license_name, vendor, category, item_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    items.forEach((it, idx) => {
+      insertItem.run(nanoid(), id, it.licenseKey, it.licenseName, it.vendor, it.category, idx);
+    });
+  });
+
+  txn();
+
+  if (autoRejected) {
+    recordStageEvent({
+      requestId: id,
+      fromStage: 'application',
+      toStage: 'application',
+      actorType: 'system',
+      note: 'Otomatik red — gerçek veri / üretim erişimi beyanı (Kılavuz §5).',
+    });
+  }
+
+  const row = db.prepare('SELECT * FROM license_requests WHERE id = ?').get(id) as DbRow;
+  const itemMap = loadItemsForRequests([id]);
+  return rowToLicenseRequest(row, itemMap.get(id) ?? []);
+}
+
+/**
+ * Kullanıcı kendi başvurusunu günceller (IDOR korumalı).
+ *
+ * Sadece 'pending' veya 'feedback_requested' durumdaki başvurular düzenlenebilir.
+ * 'feedback_requested' güncellenince statü 'pending'e döner.
+ * Gerçek veri beyanı işaretlenirse güncelleme de otomatik reddedilir.
+ */
+export function updateLicenseRequest(
+  userId: string,
+  requestId: string,
+  input: CreateLicenseRequestInput
+): LicenseRequest {
+  const db = getDb();
+
+  const existing = db
     .prepare('SELECT * FROM license_requests WHERE id = ?')
-    .get(id) as DbRow;
-  return rowToLicenseRequest(row);
+    .get(requestId) as DbRow | undefined;
+
+  if (!existing || existing.user_id !== userId) {
+    throw new HttpError(404, 'Talep bulunamadı.', 'LICENSE_REQUEST_NOT_FOUND');
+  }
+  if (existing.status === 'approved' || existing.status === 'rejected') {
+    throw new HttpError(
+      400,
+      'Sonuçlanmış bir başvuru düzenlenemez.',
+      'LICENSE_REQUEST_FINALIZED'
+    );
+  }
+
+  const items = input.items.map(normalizeItem);
+  const primary = items[0]!;
+  const governanceLevel = governanceLevelForProjectType(input.projectType);
+  const autoRejected = input.involvesRealData === true;
+  const status: LicenseRequestStatus = autoRejected ? 'rejected' : 'pending';
+  const adminFeedback = autoRejected ? AUTO_REJECT_FEEDBACK : existing.admin_feedback;
+  const reviewedAt = autoRejected ? new Date().toISOString() : existing.reviewed_at;
+
+  const txn = db.transaction(() => {
+    db.prepare(
+      `UPDATE license_requests SET
+         license_key = ?, license_name = ?, vendor = ?, category = ?,
+         reason = ?, duration_months = ?,
+         request_title = ?, expected_benefit = ?, success_criteria = ?,
+         project_type = ?, estimated_duration_days = ?, data_to_use = ?,
+         technical_stack = ?,
+         uses_external_api = ?, involves_real_data = ?, governance_level = ?,
+         status = ?, admin_feedback = ?, reviewed_at = ?,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).run(
+      primary.licenseKey,
+      primary.licenseName,
+      primary.vendor,
+      primary.category,
+      input.reason.trim(),
+      input.durationMonths,
+      input.requestTitle.trim(),
+      input.expectedBenefit.trim(),
+      input.successCriteria.trim(),
+      input.projectType,
+      input.estimatedDurationDays ?? null,
+      input.dataToUse.trim(),
+      input.technicalStack?.trim() || null,
+      input.usesExternalApi ? 1 : 0,
+      input.involvesRealData ? 1 : 0,
+      governanceLevel,
+      status,
+      adminFeedback,
+      reviewedAt,
+      requestId
+    );
+
+    db.prepare('DELETE FROM license_request_items WHERE request_id = ?').run(requestId);
+    const insertItem = db.prepare(
+      `INSERT INTO license_request_items
+         (id, request_id, license_key, license_name, vendor, category, item_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    items.forEach((it, idx) => {
+      insertItem.run(nanoid(), requestId, it.licenseKey, it.licenseName, it.vendor, it.category, idx);
+    });
+  });
+
+  txn();
+
+  if (autoRejected) {
+    recordStageEvent({
+      requestId,
+      fromStage: 'application',
+      toStage: 'application',
+      actorType: 'system',
+      note: 'Otomatik red — gerçek veri / üretim erişimi beyanı (Kılavuz §5).',
+    });
+  }
+
+  const row = db.prepare('SELECT * FROM license_requests WHERE id = ?').get(requestId) as DbRow;
+  const itemMap = loadItemsForRequests([requestId]);
+  return rowToLicenseRequest(row, itemMap.get(requestId) ?? []);
+}
+
+/**
+ * Yeni başvuruda aktif admin'lere e-posta + in-app bildirim.
+ */
+export async function notifyAdminsLicenseRequested(
+  request: LicenseRequest
+): Promise<void> {
+  const db = getDb();
+  const admins = db
+    .prepare("SELECT id, email FROM admins WHERE status = 1")
+    .all() as Array<{ id: string; email: string }>;
+  if (admins.length === 0) return;
+
+  const submitter = db
+    .prepare('SELECT full_name FROM users WHERE id = ?')
+    .get(request.userId) as { full_name: string } | undefined;
+  const submitterName = submitter?.full_name ?? 'Bir kullanıcı';
+
+  const tools = request.items.map((i) => i.licenseName).join(', ') || request.licenseName;
+  const title = request.requestTitle ?? request.licenseName;
+  for (const a of admins) {
+    await enqueueEmail(
+      licenseRequestedAdminEmail({ to: a.email, requestTitle: title, tools, submitterName })
+    );
+  }
+
+  pushNotificationBulk(admins.map((a) => a.id), 'admin', {
+    category: 'license',
+    title: 'Yeni başvuru',
+    body: `${submitterName} — "${title}" (${tools})`,
+    link: '/admin/licenses',
+  });
 }
 
 export function listUserLicenseRequests(userId: string): LicenseRequest[] {
   const db = getDb();
   const rows = db
     .prepare(
-      `SELECT * FROM license_requests
-       WHERE user_id = ?
-       ORDER BY created_at DESC`
+      `SELECT * FROM license_requests WHERE user_id = ? ORDER BY created_at DESC`
     )
     .all(userId) as DbRow[];
-  return rows.map(rowToLicenseRequest);
+  const itemMap = loadItemsForRequests(rows.map((r) => r.id));
+  return rows.map((r) => rowToLicenseRequest(r, itemMap.get(r.id) ?? []));
 }
 
 /* ============================================================
- * ADMIN — tüm talepler + review
+ * ADMIN — tüm başvurular + review
  * ============================================================ */
 
 export function listAdminLicenseRequests(
@@ -242,14 +707,7 @@ export function listAdminLicenseRequests(
 
   const rows = db
     .prepare(
-      `SELECT lr.*,
-              u.full_name AS user_full_name,
-              u.email AS user_email,
-              u.department AS user_department,
-              a.full_name AS reviewer_name
-       FROM license_requests lr
-       INNER JOIN users u ON u.id = lr.user_id
-       LEFT JOIN admins a ON a.id = lr.reviewed_by
+      `${SELECT_ADMIN_REQUEST}
        ${where}
        ORDER BY
          CASE lr.status
@@ -260,14 +718,41 @@ export function listAdminLicenseRequests(
          lr.created_at DESC`
     )
     .all(...params) as DbRowWithUser[];
-  return rows.map(rowToLicenseRequestWithUser);
+  const itemMap = loadItemsForRequests(rows.map((r) => r.id));
+  return rows.map((r) => rowToLicenseRequestWithUser(r, itemMap.get(r.id) ?? []));
 }
 
-export type ReviewAction = 'approve' | 'reject' | 'request_feedback';
+/** Tek bir başvuruyu (admin görünümü) getirir. */
+export function getAdminLicenseRequestById(
+  requestId: string
+): LicenseRequestWithUser | undefined {
+  const db = getDb();
+  const row = db
+    .prepare(`${SELECT_ADMIN_REQUEST} WHERE lr.id = ?`)
+    .get(requestId) as DbRowWithUser | undefined;
+  if (!row) return undefined;
+  const itemMap = loadItemsForRequests([requestId]);
+  return rowToLicenseRequestWithUser(row, itemMap.get(requestId) ?? []);
+}
+
+/** Kullanıcının tek başvurusu (IDOR: sahibi olmalı). */
+export function getUserLicenseRequestById(
+  userId: string,
+  requestId: string
+): LicenseRequest | undefined {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT * FROM license_requests WHERE id = ? AND user_id = ?')
+    .get(requestId, userId) as DbRow | undefined;
+  if (!row) return undefined;
+  const itemMap = loadItemsForRequests([requestId]);
+  return rowToLicenseRequest(row, itemMap.get(requestId) ?? []);
+}
+
+export type ReviewAction = 'approve' | 'reject' | 'request_feedback' | 'swat';
 
 export interface ReviewLicenseRequestInput {
   action: ReviewAction;
-  /** Opsiyonel ama feedback_requested ve rejected için önerilir. */
   adminFeedback?: string | null;
 }
 
@@ -285,17 +770,46 @@ export function reviewLicenseRequest(
   if (!existing) {
     throw new HttpError(404, 'Talep bulunamadı.', 'LICENSE_REQUEST_NOT_FOUND');
   }
-
-  // Sadece 'pending' veya 'feedback_requested' durumdaki talepler review edilebilir.
-  // Onaylanan/Reddedilen kayıtlar dondurulur.
   if (existing.status === 'approved' || existing.status === 'rejected') {
     throw new HttpError(
       400,
-      'Bu talep zaten sonuçlandırılmış.',
+      'Bu başvuru zaten sonuçlandırılmış.',
       'LICENSE_REQUEST_FINALIZED'
     );
   }
 
+  /* --- SWAT: multidisipliner inceleme kuyruğuna yönlendir --- */
+  if (input.action === 'swat') {
+    db.prepare(
+      `UPDATE license_requests SET
+         review_track = 'swat',
+         admin_feedback = ?,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).run(input.adminFeedback?.trim() || existing.admin_feedback, requestId);
+
+    recordStageEvent({
+      requestId,
+      fromStage: 'application',
+      toStage: 'application',
+      actorId: reviewerId,
+      actorType: 'admin',
+      note: 'SWAT multidisipliner incelemeye yönlendirildi (SLA ≤ 5 iş günü).',
+    });
+
+    const swatResult = getAdminLicenseRequestById(requestId)!;
+    pushNotification({
+      recipientId: swatResult.userId,
+      recipientType: 'user',
+      category: 'license',
+      title: 'Başvurun SWAT incelemesine alındı',
+      body: `"${swatResult.requestTitle ?? swatResult.licenseName}" — multidisipliner uzman ekip değerlendirecek.`,
+      link: '/licenses',
+    });
+    return swatResult;
+  }
+
+  /* --- approve / reject / request_feedback --- */
   const nextStatus: LicenseRequestStatus =
     input.action === 'approve'
       ? 'approved'
@@ -311,20 +825,48 @@ export function reviewLicenseRequest(
        reviewed_at = CURRENT_TIMESTAMP,
        updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`
-  ).run(nextStatus, input.adminFeedback ?? null, reviewerId, requestId);
+  ).run(nextStatus, input.adminFeedback?.trim() || null, reviewerId, requestId);
 
-  const updated = db
-    .prepare(
-      `SELECT lr.*,
-              u.full_name AS user_full_name,
-              u.email AS user_email,
-              u.department AS user_department,
-              a.full_name AS reviewer_name
-       FROM license_requests lr
-       INNER JOIN users u ON u.id = lr.user_id
-       LEFT JOIN admins a ON a.id = lr.reviewed_by
-       WHERE lr.id = ?`
-    )
-    .get(requestId) as DbRowWithUser;
-  return rowToLicenseRequestWithUser(updated);
+  // Onaylandıysa projeyi geliştirme aşamasına taşı (kalite kapıları oluşur).
+  if (nextStatus === 'approved') {
+    onApplicationApproved(requestId, reviewerId);
+  }
+
+  const result = getAdminLicenseRequestById(requestId)!;
+  const reqTitle = result.requestTitle ?? result.licenseName;
+
+  // Kullanıcıya sonuç e-postası (best-effort, queue üzerinden).
+  void enqueueEmail(
+    licenseReviewedEmail({
+      to: result.userEmail,
+      toName: result.userFullName,
+      requestTitle: reqTitle,
+      status: nextStatus,
+      feedback: result.adminFeedback,
+    })
+  );
+
+  // In-app bildirim — talep sahibine.
+  const notifTitle =
+    nextStatus === 'approved'
+      ? 'Başvurun onaylandı'
+      : nextStatus === 'rejected'
+        ? 'Başvurun reddedildi'
+        : 'Başvurun için düzeltme istendi';
+  pushNotification({
+    recipientId: result.userId,
+    recipientType: 'user',
+    category: 'license',
+    title: notifTitle,
+    body: `"${reqTitle}" — ${
+      nextStatus === 'feedback_requested'
+        ? 'panelinden düzenleyip yeniden gönderebilirsin.'
+        : nextStatus === 'approved'
+          ? 'proje geliştirme aşamasına geçti.'
+          : 'detaylar için Lisanslarım sayfasına git.'
+    }`,
+    link: '/licenses',
+  });
+
+  return result;
 }

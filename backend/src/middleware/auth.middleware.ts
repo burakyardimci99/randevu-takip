@@ -42,6 +42,13 @@ function buildAuthMiddleware(expectedKind: SubjectKind) {
         subjectType: expectedKind,
         email: subject.email,
         role: subject.role,
+        ...(expectedKind !== 'admin'
+          ? {
+              governanceRole:
+                (subject as { governance_role?: 'analitik_danisman' | 'yz_arge' | null })
+                  .governance_role ?? null,
+            }
+          : {}),
       };
       next();
     } catch (err) {
@@ -63,6 +70,10 @@ function buildAuthMiddleware(expectedKind: SubjectKind) {
 
 export const requireUser = buildAuthMiddleware('user');
 export const requireAdmin = buildAuthMiddleware('admin');
+/** Sadece Analitik Danışman kind'lı token kabul eder. */
+export const requireDanisman = buildAuthMiddleware('danisman');
+/** Sadece YZ / Ar-Ge kind'lı token kabul eder. */
+export const requireArge = buildAuthMiddleware('arge');
 
 export function requireAdminRole(...allowedRoles: Array<'admin' | 'super_admin'>) {
   return function roleGuard(req: Request, _res: Response, next: NextFunction): void {
@@ -81,6 +92,87 @@ export function requireAdminRole(...allowedRoles: Array<'admin' | 'super_admin'>
         details: { requiredRoles: allowedRoles, actual: req.auth.role },
       });
       next(new HttpError(403, 'Yetki yok.', 'FORBIDDEN'));
+      return;
+    }
+    next();
+  };
+}
+
+/**
+ * Yönetişim rolü kontrolü (kılavuz rolleri).
+ * super_admin tüm yönetişim rollerinin yetkisine sahiptir (override).
+ * Aksi halde admin'in `governance_role` alanı izinli roller arasında olmalı.
+ */
+export function requireGovernanceRole(
+  ...allowedRoles: Array<'analitik_danisman' | 'lab_muhendisi' | 'yz_arge'>
+) {
+  return function governanceGuard(req: Request, _res: Response, next: NextFunction): void {
+    if (!req.auth || req.auth.subjectType !== 'admin') {
+      next(new HttpError(403, 'Yetki yok.', 'FORBIDDEN'));
+      return;
+    }
+    // super_admin her yönetişim aksiyonunu yapabilir.
+    if (req.auth.role === 'super_admin') {
+      next();
+      return;
+    }
+    const subject = findSubjectById('admin', req.auth.subjectId) as
+      | { governance_role?: string | null }
+      | undefined;
+    const govRole = subject?.governance_role ?? null;
+    if (!govRole || !allowedRoles.includes(govRole as (typeof allowedRoles)[number])) {
+      recordAudit({
+        eventType: 'authz.denied',
+        subjectId: req.auth.subjectId,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') ?? null,
+        success: false,
+        details: { requiredGovernanceRoles: allowedRoles, actual: govRole },
+      });
+      next(
+        new HttpError(
+          403,
+          'Bu işlem için yönetişim rolü yetkiniz yok.',
+          'GOVERNANCE_ROLE_REQUIRED'
+        )
+      );
+      return;
+    }
+    next();
+  };
+}
+
+/**
+ * Kullanıcı yönetişim rolü kontrolü. requireUser sonrası kullanılır.
+ * Kullanıcı'nın `governance_role` alanı izinli set içinde olmalı.
+ */
+export function requireUserGovernanceRole(
+  ...allowedRoles: Array<'analitik_danisman' | 'yz_arge'>
+) {
+  return function userGovernanceGuard(req: Request, _res: Response, next: NextFunction): void {
+    if (!req.auth || req.auth.subjectType !== 'user') {
+      next(new HttpError(403, 'Yetki yok.', 'FORBIDDEN'));
+      return;
+    }
+    const govRole = req.auth.governanceRole ?? null;
+    if (!govRole || !allowedRoles.includes(govRole as (typeof allowedRoles)[number])) {
+      recordAudit({
+        eventType: 'authz.denied',
+        subjectId: req.auth.subjectId,
+        subjectType: 'user',
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') ?? null,
+        success: false,
+        details: { requiredUserGovernanceRoles: allowedRoles, actual: govRole },
+      });
+      next(
+        new HttpError(
+          403,
+          'Bu işlem için yönetişim rolü yetkiniz yok.',
+          'GOVERNANCE_ROLE_REQUIRED'
+        )
+      );
       return;
     }
     next();

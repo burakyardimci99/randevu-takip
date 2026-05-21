@@ -33,6 +33,7 @@ import userAuthRoutes from './routes/user-auth.routes';
 import adminAuthRoutes from './routes/admin-auth.routes';
 import userRoutes from './routes/user.routes';
 import adminRoutes from './routes/admin.routes';
+import governanceRoutes from './routes/governance.routes';
 import publicRoutes from './routes/public.routes';
 import { openApiDocument } from './openapi';
 
@@ -72,6 +73,7 @@ function buildApp(): express.Express {
   app.use('/api/admin/auth', adminAuthRoutes);      // Eski yol (geriye uyum)
   app.use('/api/user', userRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api/governance', governanceRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

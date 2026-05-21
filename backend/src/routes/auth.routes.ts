@@ -12,7 +12,13 @@
  * - Refresh token rotation aynı subject_type üzerinde işler
  */
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { loginSchema, refreshSchema, registerSchema } from '../validators/schemas';
+import {
+  forgotPasswordSchema,
+  loginSchema,
+  refreshSchema,
+  registerSchema,
+  resetPasswordSchema,
+} from '../validators/schemas';
 import { unifiedLogin, registerUser } from '../services/auth.service';
 import {
   revokeRefreshToken,
@@ -142,6 +148,64 @@ router.post(
 );
 
 /**
+ * Parola sıfırlama talebi.
+ * Güvenlik: kullanıcı varlığı ifşa edilmez — e-posta kayıtlı olsun olmasın
+ * her zaman aynı (başarılı) yanıt döner.
+ */
+router.post(
+  '/forgot-password',
+  authRateLimit,
+  csrfProtection,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email } = forgotPasswordSchema.parse(req.body);
+      const { requestPasswordReset } = await import('../services/password-reset.service');
+      await requestPasswordReset(email);
+      recordAudit({
+        eventType: 'password_reset.requested',
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') ?? null,
+        success: true,
+        details: { email: maskEmail(email) },
+      });
+      res.json({
+        message:
+          'E-posta kayıtlıysa parola sıfırlama bağlantısı gönderildi. Gelen kutunu kontrol et.',
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * Parola sıfırlama — token + yeni parola.
+ */
+router.post(
+  '/reset-password',
+  authRateLimit,
+  csrfProtection,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = resetPasswordSchema.parse(req.body);
+      const { resetPassword } = await import('../services/password-reset.service');
+      const { userId } = await resetPassword(input.token, input.password);
+      recordAudit({
+        eventType: 'password_reset.completed',
+        subjectId: userId,
+        subjectType: 'user',
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') ?? null,
+        success: true,
+      });
+      res.json({ message: 'Parolan güncellendi. Yeni parolanla giriş yapabilirsin.' });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * Unified refresh: frontend, sahip olduğu subject_type'ı body içinde bildirir.
  * Backend yine doğru key pair ile validate eder.
  */
@@ -150,19 +214,23 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
     const access = req.get('authorization')?.split(' ')[1];
     if (!access) throw new HttpError(401, 'Access token gerekli.', 'AUTH_REQUIRED');
 
-    // Hangi key pair ile decode edileceğini access token'dan bul
-    // İlk user olarak dene, başarısızsa admin
+    // Hangi key/aud ile decode edileceğini sırayla dene: user → admin → danisman → arge
     let decoded;
     let kind: SubjectKind = 'user';
-    try {
-      decoded = verifyAccessToken('user', access);
-    } catch {
+    const tryKinds: SubjectKind[] = ['user', 'admin', 'danisman', 'arge'];
+    let verified = false;
+    for (const k of tryKinds) {
       try {
-        decoded = verifyAccessToken('admin', access);
-        kind = 'admin';
+        decoded = verifyAccessToken(k, access);
+        kind = k;
+        verified = true;
+        break;
       } catch {
-        throw new HttpError(401, 'Access token geçersiz.', 'AUTH_INVALID');
+        /* try next */
       }
+    }
+    if (!verified || !decoded) {
+      throw new HttpError(401, 'Access token geçersiz.', 'AUTH_INVALID');
     }
 
     // Cookie öncelikli, body fallback (geriye uyum)
@@ -225,18 +293,18 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 router.post('/logout', csrfProtection, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const tokens: string[] = [];
-    const userCookie = getRefreshCookie(req, 'user');
-    if (userCookie) tokens.push(userCookie);
-    const adminCookie = getRefreshCookie(req, 'admin');
-    if (adminCookie) tokens.push(adminCookie);
+    const kinds: SubjectKind[] = ['user', 'admin', 'danisman', 'arge'];
+    for (const k of kinds) {
+      const cookie = getRefreshCookie(req, k);
+      if (cookie) tokens.push(cookie);
+    }
 
     const bodyParsed = refreshSchema.safeParse(req.body);
     if (bodyParsed.success) tokens.push(bodyParsed.data.refreshToken);
 
     for (const t of tokens) revokeRefreshToken(t);
 
-    clearRefreshCookie(res, 'user');
-    clearRefreshCookie(res, 'admin');
+    for (const k of kinds) clearRefreshCookie(res, k);
 
     recordAudit({
       eventType: 'auth.logout',

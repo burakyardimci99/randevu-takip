@@ -1,16 +1,44 @@
 import { useEffect, useState } from 'react';
 import { api } from '../services/api';
-import type { Booking, ReviewBookingPayload, SimilarBooking } from '../types';
+import type { Booking, LifecycleStage, ReviewBookingPayload, SimilarBooking } from '../types';
+import { ProjectLifecycleBar } from './governance/ProjectLifecycleBar';
 import { SimilarProjectsPanel } from './SimilarProjectsPanel';
 import { StatusBadge } from './StatusBadge';
 import { BookingThread } from './BookingThread';
+
+const STAGE_LABEL: Record<LifecycleStage, string> = {
+  application: 'Başvuru',
+  development: 'Geliştirme',
+  stage: 'Stage',
+  production: 'Production',
+  live: 'Canlı',
+};
+
+const STAGE_ORDER: LifecycleStage[] = [
+  'application',
+  'development',
+  'stage',
+  'production',
+  'live',
+];
+
+export type BookingDetailViewerRole = 'admin' | 'danisman' | 'arge' | 'user';
 
 interface BookingDetailModalProps {
   booking: Booking | null;
   open: boolean;
   loading: boolean;
   onClose: () => void;
-  onReview: (action: ReviewBookingPayload) => Promise<void>;
+  /** Hangi rol açıyor — UI'da görünür alanları ve aksiyon butonlarını belirler. Default 'admin'. */
+  viewerRole?: BookingDetailViewerRole;
+  /** Review aksiyonu (approve/reject/request_feedback). Admin her zaman; Danışman sadece pending booking için. */
+  onReview?: (action: ReviewBookingPayload) => Promise<void>;
+  /** Onaylı booking'i bir sonraki aşamaya ilerlet (admin + arge). */
+  onAdvanceStage?: () => Promise<void>;
+  /** Onaylı booking'i bir önceki aşamaya geri al (admin + arge). */
+  onRegressStage?: () => Promise<void>;
+  /** Kullanıcının stage advance talebini reddet (arge). Gerekçe (note) zorunlu değil ama destekleniyor. */
+  onRejectAdvanceRequest?: (note?: string) => Promise<void>;
 }
 
 function fmtDate(iso: string): string {
@@ -20,16 +48,27 @@ function fmtDateTime(iso: string): string {
   return new Date(iso).toLocaleString('tr-TR');
 }
 
-export function BookingDetailModal({ booking, open, loading, onClose, onReview }: BookingDetailModalProps) {
-  const [mode, setMode] = useState<'idle' | 'feedback' | 'reject'>('idle');
+export function BookingDetailModal({
+  booking,
+  open,
+  loading,
+  onClose,
+  viewerRole = 'admin',
+  onReview,
+  onAdvanceStage,
+  onRegressStage,
+  onRejectAdvanceRequest,
+}: BookingDetailModalProps) {
+  const [mode, setMode] = useState<'idle' | 'feedback' | 'reject' | 'reject_advance'>('idle');
   const [feedback, setFeedback] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [similar, setSimilar] = useState<SimilarBooking[]>([]);
   const [similarLoading, setSimilarLoading] = useState(false);
 
-  // Modal açılınca admin için benzer projeleri çek
+  // Modal açılınca benzer projeleri çek — sadece admin için (endpoint admin-gated).
+  // Danışman/Ar-Ge ileride kendi endpoint'iyle entegre edilecek.
   useEffect(() => {
-    if (!open || !booking) {
+    if (!open || !booking || viewerRole !== 'admin') {
       setSimilar([]);
       return;
     }
@@ -52,7 +91,7 @@ export function BookingDetailModal({ booking, open, loading, onClose, onReview }
     return () => {
       cancelled = true;
     };
-  }, [open, booking]);
+  }, [open, booking, viewerRole]);
 
   if (!open || !booking) return null;
 
@@ -63,12 +102,14 @@ export function BookingDetailModal({ booking, open, loading, onClose, onReview }
   }
 
   async function handleApprove() {
+    if (!onReview) return;
     setError(null);
     await onReview({ action: 'approve' });
     reset();
   }
 
   async function handleReject() {
+    if (!onReview) return;
     if (feedback.trim().length > 0 && feedback.trim().length < 5) {
       setError('Mesaj en az 5 karakter olmalı.');
       return;
@@ -79,6 +120,7 @@ export function BookingDetailModal({ booking, open, loading, onClose, onReview }
   }
 
   async function handleFeedback() {
+    if (!onReview) return;
     const v = feedback.trim();
     if (v.length < 10) {
       setError('Feedback en az 10 karakter olmalı.');
@@ -89,11 +131,34 @@ export function BookingDetailModal({ booking, open, loading, onClose, onReview }
     reset();
   }
 
-  // Admin tüm statusları yeniden inceleyebilir (admin = sınırsız yetki).
-  // Onaylanmış bir talep yine reddedilebilir/feedback istenebilir; reddedilen onaylanabilir.
-  const reviewable = true;
+  async function handleRejectAdvance() {
+    if (!onRejectAdvanceRequest) return;
+    setError(null);
+    await onRejectAdvanceRequest(feedback.trim() || undefined);
+    reset();
+  }
+
+  // Review aksiyonları (approve/reject/feedback) — Admin her durumda, Danışman pending VE
+  // feedback_requested durumlarında (backend governance.service.ts bu iki status'ü beraber SLA'ye dahil ediyor).
+  // Onaylanmış/Reddedilmiş bir talep yine admin tarafından re-review yapılabilir.
+  const reviewable =
+    !!onReview &&
+    (viewerRole === 'admin' ||
+      (viewerRole === 'danisman' &&
+        (booking.status === 'pending' || booking.status === 'feedback_requested')));
   const isReReview =
-    booking.status === 'approved' || booking.status === 'rejected';
+    viewerRole === 'admin' &&
+    (booking.status === 'approved' || booking.status === 'rejected');
+
+  // Yaşam döngüsü görünürlüğü: onaylı booking için admin, arge, kullanıcı görür (read-only kullanıcı için).
+  const showLifecycle =
+    booking.status === 'approved' && viewerRole !== 'danisman';
+  // Stage advance/regress butonları sadece admin + arge'ye verilir.
+  const canMutateStage =
+    showLifecycle && (viewerRole === 'admin' || viewerRole === 'arge');
+  // Ar-Ge advance request'i reddedebilir (admin de regress ile aynı sonucu yapabilir).
+  const canRejectAdvance =
+    viewerRole === 'arge' && !!booking.stageAdvanceRequestedAt && !!onRejectAdvanceRequest;
 
   return (
     <div
@@ -189,17 +254,141 @@ export function BookingDetailModal({ booking, open, loading, onClose, onReview }
             </div>
           </section>
 
-          {/* Semantic search: bu projeye benzer geçmiş projeler */}
-          {(similar.length > 0 || similarLoading) && (
+          {/* Semantic search: bu projeye benzer geçmiş projeler — sadece admin görür (endpoint admin-gated). */}
+          {viewerRole === 'admin' && (similar.length > 0 || similarLoading) && (
             <section>
               <SimilarProjectsPanel results={similar} loading={similarLoading} />
             </section>
           )}
 
-          {/* Booking conversation thread (admin ↔ user) */}
-          <section>
-            <BookingThread bookingId={booking.id} viewerKind="admin" compact />
-          </section>
+          {/* Booking conversation thread — admin/user thread'i destekliyor. Danışman/Ar-Ge thread'i
+              ileride backend endpoint'i (governance route) ile bağlanacak. */}
+          {(viewerRole === 'admin' || viewerRole === 'user') && (
+            <section>
+              <BookingThread bookingId={booking.id} viewerKind={viewerRole} compact />
+            </section>
+          )}
+
+          {/* Yaşam döngüsü — onaylı booking için (Danışman görmez, çünkü onlar approve öncesi inceler). */}
+          {showLifecycle && (
+            <section className="bg-gradient-to-br from-cyan-50 to-blue-50 border border-cyan-200 rounded-xl p-4">
+              <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <h3 className="font-bold text-kt-green-900">Proje Yaşam Döngüsü</h3>
+                    {booking.reviewTrack === 'swat' && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-300">
+                        ⚡ SWAT
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-kt-gray-600">
+                    Şu anki aşama:{' '}
+                    <strong className="text-cyan-800">
+                      {STAGE_LABEL[booking.lifecycleStage]}
+                    </strong>{' '}
+                    · Aşamaya giriş:{' '}
+                    {new Date(booking.stageEnteredAt).toLocaleDateString('tr-TR')}
+                  </p>
+                </div>
+                {canMutateStage && (() => {
+                  const idx = STAGE_ORDER.indexOf(booking.lifecycleStage);
+                  const isTerminal = idx >= STAGE_ORDER.length - 1;
+                  const isAtStart = idx <= 1;
+                  const next = !isTerminal ? STAGE_ORDER[idx + 1] : null;
+                  const prev = !isAtStart ? STAGE_ORDER[idx - 1] : null;
+                  return (
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      {onRegressStage && prev && (
+                        <button
+                          type="button"
+                          onClick={() => onRegressStage()}
+                          disabled={loading}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-md text-kt-gray-700 hover:bg-kt-gray-100 border border-kt-gray-300 transition"
+                          title={`${STAGE_LABEL[prev]} aşamasına geri al`}
+                        >
+                          ← {STAGE_LABEL[prev]}
+                        </button>
+                      )}
+                      {onAdvanceStage && next && (
+                        <button
+                          type="button"
+                          onClick={() => onAdvanceStage()}
+                          disabled={loading}
+                          className="btn-primary text-xs px-3 py-1.5"
+                        >
+                          → {STAGE_LABEL[next]}
+                        </button>
+                      )}
+                      {isTerminal && (
+                        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-md">
+                          ● Canlı
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <ProjectLifecycleBar stage={booking.lifecycleStage} />
+
+              {/* Kullanıcı'nın ilerletme talebi */}
+              {booking.stageAdvanceRequestedAt && (
+                <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-300 text-amber-900">
+                  <div className="flex items-start gap-2">
+                    <svg
+                      className="w-4 h-4 mt-0.5 shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                      />
+                    </svg>
+                    <div className="text-xs flex-1">
+                      <div className="font-bold mb-0.5">
+                        Kullanıcı aşama ilerletmesi talep etti
+                      </div>
+                      <div className="opacity-90">
+                        {new Date(booking.stageAdvanceRequestedAt).toLocaleString('tr-TR', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </div>
+                      {booking.stageAdvanceNote && (
+                        <div className="italic mt-1 p-2 bg-white/60 rounded">
+                          "{booking.stageAdvanceNote}"
+                        </div>
+                      )}
+                      <div className="mt-1 text-[11px] opacity-80">
+                        {canMutateStage
+                          ? 'Yukarıdaki "→" düğmesiyle onaylayın veya gerekirse aşamayı geri alın.'
+                          : 'Ar-Ge mühendisi inceleyip karar verecek.'}
+                      </div>
+                      {canRejectAdvance && (
+                        <div className="mt-2">
+                          <button
+                            type="button"
+                            onClick={() => setMode('reject_advance')}
+                            disabled={loading || mode === 'reject_advance'}
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded-md text-rose-700 bg-rose-100 hover:bg-rose-200 border border-rose-300 transition"
+                          >
+                            ✕ Talebi Reddet (gerekçeyle)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
 
           {booking.adminFeedback && (
             <section>
@@ -210,10 +399,12 @@ export function BookingDetailModal({ booking, open, loading, onClose, onReview }
             </section>
           )}
 
-          {reviewable && mode !== 'idle' && (
+          {mode !== 'idle' && (
             <section className="animate-fade-in">
               <label className="label">
-                {mode === 'feedback' ? 'Kullanıcıdan Beklenen Düzeltme' : 'Red Sebebi (opsiyonel)'}
+                {mode === 'feedback' && 'Kullanıcıdan Beklenen Düzeltme'}
+                {mode === 'reject' && 'Red Sebebi (opsiyonel)'}
+                {mode === 'reject_advance' && 'Aşama İlerletme Talebini Reddetme Gerekçesi (opsiyonel)'}
               </label>
               <textarea
                 className="textarea"
@@ -224,7 +415,9 @@ export function BookingDetailModal({ booking, open, loading, onClose, onReview }
                 placeholder={
                   mode === 'feedback'
                     ? 'Ör: Lütfen proje açıklamasında hedef kitleyi de belirtin.'
-                    : 'Ör: Bu hafta için tüm odalar workshop için ayrıldı.'
+                    : mode === 'reject_advance'
+                      ? 'Ör: Build aşamasında security gate başarısız, kullanıcı düzeltmeden Stage onaylanmayacak.'
+                      : 'Ör: Bu hafta için tüm odalar workshop için ayrıldı.'
                 }
               />
               {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
@@ -232,43 +425,47 @@ export function BookingDetailModal({ booking, open, loading, onClose, onReview }
           )}
         </div>
 
-        {reviewable && (
-          <div className="px-6 py-4 border-t border-kt-gray-100 bg-kt-gray-50 flex flex-wrap items-center justify-end gap-2">
-            {mode === 'idle' ? (
-              <>
-                <button onClick={onClose} className="btn-ghost" disabled={loading}>Kapat</button>
-                <button onClick={() => setMode('feedback')} className="btn-secondary" disabled={loading}>
-                  💬 Düzeltme İste
-                </button>
-                <button onClick={() => setMode('reject')} className="btn-danger" disabled={loading}>
-                  ✕ Reddet
-                </button>
-                <button onClick={handleApprove} className="btn-success" disabled={loading}>
-                  ✓ Onayla
-                </button>
-              </>
-            ) : (
-              <>
-                <button onClick={reset} className="btn-ghost" disabled={loading}>Vazgeç</button>
-                {mode === 'feedback' ? (
-                  <button onClick={handleFeedback} className="btn-primary" disabled={loading}>
-                    {loading ? 'Gönderiliyor...' : 'Geri Bildirimi Gönder'}
+        {/* Action footer — role-aware. Hiçbir aksiyon yoksa sadece "Kapat" gösterilir. */}
+        <div className="px-6 py-4 border-t border-kt-gray-100 bg-kt-gray-50 flex flex-wrap items-center justify-end gap-2">
+          {mode === 'idle' && (
+            <>
+              <button onClick={onClose} className="btn-ghost" disabled={loading}>Kapat</button>
+              {reviewable && (
+                <>
+                  <button onClick={() => setMode('feedback')} className="btn-secondary" disabled={loading}>
+                    💬 Düzeltme İste
                   </button>
-                ) : (
-                  <button onClick={handleReject} className="btn-danger" disabled={loading}>
-                    {loading ? 'Gönderiliyor...' : 'Reddi Onayla'}
+                  <button onClick={() => setMode('reject')} className="btn-danger" disabled={loading}>
+                    ✕ Reddet
                   </button>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {!reviewable && (
-          <div className="px-6 py-4 border-t border-kt-gray-100 bg-kt-gray-50 flex items-center justify-end">
-            <button onClick={onClose} className="btn-primary">Kapat</button>
-          </div>
-        )}
+                  <button onClick={handleApprove} className="btn-success" disabled={loading}>
+                    ✓ Onayla
+                  </button>
+                </>
+              )}
+            </>
+          )}
+          {mode !== 'idle' && (
+            <>
+              <button onClick={reset} className="btn-ghost" disabled={loading}>Vazgeç</button>
+              {mode === 'feedback' && (
+                <button onClick={handleFeedback} className="btn-primary" disabled={loading}>
+                  {loading ? 'Gönderiliyor...' : 'Geri Bildirimi Gönder'}
+                </button>
+              )}
+              {mode === 'reject' && (
+                <button onClick={handleReject} className="btn-danger" disabled={loading}>
+                  {loading ? 'Gönderiliyor...' : 'Reddi Onayla'}
+                </button>
+              )}
+              {mode === 'reject_advance' && (
+                <button onClick={handleRejectAdvance} className="btn-danger" disabled={loading}>
+                  {loading ? 'Gönderiliyor...' : 'Talebi Reddet'}
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

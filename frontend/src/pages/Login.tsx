@@ -34,13 +34,22 @@ export default function Login() {
     setLoading(true);
     try {
       const { kind, subject } = await login(email, password);
-      toast.push(
-        'success',
-        kind === 'admin'
-          ? `Hoş geldiniz ${subject.fullName} — yönetim paneline yönlendiriliyorsunuz.`
-          : `Hoş geldiniz ${subject.fullName}.`
-      );
-      navigate(kind === 'admin' ? '/admin' : '/rooms', { replace: true });
+      // Yönetişim rolüne göre redirect: admin → /admin, danışman → /danisman,
+      // ar-ge → /arge, normal user → /rooms.
+      let destination = '/rooms';
+      let greetingSuffix = '.';
+      if (kind === 'admin') {
+        destination = '/admin';
+        greetingSuffix = ' — yönetim paneline yönlendiriliyorsunuz.';
+      } else if (subject.governanceRole === 'analitik_danisman') {
+        destination = '/danisman';
+        greetingSuffix = ' — analitik danışman paneline yönlendiriliyorsunuz.';
+      } else if (subject.governanceRole === 'yz_arge') {
+        destination = '/arge';
+        greetingSuffix = ' — Ar-Ge paneline yönlendiriliyorsunuz.';
+      }
+      toast.push('success', `Hoş geldiniz ${subject.fullName}${greetingSuffix}`);
+      navigate(destination, { replace: true });
     } catch (err) {
       toast.push('error', (err as Error).message || 'Giriş başarısız.');
     } finally {
@@ -48,13 +57,21 @@ export default function Login() {
     }
   }
 
-  function fillDemo(which: 'user' | 'admin') {
+  function fillDemo(which: 'user' | 'admin' | 'danisman' | 'arge') {
     if (which === 'user') {
       setEmail('user@klab.test');
       setPassword('Demo1234!Pass');
-    } else {
+    } else if (which === 'admin') {
       setEmail('admin@klab.test');
       setPassword('Admin1234!Pass');
+    } else if (which === 'danisman') {
+      // Ayşe Yılmaz — governance_role: analitik_danisman (seed)
+      setEmail('ayse.yilmaz@klab.test');
+      setPassword('Ayse1234!Pass');
+    } else {
+      // Burak Şahin — governance_role: yz_arge (seed)
+      setEmail('burak.sahin@klab.test');
+      setPassword('Burak1234!Pass');
     }
   }
 
@@ -131,6 +148,7 @@ export default function Login() {
           onDemoFill={fillDemo}
           onHomeClick={() => navigate('/')}
           registerHref="/register"
+          forgotHref="/forgot-password"
         />
 
         <p className="text-center text-xs text-white/60 mt-6 backdrop-blur-sm bg-black/20 px-3 py-1.5 rounded-lg inline-block">

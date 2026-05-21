@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Eye, EyeOff, Mail, Lock, User, ShieldCheck, Home } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, User, ShieldCheck, Home, BrainCircuit, FlaskConical } from 'lucide-react';
 
 interface LoginFormProps {
   email: string;
@@ -10,7 +10,7 @@ interface LoginFormProps {
   onPasswordChange: (v: string) => void;
   onRememberChange: (v: boolean) => void;
   onSubmit: (e: React.FormEvent) => void;
-  onDemoFill?: (which: 'user' | 'admin') => void;
+  onDemoFill?: (which: 'user' | 'admin' | 'danisman' | 'arge') => void;
   onHomeClick?: () => void;
   registerHref?: string;
   forgotHref?: string;
@@ -156,7 +156,7 @@ const LoginForm: React.FC<LoginFormProps> = ({
           <h2 className="text-3xl font-bold mb-2 relative group inline-block">
             <span className="absolute -inset-1 bg-gradient-to-r from-kt-gold-400/30 via-kt-violet-500/30 to-kt-gold-500/30 blur-xl opacity-75 group-hover:opacity-100 transition-all duration-500 animate-pulse" />
             <span className="relative inline-block text-3xl font-extrabold text-white">
-              Kuveyt Türk <span className="text-shimmer">AI Lab</span>
+              Kuveyt Türk <span className="text-shimmer">Yapay Zeka Laboratuvarı</span>
             </span>
           </h2>
           <div className="text-white/80 flex flex-col items-center space-y-2 mt-3">
@@ -231,13 +231,11 @@ const LoginForm: React.FC<LoginFormProps> = ({
             </a>
           </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="group relative w-full py-3 rounded-lg bg-ai-glow-btn text-white font-bold shadow-glow-cyan hover:shadow-2xl transition-all duration-200 ease-in-out transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-kt-gold-400/50 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none overflow-hidden"
-          >
-            <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
-            <span className="relative">{loading ? 'Giriş yapılıyor…' : 'Giriş Yap'}</span>
+          <button type="submit" disabled={loading} className="btn-pill-primary btn-pill-md w-full">
+            <span className="btn-pill-shimmer" />
+            <span className="relative z-10 font-semibold">
+              {loading ? 'Giriş yapılıyor…' : 'Giriş Yap'}
+            </span>
           </button>
         </form>
 
@@ -250,7 +248,7 @@ const LoginForm: React.FC<LoginFormProps> = ({
               </div>
             </div>
 
-            <div className="mt-5 grid grid-cols-3 gap-3">
+            <div className="mt-5 grid grid-cols-2 gap-3">
               {onDemoFill && (
                 <QuickButton
                   icon={<User size={18} />}
@@ -263,8 +261,24 @@ const LoginForm: React.FC<LoginFormProps> = ({
                 <QuickButton
                   icon={<ShieldCheck size={18} />}
                   label="Admin"
-                  title="Demo admin bilgilerini doldur"
+                  title="Demo Lab Mühendisi (admin) bilgilerini doldur"
                   onClick={() => onDemoFill('admin')}
+                />
+              )}
+              {onDemoFill && (
+                <QuickButton
+                  icon={<BrainCircuit size={18} />}
+                  label="Danışman"
+                  title="Analitik Danışman demo hesabını doldur (Ayşe Yılmaz)"
+                  onClick={() => onDemoFill('danisman')}
+                />
+              )}
+              {onDemoFill && (
+                <QuickButton
+                  icon={<FlaskConical size={18} />}
+                  label="Ar-Ge"
+                  title="YZ / Ar-Ge Mühendisi demo hesabını doldur (Burak Şahin)"
+                  onClick={() => onDemoFill('arge')}
                 />
               )}
               {onHomeClick && (

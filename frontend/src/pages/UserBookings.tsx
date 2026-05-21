@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
+import { AppointmentModal } from '../components/AppointmentModal';
 import { BookingModal } from '../components/BookingModal';
 import { BookingThread } from '../components/BookingThread';
 import { EmptyState } from '../components/EmptyState';
+import { ProjectLifecycleBar } from '../components/governance/ProjectLifecycleBar';
 import { StatusBadge } from '../components/StatusBadge';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
-import type { Booking, CreateBookingPayload, Room } from '../types';
+import type { Appointment, Booking, CreateBookingPayload, Room } from '../types';
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
@@ -25,18 +27,77 @@ export default function UserBookings() {
   const [confirmWithdraw, setConfirmWithdraw] = useState<Booking | null>(null);
   const [openThread, setOpenThread] = useState<string | null>(null);
 
+  // Randevu state'i: hangi booking için modal açık + booking → randevu listesi map'i
+  const [scheduling, setScheduling] = useState<Booking | null>(null);
+  const [appointmentsByBooking, setAppointmentsByBooking] = useState<
+    Record<string, Appointment[]>
+  >({});
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [bRes, rRes] = await Promise.all([api.listUserBookings(), api.listUserRooms()]);
       setBookings(bRes.bookings);
       setRooms(rRes.rooms);
+
+      // Onaylanmış booking'lerin randevularını paralelle çek
+      const approved = bRes.bookings.filter((b) => b.status === 'approved');
+      const apptRes = await Promise.all(
+        approved.map((b) =>
+          api
+            .listBookingAppointments(b.id)
+            .then((r) => [b.id, r.appointments] as const)
+            .catch(() => [b.id, [] as Appointment[]] as const)
+        )
+      );
+      setAppointmentsByBooking(Object.fromEntries(apptRes));
     } catch (err) {
       toast.push('error', (err as Error).message || 'Talepler yüklenemedi.');
     } finally {
       setLoading(false);
     }
   }, [toast]);
+
+  async function submitAppointment(payload: {
+    bookingId: string;
+    startAt: string;
+    endAt: string;
+    title?: string;
+    notes?: string;
+  }) {
+    setSubmitting(true);
+    try {
+      await api.createAppointment(payload);
+      toast.push('success', 'Randevunuz takvime eklendi.');
+      setScheduling(null);
+      await load();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Randevu oluşturulamadı.');
+      throw err; // modal hata mesajını yakalasın
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function cancelAppointment(appointmentId: string) {
+    try {
+      await api.cancelAppointment(appointmentId);
+      toast.push('info', 'Randevu iptal edildi.');
+      await load();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'İptal başarısız.');
+    }
+  }
+
+  async function requestStageAdvance(bookingId: string, note?: string) {
+    try {
+      await api.requestStageAdvance(bookingId, note);
+      toast.push('success', 'Aşama ilerletme talebiniz admin\'e iletildi.');
+      await load();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Talep oluşturulamadı.');
+    }
+  }
 
   useEffect(() => {
     load();
@@ -48,7 +109,8 @@ export default function UserBookings() {
       type === 'booking.reviewed' ||
       type === 'booking.created' ||
       type === 'booking.updated' ||
-      type === 'waitlist.changed'
+      type === 'waitlist.changed' ||
+      type === 'appointment.changed'
     ) {
       load();
       if (type === 'booking.reviewed' && data && typeof data === 'object') {
@@ -152,6 +214,11 @@ export default function UserBookings() {
 
                 <p className="text-sm text-kt-gray-700 mb-3 line-clamp-2">{b.projectDescription}</p>
 
+                {/* Onaylı booking için proje yaşam döngüsü çubuğu */}
+                {b.status === 'approved' && (
+                  <LifecycleSection booking={b} onRequest={requestStageAdvance} />
+                )}
+
                 <div className="flex flex-wrap gap-1.5 mb-4">
                   {b.technologies.slice(0, 8).map((t) => (
                     <span key={t} className="px-2 py-0.5 rounded-md bg-kt-gray-100 text-kt-green-700 text-xs font-medium">
@@ -164,6 +231,16 @@ export default function UserBookings() {
                     </span>
                   )}
                 </div>
+
+                {/* Onaylı booking için randevu listesi + ekleme */}
+                {b.status === 'approved' && (
+                  <AppointmentsSection
+                    booking={b}
+                    appointments={appointmentsByBooking[b.id] ?? []}
+                    onAdd={() => setScheduling(b)}
+                    onCancel={cancelAppointment}
+                  />
+                )}
 
                 {b.adminFeedback && (
                   <div
@@ -254,6 +331,16 @@ export default function UserBookings() {
         onSubmit={submitEdit}
       />
 
+      {/* Appointment Modal */}
+      {scheduling && (
+        <AppointmentModal
+          booking={scheduling}
+          onClose={() => setScheduling(null)}
+          onSubmit={submitAppointment}
+          submitting={submitting}
+        />
+      )}
+
       {/* Withdraw Confirmation */}
       {confirmWithdraw && (
         <div
@@ -299,5 +386,245 @@ export default function UserBookings() {
         </div>
       )}
     </AppShell>
+  );
+}
+
+/* ============================================================
+ * Onaylı booking kartı içinde proje yaşam döngüsü + ilerletme talebi
+ * ============================================================ */
+
+const STAGE_LABEL: Record<string, string> = {
+  application: 'Başvuru',
+  development: 'Geliştirme',
+  stage: 'Stage',
+  production: 'Production',
+  live: 'Canlı',
+};
+const STAGE_ORDER = ['application', 'development', 'stage', 'production', 'live'] as const;
+
+function LifecycleSection({
+  booking,
+  onRequest,
+}: {
+  booking: Booking;
+  onRequest: (bookingId: string, note?: string) => Promise<void>;
+}) {
+  const [requesting, setRequesting] = useState(false);
+  const [note, setNote] = useState('');
+
+  const currentIdx = STAGE_ORDER.indexOf(booking.lifecycleStage);
+  const isTerminal = currentIdx >= STAGE_ORDER.length - 1;
+  const nextStage = !isTerminal ? STAGE_ORDER[currentIdx + 1] : null;
+  const hasPendingRequest = !!booking.stageAdvanceRequestedAt;
+
+  async function submit() {
+    setRequesting(true);
+    try {
+      await onRequest(booking.id, note.trim() || undefined);
+      setNote('');
+    } finally {
+      setRequesting(false);
+    }
+  }
+
+  return (
+    <div className="my-4">
+      <ProjectLifecycleBar stage={booking.lifecycleStage} />
+
+      {/* Bekleyen talep — admin'e gitti */}
+      {hasPendingRequest && (
+        <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">
+          <div className="flex items-start gap-2">
+            <svg
+              className="w-4 h-4 mt-0.5 shrink-0 text-amber-700"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <div className="text-xs flex-1">
+              <div className="font-semibold mb-0.5">
+                Aşama ilerletme talebiniz admin onayını bekliyor.
+              </div>
+              <div className="opacity-80">
+                {new Date(booking.stageAdvanceRequestedAt!).toLocaleString('tr-TR', {
+                  day: '2-digit',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+                {booking.stageAdvanceNote && (
+                  <span className="italic">
+                    {' '}
+                    · "{booking.stageAdvanceNote}"
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Yeni talep formu — bekleyen talep yoksa ve terminal değilse */}
+      {!hasPendingRequest && nextStage && (
+        <div className="mt-3 p-3 rounded-xl bg-gradient-to-br from-cyan-50 to-blue-50 border border-cyan-200">
+          <div className="flex items-center gap-2 mb-2">
+            <svg
+              className="w-4 h-4 text-cyan-700 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M13 7l5 5m0 0l-5 5m5-5H6"
+              />
+            </svg>
+            <p className="text-xs text-cyan-900 font-semibold">
+              <span className="opacity-80">Sıradaki aşama:</span>{' '}
+              <strong>{STAGE_LABEL[nextStage]}</strong> — admin onayını gerektirir.
+            </p>
+          </div>
+          <textarea
+            className="textarea text-xs min-h-[48px] mb-2"
+            placeholder="Hangi kriteri karşıladığınızı kısaca anlatın (opsiyonel)..."
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={500}
+            disabled={requesting}
+          />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={requesting}
+              className="btn-primary text-xs px-3 py-1.5"
+            >
+              {requesting ? 'Gönderiliyor…' : 'Aşama ilerletmesi talep et'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isTerminal && (
+        <div className="mt-3 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+          ● Projeniz canlı aşamada — yaşam döngüsü tamamlandı.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+ * Onaylı booking kartı içinde randevu listesi + "Randevu Ekle"
+ * ============================================================ */
+
+function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleString('tr-TR', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function AppointmentsSection({
+  booking: _booking,
+  appointments,
+  onAdd,
+  onCancel,
+}: {
+  booking: Booking;
+  appointments: Appointment[];
+  onAdd: () => void;
+  onCancel: (id: string) => void;
+}) {
+  const upcoming = appointments
+    .filter((a) => a.status === 'scheduled' && new Date(a.endAt).getTime() >= Date.now())
+    .sort((a, b) => a.startAt.localeCompare(b.startAt));
+
+  return (
+    <div className="my-4 p-4 rounded-xl bg-gradient-to-br from-cyan-50 to-blue-50 border border-cyan-200">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2">
+          <svg
+            className="w-5 h-5 text-cyan-700"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+            />
+          </svg>
+          <h4 className="text-sm font-bold text-cyan-900">Odaya geliş randevuları</h4>
+          <span className="text-xs text-cyan-700 bg-cyan-100 px-2 py-0.5 rounded-full font-semibold">
+            {upcoming.length}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="btn-primary text-xs px-3 py-1.5"
+        >
+          + Randevu Ekle
+        </button>
+      </div>
+
+      {upcoming.length === 0 ? (
+        <p className="text-xs text-cyan-700/80 italic">
+          Henüz randevu yok. Odaya gelmek istediğiniz tarihler için randevu oluşturun.
+        </p>
+      ) : (
+        <ul className="space-y-1.5">
+          {upcoming.slice(0, 5).map((a) => (
+            <li
+              key={a.id}
+              className="flex items-center gap-3 text-xs bg-white/80 rounded-lg px-3 py-2 border border-cyan-200/60"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-kt-green-900 truncate">
+                  {a.title}
+                </div>
+                <div className="text-cyan-800 mt-0.5">
+                  {fmtTime(a.startAt)} – {new Date(a.endAt).toLocaleTimeString('tr-TR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onCancel(a.id)}
+                className="text-rose-600 hover:text-rose-800 font-semibold shrink-0"
+                title="Randevuyu iptal et"
+              >
+                İptal
+              </button>
+            </li>
+          ))}
+          {upcoming.length > 5 && (
+            <li className="text-[11px] text-cyan-700 px-3">
+              + {upcoming.length - 5} ek randevu — tamamı{' '}
+              <Link to="/takvim" className="underline font-semibold">
+                takvimde
+              </Link>
+              .
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
   );
 }

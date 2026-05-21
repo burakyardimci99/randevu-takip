@@ -22,10 +22,50 @@ const ARGON2_OPTIONS: argon2.Options = {
   parallelism: 1,
 };
 
+/**
+ * Parola hash'i — ortak Argon2id ayarlarıyla (app_security §7).
+ * Şifre sıfırlama gibi diğer servisler de aynı politikayı kullanır.
+ */
+export function hashPassword(plain: string): Promise<string> {
+  return argon2.hash(plain, ARGON2_OPTIONS);
+}
+
+/**
+ * Admin kendi parolasını değiştirir — mevcut parola doğrulaması zorunlu.
+ */
+export async function changeAdminPassword(
+  adminId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<void> {
+  const db = getDb();
+  const admin = db
+    .prepare('SELECT id, password_hash FROM admins WHERE id = ? AND status = 1')
+    .get(adminId) as { id: string; password_hash: string } | undefined;
+  if (!admin) {
+    throw new HttpError(404, 'Yönetici bulunamadı.', 'ADMIN_NOT_FOUND');
+  }
+  const ok = await argon2.verify(admin.password_hash, currentPassword).catch(() => false);
+  if (!ok) {
+    throw new HttpError(400, 'Mevcut parola yanlış.', 'INVALID_CURRENT_PASSWORD');
+  }
+  const passwordHash = await hashPassword(newPassword);
+  db.prepare(
+    'UPDATE admins SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+  ).run(passwordHash, adminId);
+}
+
 type SubjectRecord = UserRecord | AdminRecord;
 
 function tableFor(kind: SubjectKind): 'users' | 'admins' {
-  return kind === 'user' ? 'users' : 'admins';
+  return kind === 'admin' ? 'admins' : 'users';
+}
+
+/** Yönetişim kind'ı (danisman/arge) için user kaydının governance_role'ü eşleşmeli. */
+function expectedGovernanceRoleFor(kind: SubjectKind): 'analitik_danisman' | 'yz_arge' | null {
+  if (kind === 'danisman') return 'analitik_danisman';
+  if (kind === 'arge') return 'yz_arge';
+  return null;
 }
 
 function findSubjectByEmail(kind: SubjectKind, email: string): SubjectRecord | undefined {
@@ -69,7 +109,13 @@ function resetFailedLogin(kind: SubjectKind, id: string): void {
 
 export interface LoginResult {
   tokens: IssuedTokens;
-  subject: { id: string; email: string; fullName: string; role: string };
+  subject: {
+    id: string;
+    email: string;
+    fullName: string;
+    role: string;
+    governanceRole?: 'analitik_danisman' | 'yz_arge' | null;
+  };
   locked: boolean;
 }
 
@@ -110,10 +156,14 @@ export async function login(
 
   resetFailedLogin(kind, record.id);
 
+  const governanceRole =
+    kind === 'user' ? (record as UserRecord).governance_role ?? null : undefined;
+
   const accessPayload = {
     sub: record.id,
     role: record.role,
     email: record.email,
+    ...(governanceRole !== undefined ? { governanceRole } : {}),
   };
 
   const { token: accessToken, ttl } = signAccessToken(kind, accessPayload);
@@ -126,6 +176,7 @@ export async function login(
       email: record.email,
       fullName: record.full_name,
       role: record.role,
+      ...(governanceRole !== undefined ? { governanceRole } : {}),
     },
     locked: false,
   };
@@ -173,9 +224,15 @@ export async function registerUser(input: RegisterInput): Promise<{ id: string; 
   const id = nanoid();
   try {
     db.prepare(
-      `INSERT INTO users (id, email, password_hash, full_name, role, status)
-       VALUES (?, ?, ?, ?, 'user', 1)`
-    ).run(id, normalizedEmail, passwordHash, input.fullName.trim());
+      `INSERT INTO users (id, email, password_hash, full_name, role, status, governance_role)
+       VALUES (?, ?, ?, ?, 'user', 1, ?)`
+    ).run(
+      id,
+      normalizedEmail,
+      passwordHash,
+      input.fullName.trim(),
+      input.governanceRole ?? null
+    );
   } catch (err) {
     // UNIQUE constraint çakışması (yarış durumu) — yine generic mesaj
     if ((err as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -189,9 +246,25 @@ export async function registerUser(input: RegisterInput): Promise<{ id: string; 
 
 export function findSubjectById(kind: SubjectKind, id: string): SubjectRecord | undefined {
   const table = tableFor(kind);
-  return getDb()
+  const row = getDb()
     .prepare(`SELECT * FROM ${table} WHERE id = ? AND status = 1 LIMIT 1`)
     .get(id) as SubjectRecord | undefined;
+  if (!row) return undefined;
+
+  // Yönetişim kind'ları için governance_role eşleşmesi şart — DB'de role
+  // değiştirilmişse eski token geçersizleşir.
+  const expectedRole = expectedGovernanceRoleFor(kind);
+  if (expectedRole !== null) {
+    const actual = (row as UserRecord).governance_role ?? null;
+    if (actual !== expectedRole) return undefined;
+  }
+  // Normal user için governance_role NULL olmalı; varsa danisman/arge kind'ına
+  // yönlendirilmiş, 'user' token'ı yanlış kişide.
+  if (kind === 'user') {
+    const actual = (row as UserRecord).governance_role ?? null;
+    if (actual !== null) return undefined;
+  }
+  return row;
 }
 
 /**
@@ -257,13 +330,33 @@ export async function unifiedLogin(email: string, password: string): Promise<Log
   }
 
   resetFailedLogin('user', userRecord.id);
-  const accessPayload = { sub: userRecord.id, role: userRecord.role, email: userRecord.email };
-  const { token: accessToken, ttl } = signAccessToken('user', accessPayload);
-  const { token: refreshToken } = issueRefreshToken('user', userRecord.id);
+  const governanceRole = (userRecord as UserRecord).governance_role ?? null;
+  // Yönetişim rolüne göre token kind'ı belirlenir — danisman/arge için ayrı
+  // audience'lı token üretilir, bu token user/admin endpoint'lerinde geçmez.
+  const effectiveKind: SubjectKind =
+    governanceRole === 'analitik_danisman'
+      ? 'danisman'
+      : governanceRole === 'yz_arge'
+        ? 'arge'
+        : 'user';
+  const accessPayload = {
+    sub: userRecord.id,
+    role: userRecord.role,
+    email: userRecord.email,
+    governanceRole,
+  };
+  const { token: accessToken, ttl } = signAccessToken(effectiveKind, accessPayload);
+  const { token: refreshToken } = issueRefreshToken(effectiveKind, userRecord.id);
   return {
-    kind: 'user',
+    kind: effectiveKind,
     tokens: { accessToken, refreshToken, expiresIn: ttl },
-    subject: { id: userRecord.id, email: userRecord.email, fullName: userRecord.full_name, role: userRecord.role },
+    subject: {
+      id: userRecord.id,
+      email: userRecord.email,
+      fullName: userRecord.full_name,
+      role: userRecord.role,
+      governanceRole,
+    },
     locked: false,
   };
 }

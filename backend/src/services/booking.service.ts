@@ -16,12 +16,28 @@ import {
   saveBookingEmbedding,
 } from './embedding.service';
 import { broadcastBooking, broadcastToAdmins } from './sse.service';
+import { recordAudit } from './audit.service';
 import {
   bookingCreatedAdminEmail,
   bookingReviewedEmail,
   enqueueEmail,
 } from './notification.service';
 import { logger } from '../utils/logger';
+
+export type LifecycleStage =
+  | 'application'
+  | 'development'
+  | 'stage'
+  | 'production'
+  | 'live';
+
+export const LIFECYCLE_STAGE_ORDER: LifecycleStage[] = [
+  'application',
+  'development',
+  'stage',
+  'production',
+  'live',
+];
 
 export interface BookingDto {
   id: string;
@@ -42,6 +58,16 @@ export interface BookingDto {
   adminFeedback: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  /** Yaşam döngüsü aşaması — application → development → stage → production → live. */
+  lifecycleStage: LifecycleStage;
+  /** Mevcut aşamaya girilme zamanı (SLA + audit). */
+  stageEnteredAt: string;
+  /** Review akışı: 'standard' (normal) veya 'swat' (fast-track). */
+  reviewTrack: 'standard' | 'swat';
+  /** Kullanıcı admin'den bir sonraki aşamaya ilerletme talebinde bulunduysa timestamp. */
+  stageAdvanceRequestedAt: string | null;
+  /** Talep gerekçesi/notu (opsiyonel). */
+  stageAdvanceNote: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -65,6 +91,11 @@ interface BookingRow {
   admin_feedback: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  lifecycle_stage: LifecycleStage;
+  stage_entered_at: string;
+  review_track: 'standard' | 'swat';
+  stage_advance_requested_at: string | null;
+  stage_advance_note: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -96,6 +127,11 @@ function rowToDto(r: BookingRow): BookingDto {
     adminFeedback: r.admin_feedback,
     reviewedBy: r.reviewed_by,
     reviewedAt: r.reviewed_at,
+    lifecycleStage: r.lifecycle_stage,
+    stageEnteredAt: r.stage_entered_at,
+    reviewTrack: r.review_track,
+    stageAdvanceRequestedAt: r.stage_advance_requested_at,
+    stageAdvanceNote: r.stage_advance_note,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -417,24 +453,49 @@ export function getBookingByIdAdmin(bookingId: string): BookingDto | undefined {
   return row ? rowToDto(row) : undefined;
 }
 
+export interface ReviewBookingResult {
+  booking: BookingDto;
+  /** Admin approve denedi ama oda doluydu → otomatik waitlist'e taşındı. */
+  autoWaitlisted?: boolean;
+  /** Waitlist'e taşındıysa atanmış sıra numarası. */
+  waitlistPosition?: number;
+}
+
 export function reviewBooking(
   adminId: string,
   bookingId: string,
   input: ReviewBookingInput
-): BookingDto {
+): ReviewBookingResult {
   const statusMap: Record<ReviewBookingInput['action'], BookingDto['status']> = {
     approve: 'approved',
     reject: 'rejected',
     request_feedback: 'feedback_requested',
   };
-  const newStatus = statusMap[input.action];
+  let newStatus = statusMap[input.action];
+  let autoWaitlistedPosition: number | null = null;
   const db = getDb();
 
   const txn = db.transaction(() => {
     const existing = db
-      .prepare(`SELECT id, status, room_id, start_date, end_date FROM bookings WHERE id = ?`)
+      .prepare(
+        `SELECT id, user_id, status, room_id, period_months, start_date, end_date,
+                project_name, project_description, help_needed, technologies
+         FROM bookings WHERE id = ?`
+      )
       .get(bookingId) as
-      | { id: string; status: string; room_id: string; start_date: string; end_date: string }
+      | {
+          id: string;
+          user_id: string;
+          status: string;
+          room_id: string;
+          period_months: 1 | 2 | 3;
+          start_date: string;
+          end_date: string;
+          project_name: string;
+          project_description: string;
+          help_needed: string;
+          technologies: string;
+        }
       | undefined;
 
     if (!existing) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
@@ -449,11 +510,67 @@ export function reviewBooking(
         )
         .get(existing.room_id, existing.id, existing.start_date, existing.end_date);
       if (conflict) {
-        throw new HttpError(
-          409,
-          'Bu booking onaylanamaz, oda zaten başka bir onaylı booking ile dolu.',
-          'ROOM_CONFLICT'
-        );
+        // ❗ Eski davranış 409 ROOM_CONFLICT fırlatıyordu. Yeni davranış: bu
+        // booking'i otomatik olarak waitlist'e ekle, kendisini 'rejected' yap.
+        // Kullanıcı bekleme listesinde sıra alır; oda boşaldığında promote edilir.
+
+        // 1) Mevcut waiting kuyrukta sıra numarası belirle.
+        const maxRow = db
+          .prepare(
+            `SELECT COALESCE(MAX(position), 0) AS max_pos
+             FROM waitlist WHERE room_id = ? AND status = 'waiting'`
+          )
+          .get(existing.room_id) as { max_pos: number };
+        const position = maxRow.max_pos + 1;
+
+        // 2) Aynı user aynı oda + aynı tarih için zaten kayıt var mı?
+        const dupe = db
+          .prepare(
+            `SELECT id FROM waitlist
+             WHERE user_id = ? AND room_id = ? AND desired_start_date = ?
+               AND status IN ('waiting', 'promoted')
+             LIMIT 1`
+          )
+          .get(existing.user_id, existing.room_id, existing.start_date);
+
+        if (!dupe) {
+          const wId = nanoid();
+          db.prepare(
+            `INSERT INTO waitlist (
+               id, user_id, room_id, period_months, desired_start_date,
+               project_name, project_description, help_needed, technologies, position, status
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`
+          ).run(
+            wId,
+            existing.user_id,
+            existing.room_id,
+            existing.period_months,
+            existing.start_date,
+            existing.project_name,
+            existing.project_description,
+            existing.help_needed,
+            existing.technologies,
+            position
+          );
+        }
+
+        // 3) Booking artık reddedilmiş + otomatik açıklayıcı feedback.
+        newStatus = 'rejected';
+        autoWaitlistedPosition = position;
+        const autoFeedback =
+          `Oda bu tarih aralığında dolu olduğu için talebiniz otomatik olarak ` +
+          `bekleme listesine alındı (sıra: ${position}). Oda boşaldığında ` +
+          `yeniden değerlendirilecektir.` +
+          (input.feedback ? `\n\nAdmin notu: ${input.feedback}` : '');
+
+        db.prepare(
+          `UPDATE bookings
+           SET status = 'rejected', admin_feedback = ?, reviewed_by = ?,
+               reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`
+        ).run(autoFeedback, adminId, bookingId);
+
+        return; // status update tamam, aşağıdaki update'i atla
       }
     }
 
@@ -463,6 +580,19 @@ export function reviewBooking(
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
     ).run(newStatus, input.feedback ?? null, adminId, bookingId);
+
+    // Onay sonrası proje yaşam döngüsüne giriş: application → development
+    // (sadece henüz application aşamasındaki booking'ler için; tekrar approve'da
+    // mevcut aşama korunur).
+    if (newStatus === 'approved') {
+      db.prepare(
+        `UPDATE bookings
+         SET lifecycle_stage = 'development',
+             stage_entered_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND lifecycle_stage = 'application'`
+      ).run(bookingId);
+    }
   });
 
   txn();
@@ -495,6 +625,24 @@ export function reviewBooking(
     );
   }
 
+  // In-app bildirim — talep sahibine.
+  void import('./notification-center.service').then((m) => {
+    const notifTitle =
+      newStatus === 'approved'
+        ? 'Randevu talebin onaylandı'
+        : newStatus === 'rejected'
+          ? 'Randevu talebin reddedildi'
+          : 'Randevu talebin için düzeltme istendi';
+    m.pushNotification({
+      recipientId: reviewed.userId,
+      recipientType: 'user',
+      category: 'booking',
+      title: notifTitle,
+      body: `"${reviewed.projectName}" (${reviewed.roomCode}) — Taleplerim sayfasından görüntüle.`,
+      link: '/bookings',
+    });
+  });
+
   // Eğer reject ya da feedback_requested ile slot serbest kaldıysa,
   // waitlist promotion tetikle (oda durum değişimi).
   if (newStatus === 'rejected') {
@@ -509,5 +657,598 @@ export function reviewBooking(
       );
   }
 
-  return reviewed;
+  // Otomatik waitlist'e taşındıysa: admin'lere kuyruğun güncellendiğini bildir
+  // + kullanıcıya in-app bildirim (toast yerine kalıcı notification).
+  if (autoWaitlistedPosition !== null) {
+    recordAudit({
+      eventType: 'waitlist.joined',
+      subjectId: adminId,
+      subjectType: 'admin',
+      success: true,
+      details: {
+        bookingId,
+        userId: reviewed.userId,
+        roomId: reviewed.roomId,
+        position: autoWaitlistedPosition,
+        autoFromBooking: true,
+      },
+    });
+    broadcastToAdmins({
+      type: 'waitlist.changed',
+      data: { roomId: reviewed.roomId, action: 'auto_added_from_booking' },
+    });
+  }
+
+  return {
+    booking: reviewed,
+    autoWaitlisted: autoWaitlistedPosition !== null,
+    waitlistPosition: autoWaitlistedPosition ?? undefined,
+  };
+}
+
+/**
+ * Admin: bir booking'i başka bir odaya taşır (oda ataması değiştirme).
+ *
+ * Onaylı bir booking taşınırken hedef oda aynı tarih aralığında başka bir
+ * onaylı booking ile çakışmamalı (race condition koruması — transaction).
+ */
+export function reassignBookingRoom(
+  adminId: string,
+  bookingId: string,
+  newRoomId: string
+): BookingDto {
+  const db = getDb();
+
+  const txn = db.transaction(() => {
+    const existing = db
+      .prepare(
+        `SELECT id, room_id, status, start_date, end_date FROM bookings WHERE id = ?`
+      )
+      .get(bookingId) as
+      | { id: string; room_id: string; status: string; start_date: string; end_date: string }
+      | undefined;
+    if (!existing) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+
+    if (existing.room_id === newRoomId) {
+      throw new HttpError(400, 'Booking zaten bu odada.', 'SAME_ROOM');
+    }
+
+    const room = db
+      .prepare(`SELECT id FROM rooms WHERE id = ? AND is_active = 1`)
+      .get(newRoomId) as { id: string } | undefined;
+    if (!room) throw new HttpError(404, 'Hedef oda bulunamadı.', 'ROOM_NOT_FOUND');
+
+    // Onaylı booking için hedef odada tarih çakışması kontrolü.
+    if (existing.status === 'approved') {
+      const conflict = db
+        .prepare(
+          `SELECT id FROM bookings
+           WHERE room_id = ? AND id != ? AND status = 'approved'
+             AND NOT (end_date < ? OR start_date > ?)
+           LIMIT 1`
+        )
+        .get(newRoomId, existing.id, existing.start_date, existing.end_date);
+      if (conflict) {
+        throw new HttpError(
+          409,
+          'Hedef oda bu tarih aralığında başka bir onaylı booking ile dolu.',
+          'ROOM_CONFLICT'
+        );
+      }
+    }
+
+    db.prepare(
+      `UPDATE bookings SET room_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).run(newRoomId, bookingId);
+
+    return existing.room_id;
+  });
+
+  const oldRoomId = txn();
+  const reassigned = getBookingByIdAdmin(bookingId) as BookingDto;
+
+  recordAudit({
+    eventType: 'booking.reassigned',
+    subjectId: adminId,
+    subjectType: 'admin',
+    success: true,
+    details: { bookingId, fromRoomId: oldRoomId, toRoomId: newRoomId },
+  });
+
+  broadcastBooking(
+    { type: 'booking.updated', data: { bookingId, kind: 'reassigned' } },
+    reassigned.userId
+  );
+
+  return reassigned;
+}
+
+/**
+ * Admin: bir booking'i tamamen siler (hard delete).
+ *
+ * Kullanıcı `deleteBooking`'inden farkı:
+ *  - Status fark etmez (approved/rejected dahil tümü silinebilir).
+ *  - Audit'e `booking.admin_deleted` event tipi düşer.
+ *  - Booking onaylıydıysa odada slot serbest kalır → waitlist promote tetiklenir.
+ */
+export function adminDeleteBooking(
+  adminId: string,
+  bookingId: string
+): { deleted: boolean; roomId: string; userId: string; wasApproved: boolean } {
+  const db = getDb();
+
+  const txn = db.transaction(() => {
+    const existing = db
+      .prepare(`SELECT id, user_id, room_id, status FROM bookings WHERE id = ?`)
+      .get(bookingId) as
+      | { id: string; user_id: string; room_id: string; status: string }
+      | undefined;
+
+    if (!existing) {
+      throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+    }
+
+    db.prepare('DELETE FROM bookings WHERE id = ?').run(bookingId);
+    return existing;
+  });
+
+  const existing = txn();
+  deleteBookingEmbedding(bookingId);
+
+  recordAudit({
+    eventType: 'booking.admin_deleted',
+    subjectId: adminId,
+    subjectType: 'admin',
+    success: true,
+    details: {
+      bookingId,
+      userId: existing.user_id,
+      roomId: existing.room_id,
+      previousStatus: existing.status,
+    },
+  });
+
+  broadcastBooking(
+    { type: 'booking.withdrawn', data: { bookingId } },
+    existing.user_id
+  );
+  broadcastToAdmins({
+    type: 'booking.withdrawn',
+    data: { bookingId, roomId: existing.room_id },
+  });
+
+  const wasApproved = existing.status === 'approved';
+  if (wasApproved) {
+    // Slot boşaldı → waitlist promotion (async, response'u bekletmez).
+    import('./waitlist.service')
+      .then((m) => m.tryPromoteForRoom(existing.room_id))
+      .catch((err) =>
+        logger.warn('waitlist_promote_failed', {
+          roomId: existing.room_id,
+          err: (err as Error).message,
+        })
+      );
+  }
+
+  return {
+    deleted: true,
+    roomId: existing.room_id,
+    userId: existing.user_id,
+    wasApproved,
+  };
+}
+
+/**
+ * Admin: bir booking'in user'ını değiştirir (kullanıcı yeniden atama).
+ *
+ * Kullanım: oda dolu ama yanlış kişi rezervasyon yapmış → admin doğru kullanıcıya
+ * taşır. Onaylı booking için ek bir tarih çakışma kontrolü gerekmez (oda zaten
+ * o tarihte bu booking'e ayrılmış).
+ */
+export function reassignBookingUser(
+  adminId: string,
+  bookingId: string,
+  newUserId: string
+): BookingDto {
+  const db = getDb();
+
+  const txn = db.transaction(() => {
+    const existing = db
+      .prepare(`SELECT id, user_id, room_id, status FROM bookings WHERE id = ?`)
+      .get(bookingId) as
+      | { id: string; user_id: string; room_id: string; status: string }
+      | undefined;
+    if (!existing) {
+      throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+    }
+
+    if (existing.user_id === newUserId) {
+      throw new HttpError(400, 'Booking zaten bu kullanıcıya ait.', 'SAME_USER');
+    }
+
+    const user = db
+      .prepare(`SELECT id FROM users WHERE id = ? AND status = 1`)
+      .get(newUserId) as { id: string } | undefined;
+    if (!user) {
+      throw new HttpError(404, 'Hedef kullanıcı bulunamadı veya pasif.', 'USER_NOT_FOUND');
+    }
+
+    db.prepare(
+      `UPDATE bookings SET user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).run(newUserId, bookingId);
+
+    return existing;
+  });
+
+  const existing = txn();
+  const reassigned = getBookingByIdAdmin(bookingId) as BookingDto;
+
+  recordAudit({
+    eventType: 'booking.user_reassigned',
+    subjectId: adminId,
+    subjectType: 'admin',
+    success: true,
+    details: {
+      bookingId,
+      fromUserId: existing.user_id,
+      toUserId: newUserId,
+      roomId: existing.room_id,
+    },
+  });
+
+  // Hem eski hem yeni user'a haber ver, ayrıca admin kanalı.
+  broadcastBooking(
+    { type: 'booking.updated', data: { bookingId, kind: 'user_reassigned' } },
+    existing.user_id
+  );
+  broadcastBooking(
+    { type: 'booking.updated', data: { bookingId, kind: 'user_reassigned' } },
+    newUserId
+  );
+  broadcastToAdmins({
+    type: 'booking.updated',
+    data: { bookingId, kind: 'user_reassigned' },
+  });
+
+  return reassigned;
+}
+
+/**
+ * Admin: bir booking'i yaşam döngüsünde bir sonraki aşamaya ilerletir.
+ *
+ *   application → development → stage → production → live
+ *
+ * 'application' aşamasından çıkış zaten reviewBooking(approve) ile yapılır,
+ * bu fonksiyon onun ötesindeki manuel ilerletmeler için kullanılır. Booking
+ * onaylanmış olmalıdır (status='approved').
+ */
+export function advanceBookingLifecycle(
+  adminId: string,
+  bookingId: string
+): BookingDto {
+  const db = getDb();
+
+  const txn = db.transaction(() => {
+    const existing = db
+      .prepare(
+        `SELECT id, status, lifecycle_stage FROM bookings WHERE id = ?`
+      )
+      .get(bookingId) as
+      | { id: string; status: string; lifecycle_stage: LifecycleStage }
+      | undefined;
+    if (!existing) {
+      throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+    }
+    if (existing.status !== 'approved') {
+      throw new HttpError(
+        409,
+        'Sadece onaylanmış booking ilerletilebilir.',
+        'BOOKING_NOT_APPROVED'
+      );
+    }
+
+    const currentIdx = LIFECYCLE_STAGE_ORDER.indexOf(existing.lifecycle_stage);
+    if (currentIdx < 0 || currentIdx >= LIFECYCLE_STAGE_ORDER.length - 1) {
+      throw new HttpError(
+        409,
+        'Booking zaten son aşamada (live).',
+        'LIFECYCLE_TERMINAL'
+      );
+    }
+    const next = LIFECYCLE_STAGE_ORDER[currentIdx + 1];
+
+    // İlerlerken varsa bekleyen kullanıcı talebi tüketilir (talep karşılandı).
+    db.prepare(
+      `UPDATE bookings
+       SET lifecycle_stage = ?, stage_entered_at = CURRENT_TIMESTAMP,
+           stage_advance_requested_at = NULL,
+           stage_advance_note = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).run(next, bookingId);
+
+    return { from: existing.lifecycle_stage, to: next };
+  });
+
+  const { from, to } = txn();
+  const updated = getBookingByIdAdmin(bookingId) as BookingDto;
+
+  recordAudit({
+    eventType: 'booking.updated',
+    subjectId: adminId,
+    subjectType: 'admin',
+    success: true,
+    details: { bookingId, kind: 'lifecycle_advanced', fromStage: from, toStage: to },
+  });
+
+  broadcastBooking(
+    {
+      type: 'booking.updated',
+      data: { bookingId, kind: 'lifecycle_advanced', stage: to },
+    },
+    updated.userId
+  );
+  broadcastToAdmins({
+    type: 'booking.updated',
+    data: { bookingId, kind: 'lifecycle_advanced', stage: to },
+  });
+
+  return updated;
+}
+
+/**
+ * Admin: bir booking'i yaşam döngüsünde bir önceki aşamaya geri al.
+ *
+ *   live → production → stage → development
+ *
+ * 'development'dan geri 'application'a düşmek senaryosu manuel iptal anlamına
+ * gelir ve burada engellenir; bunun yerine reviewBooking(reject) kullanılmalı.
+ */
+export function regressBookingLifecycle(
+  adminId: string,
+  bookingId: string
+): BookingDto {
+  const db = getDb();
+
+  const txn = db.transaction(() => {
+    const existing = db
+      .prepare(
+        `SELECT id, status, lifecycle_stage FROM bookings WHERE id = ?`
+      )
+      .get(bookingId) as
+      | { id: string; status: string; lifecycle_stage: LifecycleStage }
+      | undefined;
+    if (!existing) {
+      throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+    }
+    if (existing.status !== 'approved') {
+      throw new HttpError(
+        409,
+        'Sadece onaylanmış booking geri alınabilir.',
+        'BOOKING_NOT_APPROVED'
+      );
+    }
+
+    const currentIdx = LIFECYCLE_STAGE_ORDER.indexOf(existing.lifecycle_stage);
+    if (currentIdx <= 1) {
+      // 0 = application, 1 = development. Daha geri gitmek istenirse review-reject akışı.
+      throw new HttpError(
+        409,
+        'Booking en erken aşamada — daha geri alınamaz.',
+        'LIFECYCLE_AT_START'
+      );
+    }
+    const prev = LIFECYCLE_STAGE_ORDER[currentIdx - 1];
+
+    db.prepare(
+      `UPDATE bookings
+       SET lifecycle_stage = ?, stage_entered_at = CURRENT_TIMESTAMP,
+           stage_advance_requested_at = NULL,
+           stage_advance_note = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).run(prev, bookingId);
+
+    return { from: existing.lifecycle_stage, to: prev };
+  });
+
+  const { from, to } = txn();
+  const updated = getBookingByIdAdmin(bookingId) as BookingDto;
+
+  recordAudit({
+    eventType: 'booking.updated',
+    subjectId: adminId,
+    subjectType: 'admin',
+    success: true,
+    details: { bookingId, kind: 'lifecycle_regressed', fromStage: from, toStage: to },
+  });
+
+  broadcastBooking(
+    {
+      type: 'booking.updated',
+      data: { bookingId, kind: 'lifecycle_regressed', stage: to },
+    },
+    updated.userId
+  );
+  broadcastToAdmins({
+    type: 'booking.updated',
+    data: { bookingId, kind: 'lifecycle_regressed', stage: to },
+  });
+
+  return updated;
+}
+
+/**
+ * Admin: bir booking'i SWAT (fast-track) inceleme akışına alır veya çıkarır.
+ * SWAT işareti review için "yüksek öncelikli" anlamına gelir.
+ */
+export function setBookingReviewTrack(
+  adminId: string,
+  bookingId: string,
+  track: 'standard' | 'swat'
+): BookingDto {
+  const db = getDb();
+  const existing = db
+    .prepare(`SELECT id, review_track FROM bookings WHERE id = ?`)
+    .get(bookingId) as { id: string; review_track: string } | undefined;
+  if (!existing) {
+    throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+  }
+  if (existing.review_track === track) {
+    throw new HttpError(400, 'Booking zaten bu inceleme akışında.', 'SAME_TRACK');
+  }
+  db.prepare(
+    `UPDATE bookings SET review_track = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+  ).run(track, bookingId);
+
+  const updated = getBookingByIdAdmin(bookingId) as BookingDto;
+
+  recordAudit({
+    eventType: 'booking.updated',
+    subjectId: adminId,
+    subjectType: 'admin',
+    success: true,
+    details: { bookingId, kind: 'review_track_changed', track },
+  });
+
+  broadcastBooking(
+    { type: 'booking.updated', data: { bookingId, kind: 'review_track_changed', track } },
+    updated.userId
+  );
+  broadcastToAdmins({
+    type: 'booking.updated',
+    data: { bookingId, kind: 'review_track_changed', track },
+  });
+
+  return updated;
+}
+
+/**
+ * Kullanıcı: onaylı projesinin bir sonraki aşamaya ilerletilmesi için admin'den
+ * talep oluşturur. Talep yoksa stage_advance_requested_at=now, varsa idempotent
+ * olarak yenilenir (kullanıcı not'unu güncelleyebilir).
+ */
+export function requestStageAdvance(
+  userId: string,
+  bookingId: string,
+  note?: string
+): BookingDto {
+  const db = getDb();
+
+  const txn = db.transaction(() => {
+    const existing = db
+      .prepare(
+        `SELECT id, user_id, status, lifecycle_stage FROM bookings WHERE id = ?`
+      )
+      .get(bookingId) as
+      | { id: string; user_id: string; status: string; lifecycle_stage: LifecycleStage }
+      | undefined;
+    if (!existing) {
+      throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+    }
+    if (existing.user_id !== userId) {
+      throw new HttpError(403, 'Bu booking size ait değil.', 'NOT_OWNED');
+    }
+    if (existing.status !== 'approved') {
+      throw new HttpError(
+        409,
+        'Sadece onaylı projeler için aşama talebi oluşturulabilir.',
+        'BOOKING_NOT_APPROVED'
+      );
+    }
+    const idx = LIFECYCLE_STAGE_ORDER.indexOf(existing.lifecycle_stage);
+    if (idx >= LIFECYCLE_STAGE_ORDER.length - 1) {
+      throw new HttpError(
+        409,
+        'Proje zaten son aşamada (canlı).',
+        'LIFECYCLE_TERMINAL'
+      );
+    }
+
+    db.prepare(
+      `UPDATE bookings
+       SET stage_advance_requested_at = CURRENT_TIMESTAMP,
+           stage_advance_note = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).run((note ?? '').trim().slice(0, 500) || null, bookingId);
+  });
+
+  txn();
+  const updated = getBookingByIdAdmin(bookingId) as BookingDto;
+
+  recordAudit({
+    eventType: 'booking.updated',
+    subjectId: userId,
+    subjectType: 'user',
+    success: true,
+    details: { bookingId, kind: 'stage_advance_requested', note: note ?? null },
+  });
+
+  // Sadece adminlere bildir — yeni iş kuyruğunda.
+  broadcastToAdmins({
+    type: 'booking.updated',
+    data: {
+      bookingId,
+      kind: 'stage_advance_requested',
+      userId: updated.userId,
+      currentStage: updated.lifecycleStage,
+    },
+  });
+
+  return updated;
+}
+
+/**
+ * Admin: kullanıcının aşama ilerletme talebini reddet (ilerletmeden iptal et).
+ * Reddedildiğinde sebep `note` parametresi ile audit log'a düşer.
+ */
+export function rejectStageAdvanceRequest(
+  adminId: string,
+  bookingId: string,
+  note?: string
+): BookingDto {
+  const db = getDb();
+  const existing = db
+    .prepare(
+      `SELECT id, user_id, stage_advance_requested_at FROM bookings WHERE id = ?`
+    )
+    .get(bookingId) as
+    | { id: string; user_id: string; stage_advance_requested_at: string | null }
+    | undefined;
+  if (!existing) {
+    throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+  }
+  if (!existing.stage_advance_requested_at) {
+    throw new HttpError(409, 'Bekleyen bir aşama talebi yok.', 'NO_REQUEST');
+  }
+
+  db.prepare(
+    `UPDATE bookings
+     SET stage_advance_requested_at = NULL,
+         stage_advance_note = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`
+  ).run(bookingId);
+
+  const updated = getBookingByIdAdmin(bookingId) as BookingDto;
+
+  recordAudit({
+    eventType: 'booking.updated',
+    subjectId: adminId,
+    subjectType: 'admin',
+    success: true,
+    details: { bookingId, kind: 'stage_advance_rejected', adminNote: note ?? null },
+  });
+
+  broadcastBooking(
+    { type: 'booking.updated', data: { bookingId, kind: 'stage_advance_rejected' } },
+    existing.user_id
+  );
+  broadcastToAdmins({
+    type: 'booking.updated',
+    data: { bookingId, kind: 'stage_advance_rejected' },
+  });
+
+  return updated;
 }

@@ -34,6 +34,7 @@ export type SseEventType =
   | 'booking.reviewed'
   | 'booking.withdrawn'
   | 'waitlist.changed'
+  | 'appointment.changed'
   | 'ping';
 
 export interface SsePayload {

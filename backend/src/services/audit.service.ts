@@ -27,6 +27,14 @@ export type AuditEventType =
   | 'waitlist.joined'
   | 'waitlist.left'
   | 'waitlist.promoted'
+  | 'waitlist.reordered'
+  | 'booking.reassigned'
+  | 'booking.user_reassigned'
+  | 'booking.admin_deleted'
+  | 'appointment.created'
+  | 'appointment.cancelled'
+  | 'admin.password_reset'
+  | 'admin.password_changed'
   | 'user.update'
   | 'user.delete'
   | 'user.restore'
@@ -34,10 +42,15 @@ export type AuditEventType =
   | 'message.sent'
   | 'showcase.liked'
   | 'showcase.commented'
+  | 'license_request.created'
+  | 'license_request.updated'
+  | 'license_request.reviewed'
+  | 'password_reset.requested'
+  | 'password_reset.completed'
   | 'rate_limit.exceeded'
   | 'csrf.failure';
 
-export type SubjectType = 'user' | 'admin' | 'anonymous';
+export type SubjectType = 'user' | 'admin' | 'danisman' | 'arge' | 'anonymous';
 
 export interface AuditEvent {
   eventType: AuditEventType;

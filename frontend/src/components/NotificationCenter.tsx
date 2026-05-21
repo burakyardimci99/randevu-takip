@@ -2,53 +2,26 @@
  * Bildirim Merkezi — header zil + popover.
  *
  * Veri kaynağı:
- *  - User: cevap bekleyen admin mesajları (api.userUnreadCount)
- *  - User: kendi booking'lerinin son state değişiklikleri (SSE event'leri)
- *  - Admin: yeni booking + cevap bekleyen user mesajları
+ *  - Kalıcı bildirimler: backend `notifications` tablosu
+ *    (booking/lisans review, yeni lisans başvurusu vb.).
+ *  - Anlık güncelleme: SSE event'i geldiğinde liste yeniden çekilir.
+ *  - Mesaj sayacı: cevap bekleyen booking mesajları ayrı bir uyarı bandında.
  *
- * Pratik yaklaşım: state SSE event'leri ile in-memory tutulur (50 son event).
- * Sayfa yenilense de "unread count" backend'den fetch edilir.
+ * Kalıcılık: kullanıcı çevrimdışıyken oluşan bildirimler de sonradan görünür
+ * (eski SSE-only + sessionStorage yaklaşımının aksine).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
-import type { SubjectKind } from '../types';
-
-interface NotifyItem {
-  id: string;
-  icon: 'message' | 'booking' | 'waitlist' | 'system';
-  title: string;
-  body: string;
-  link?: string;
-  createdAt: number;
-  unread: boolean;
-}
+import type { AppNotification, NotificationCategory, SubjectKind } from '../types';
 
 interface Props {
   kind: SubjectKind;
 }
 
-const STORAGE_KEY = (k: SubjectKind) => `klab:notify:${k}`;
-
-function loadFromStorage(kind: SubjectKind): NotifyItem[] {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY(kind));
-    if (!raw) return [];
-    return JSON.parse(raw) as NotifyItem[];
-  } catch {
-    return [];
-  }
-}
-function saveToStorage(kind: SubjectKind, items: NotifyItem[]): void {
-  try {
-    sessionStorage.setItem(STORAGE_KEY(kind), JSON.stringify(items.slice(0, 50)));
-  } catch {
-    /* ignore */
-  }
-}
-
-function fmtRelative(ms: number): string {
+function fmtRelative(iso: string): string {
+  const ms = new Date(iso).getTime();
   const diff = Date.now() - ms;
   if (diff < 60_000) return 'az önce';
   if (diff < 3600_000) return `${Math.floor(diff / 60_000)} dk önce`;
@@ -58,86 +31,37 @@ function fmtRelative(ms: number): string {
 
 export function NotificationCenter({ kind }: Props) {
   const navigate = useNavigate();
-  const [items, setItems] = useState<NotifyItem[]>(() => loadFromStorage(kind));
+  const [items, setItems] = useState<AppNotification[]>([]);
+  const [unread, setUnread] = useState(0);
+  const [messageUnread, setMessageUnread] = useState(0);
   const [open, setOpen] = useState(false);
-  const [serverUnread, setServerUnread] = useState(0);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
-  // Sayfa yenilenince server'dan unread count
-  const refreshServerUnread = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
-      const res = kind === 'admin' ? await api.adminUnreadCount() : await api.userUnreadCount();
-      setServerUnread(res.unread);
+      const [notif, msg] = await Promise.all([
+        api.listNotifications(kind),
+        (kind === 'admin' ? api.adminUnreadCount() : api.userUnreadCount()).catch(() => ({
+          unread: 0,
+        })),
+      ]);
+      setItems(notif.items);
+      setUnread(notif.unread);
+      setMessageUnread(msg.unread);
     } catch {
-      // ignore
+      // sessiz — bildirim merkezi kritik yol değil
     }
   }, [kind]);
 
   useEffect(() => {
-    refreshServerUnread();
-    const t = window.setInterval(refreshServerUnread, 60_000);
+    void load();
+    const t = window.setInterval(() => void load(), 60_000);
     return () => window.clearInterval(t);
-  }, [refreshServerUnread]);
+  }, [load]);
 
-  // Real-time
-  useRealtimeEvents(kind, (type, data) => {
-    const d = (data ?? {}) as { bookingId?: string; status?: string; kind?: string; fromWaitlist?: boolean };
-    let item: NotifyItem | null = null;
-    if (type === 'booking.reviewed' && kind === 'user') {
-      const status = d.status ?? '';
-      item = {
-        id: `bookrev-${d.bookingId}-${Date.now()}`,
-        icon: 'booking',
-        title:
-          status === 'approved'
-            ? 'Talebiniz onaylandı'
-            : status === 'rejected'
-            ? 'Talebiniz reddedildi'
-            : 'Düzeltme istendi',
-        body: 'Detaylar için Taleplerim sayfasını açın.',
-        link: '/bookings',
-        createdAt: Date.now(),
-        unread: true,
-      };
-    } else if (type === 'booking.created' && kind === 'admin') {
-      item = {
-        id: `newbook-${d.bookingId}-${Date.now()}`,
-        icon: 'booking',
-        title: d.fromWaitlist ? 'Bekleme listesinden yeni talep' : 'Yeni talep geldi',
-        body: 'Admin paneline gidip inceleyin.',
-        link: '/admin',
-        createdAt: Date.now(),
-        unread: true,
-      };
-    } else if (type === 'booking.updated' && d.kind === 'new_message') {
-      item = {
-        id: `msg-${d.bookingId}-${Date.now()}`,
-        icon: 'message',
-        title: 'Yeni mesaj geldi',
-        body: 'Booking konuşmasında yeni bir mesaj var.',
-        link: kind === 'admin' ? '/admin' : '/bookings',
-        createdAt: Date.now(),
-        unread: true,
-      };
-    } else if (type === 'waitlist.changed' && d.kind === 'promoted') {
-      item = {
-        id: `wpro-${Date.now()}`,
-        icon: 'waitlist',
-        title: 'Sıranız geldi',
-        body: 'Bekleme listenizden talebiniz oluşturuldu.',
-        link: '/bookings',
-        createdAt: Date.now(),
-        unread: true,
-      };
-    }
-    if (item) {
-      setItems((curr) => {
-        const next = [item!, ...curr].slice(0, 50);
-        saveToStorage(kind, next);
-        return next;
-      });
-      refreshServerUnread();
-    }
+  // Real-time: ilgili bir event gelince listeyi tazele.
+  useRealtimeEvents(kind, () => {
+    void load();
   });
 
   // Click outside → kapat
@@ -162,31 +86,31 @@ export function NotificationCenter({ kind }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  const localUnread = items.filter((i) => i.unread).length;
-  const totalUnread = serverUnread + localUnread;
+  const totalUnread = unread + messageUnread;
   const hasAny = items.length > 0 || totalUnread > 0;
 
-  function markAllRead() {
-    setItems((curr) => {
-      const next = curr.map((i) => ({ ...i, unread: false }));
-      saveToStorage(kind, next);
-      return next;
-    });
+  async function markAllRead() {
+    try {
+      await api.markAllNotificationsRead(kind);
+      setItems((curr) => curr.map((i) => ({ ...i, read: true })));
+      setUnread(0);
+    } catch {
+      /* ignore */
+    }
   }
 
-  function clickItem(item: NotifyItem) {
-    setItems((curr) => {
-      const next = curr.map((i) => (i.id === item.id ? { ...i, unread: false } : i));
-      saveToStorage(kind, next);
-      return next;
-    });
+  async function clickItem(item: AppNotification) {
+    if (!item.read) {
+      setItems((curr) => curr.map((i) => (i.id === item.id ? { ...i, read: true } : i)));
+      setUnread((u) => Math.max(0, u - 1));
+      try {
+        await api.markNotificationRead(kind, item.id);
+      } catch {
+        /* ignore */
+      }
+    }
     if (item.link) navigate(item.link);
     setOpen(false);
-  }
-
-  function clearAll() {
-    setItems([]);
-    saveToStorage(kind, []);
   }
 
   return (
@@ -217,18 +141,14 @@ export function NotificationCenter({ kind }: Props) {
                 <div className="text-[10px] text-kt-gray-500">{totalUnread} okunmamış</div>
               )}
             </div>
-            <div className="flex gap-2 text-[11px]">
-              {localUnread > 0 && (
-                <button onClick={markAllRead} className="text-kt-green-700 hover:text-kt-gold-700 font-semibold">
-                  Hepsini okundu yap
-                </button>
-              )}
-              {items.length > 0 && (
-                <button onClick={clearAll} className="text-rose-500 hover:text-rose-700 font-semibold">
-                  Temizle
-                </button>
-              )}
-            </div>
+            {unread > 0 && (
+              <button
+                onClick={markAllRead}
+                className="text-[11px] text-kt-green-700 hover:text-kt-gold-700 font-semibold"
+              >
+                Hepsini okundu yap
+              </button>
+            )}
           </div>
 
           {/* Body */}
@@ -241,14 +161,14 @@ export function NotificationCenter({ kind }: Props) {
               </div>
               <div>Bildirim yok</div>
               <div className="text-[10px] text-kt-gray-400 mt-1">
-                Yeni mesaj veya talep değişimlerinde burada görünür.
+                Talep değişimleri ve onaylar burada görünür.
               </div>
             </div>
           ) : (
             <div className="overflow-y-auto scrollbar-thin flex-1">
-              {serverUnread > 0 && (
+              {messageUnread > 0 && (
                 <div className="px-4 py-2 bg-kt-gold-50 border-b border-kt-gold-100 text-xs text-kt-gold-800">
-                  <strong>{serverUnread}</strong> okunmamış mesaj var.
+                  <strong>{messageUnread}</strong> okunmamış mesaj var.
                   <button
                     onClick={() => {
                       navigate(kind === 'admin' ? '/admin' : '/bookings');
@@ -260,42 +180,52 @@ export function NotificationCenter({ kind }: Props) {
                   </button>
                 </div>
               )}
-              <ul>
-                {items.map((it) => (
-                  <li key={it.id}>
-                    <button
-                      onClick={() => clickItem(it)}
-                      className={`w-full text-left px-4 py-3 border-b border-kt-gray-50 hover:bg-kt-gray-50 transition-colors flex items-start gap-3 ${
-                        it.unread ? 'bg-kt-gold-50/30' : ''
-                      }`}
-                    >
-                      <div
-                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                          it.icon === 'message'
-                            ? 'bg-blue-100 text-blue-700'
-                            : it.icon === 'booking'
-                            ? 'bg-kt-gold-100 text-kt-gold-700'
-                            : it.icon === 'waitlist'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-kt-gray-100 text-kt-gray-600'
+              {items.length === 0 ? (
+                <div className="p-6 text-center text-xs text-kt-gray-400">
+                  Kalıcı bildirim yok.
+                </div>
+              ) : (
+                <ul>
+                  {items.map((it) => (
+                    <li key={it.id}>
+                      <button
+                        onClick={() => clickItem(it)}
+                        className={`w-full text-left px-4 py-3 border-b border-kt-gray-50 hover:bg-kt-gray-50 transition-colors flex items-start gap-3 ${
+                          !it.read ? 'bg-kt-gold-50/30' : ''
                         }`}
                       >
-                        <NotifyIcon icon={it.icon} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-semibold text-kt-green-900 truncate flex items-center gap-1.5">
-                          {it.title}
-                          {it.unread && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />}
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                            it.category === 'message'
+                              ? 'bg-blue-100 text-blue-700'
+                              : it.category === 'booking'
+                              ? 'bg-kt-gold-100 text-kt-gold-700'
+                              : it.category === 'waitlist'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : it.category === 'license'
+                              ? 'bg-violet-100 text-violet-700'
+                              : 'bg-kt-gray-100 text-kt-gray-600'
+                          }`}
+                        >
+                          <NotifyIcon category={it.category} />
                         </div>
-                        <div className="text-xs text-kt-gray-500 truncate">{it.body}</div>
-                        <div className="text-[10px] text-kt-gray-400 mt-0.5">
-                          {fmtRelative(it.createdAt)}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold text-kt-green-900 flex items-center gap-1.5">
+                            <span className="truncate">{it.title}</span>
+                            {!it.read && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                            )}
+                          </div>
+                          <div className="text-xs text-kt-gray-500 line-clamp-2">{it.body}</div>
+                          <div className="text-[10px] text-kt-gray-400 mt-0.5">
+                            {fmtRelative(it.createdAt)}
+                          </div>
                         </div>
-                      </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
         </div>
@@ -304,24 +234,36 @@ export function NotificationCenter({ kind }: Props) {
   );
 }
 
-function NotifyIcon({ icon }: { icon: NotifyItem['icon'] }) {
-  const common = { className: 'w-4 h-4', fill: 'none', stroke: 'currentColor', strokeWidth: '2', viewBox: '0 0 24 24' };
-  if (icon === 'message')
+function NotifyIcon({ category }: { category: NotificationCategory }) {
+  const common = {
+    className: 'w-4 h-4',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '2',
+    viewBox: '0 0 24 24',
+  };
+  if (category === 'message')
     return (
       <svg {...common}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
       </svg>
     );
-  if (icon === 'booking')
+  if (category === 'booking')
     return (
       <svg {...common}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
       </svg>
     );
-  if (icon === 'waitlist')
+  if (category === 'waitlist')
     return (
       <svg {...common}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    );
+  if (category === 'license')
+    return (
+      <svg {...common}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
       </svg>
     );
   return (

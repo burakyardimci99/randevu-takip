@@ -11,6 +11,12 @@
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
 import { getDb } from './schema';
+import {
+  GATE_DEFINITIONS,
+  applicableGates,
+  type GateKey,
+  type GovernanceLevel,
+} from '../services/governance-data';
 
 /* ============================================================
  * 1) ODALAR
@@ -22,21 +28,62 @@ interface RoomSeed {
   neighborhood: string;
   capacity: number;
   theme: string;
+  equipment: string;
   description: string;
 }
 
+/**
+ * Resmi AILAB envanteri — basement (-1D) zone.
+ *
+ * 18 cihaz pod'u + 1 deneyim alanı = toplam 19 oda.
+ *  - NVD pod'ları: NVIDIA DGX SPARK (GPU compute) — "neural" tema
+ *  - MAC pod'ları: MAC STUDIO (genel geliştirme) — "code" tema
+ *  - 2x suffix: aynı pod'da 2 cihaz, capacity 2
+ *  - "AI Deneyim Alanı": eğitim / demo odası, 15 kişilik workshop alanı
+ */
 const ROOMS: RoomSeed[] = [
-  { code: 'KT-01', district: 'Kadıköy',      neighborhood: 'Moda',           capacity: 6, theme: 'robot',   description: 'Doğal ışıklı, sessiz pod. Küçük ekip çalışmaları için ideal.' },
-  { code: 'KT-02', district: 'Beşiktaş',     neighborhood: 'Bebek',          capacity: 4, theme: 'pc',      description: 'Butik toplantı odası, video konferans donanımlı.' },
-  { code: 'KT-03', district: 'Şişli',        neighborhood: 'Nişantaşı',      capacity: 8, theme: 'neural',  description: 'Geniş workshop odası, üç adet beyaz tahta ve sunum ekranı.' },
-  { code: 'KT-04', district: 'Üsküdar',      neighborhood: 'Kuzguncuk',      capacity: 4, theme: 'chatbot', description: 'Sessiz odaklanma odası, telefon kabinli bireysel çalışma.' },
-  { code: 'KT-05', district: 'Sarıyer',      neighborhood: 'Tarabya',        capacity: 6, theme: 'data',    description: 'Premium toplantı odası, hibrit sunum altyapılı.' },
-  { code: 'KT-06', district: 'Beyoğlu',      neighborhood: 'Cihangir',       capacity: 4, theme: 'brain',   description: 'Tasarım odaklı stüdyo, akıllı tahta ile prototipleme.' },
-  { code: 'KT-07', district: 'Beykoz',       neighborhood: 'Anadolu Hisarı', capacity: 6, theme: 'code',    description: 'Hibrit toplantı odası, 4K kamera ve dizi mikrofon.' },
-  { code: 'KT-08', district: 'Bakırköy',     neighborhood: 'Yeşilköy',       capacity: 8, theme: 'cloud',   description: 'Geniş ekip odası, U masa düzeni ve büyük sunum ekranı.' },
-  { code: 'KT-09', district: 'Eyüp',         neighborhood: 'Pierre Loti',    capacity: 4, theme: 'vector',  description: 'Yüksek konsantrasyon pod, ses yalıtımlı.' },
-  { code: 'KT-10', district: 'Maltepe',      neighborhood: 'Cevizli',        capacity: 6, theme: 'agent',   description: 'AI deney odası, GPU iş istasyonlu masa.' },
+  { code: 'AILAB -1D 1-NVD',   district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX SPARK',     description: 'NVIDIA DGX SPARK iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
+  { code: 'AILAB -1D 2-NVD',   district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX SPARK',     description: 'NVIDIA DGX SPARK iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
+  { code: 'AILAB -1D 3-NVD',   district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX SPARK',     description: 'NVIDIA DGX SPARK iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
+  { code: 'AILAB -1D 4-2xNVD', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'neural', equipment: '2x NVIDIA DGX SPARK',  description: 'Çift NVIDIA DGX SPARK iş istasyonlu pod — çift kişilik GPU çalışma alanı.' },
+  { code: 'AILAB -1D 5-2xMAC', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2x MAC STUDIO',        description: 'Çift MAC STUDIO ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
+  { code: 'AILAB -1D 6-NVD',   district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX SPARK',     description: 'NVIDIA DGX SPARK iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
+  { code: 'AILAB -1D 7-2xMAC', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2x MAC STUDIO',        description: 'Çift MAC STUDIO ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
+  { code: 'AILAB -1D 8-2xMAC', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2x MAC STUDIO',        description: 'Çift MAC STUDIO ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
+  { code: 'AILAB -1D 9-2xMAC', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2x MAC STUDIO',        description: 'Çift MAC STUDIO ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
+  { code: 'AILAB -1D 10-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 11-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 12-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 13-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 14-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 15-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 16-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 17-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 18-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D AI Deneyim Alanı', district: 'AI Lab', neighborhood: '-1D', capacity: 15, theme: 'brain', equipment: 'AI Deneyim Alanı', description: '15 kişilik AI deneyim & eğitim alanı — workshop, demo ve topluluk etkinlikleri için.' },
 ];
+
+/**
+ * Eski demo verilerinde kullanılan KT-01..KT-10 oda kodları → yeni AILAB pod'larına
+ * eşlemesi. Booking ve waitlist seed'leri bu map üzerinden yeni kodlara çözülür.
+ * Yeni eklenen kodlar yine ROOMS array'inde mevcuttur — yapıyı korur.
+ */
+const LEGACY_ROOM_CODE_MAP: Record<string, string> = {
+  'KT-01': 'AILAB -1D 1-NVD',
+  'KT-02': 'AILAB -1D 2-NVD',
+  'KT-03': 'AILAB -1D 3-NVD',
+  'KT-04': 'AILAB -1D 4-2xNVD',
+  'KT-05': 'AILAB -1D 5-2xMAC',
+  'KT-06': 'AILAB -1D 6-NVD',
+  'KT-07': 'AILAB -1D 7-2xMAC',
+  'KT-08': 'AILAB -1D 8-2xMAC',
+  'KT-09': 'AILAB -1D 9-2xMAC',
+  'KT-10': 'AILAB -1D 10-MAC',
+};
+
+function resolveRoomCode(legacyOrNew: string): string {
+  return LEGACY_ROOM_CODE_MAP[legacyOrNew] ?? legacyOrNew;
+}
 
 /* ============================================================
  * 2) KULLANICILAR — 18 kişi (zengin profil)
@@ -50,16 +97,18 @@ interface DemoUserSeed {
   title?: string;
   manager?: string;
   bio?: string;
+  /** Yönetişim rolü — admin'in atadığı role demo amaçlı seed'de set. */
+  governanceRole?: 'analitik_danisman' | 'yz_arge';
 }
 
 const DEMO_USERS: DemoUserSeed[] = [
   { email: 'user@klab.test',          password: 'Demo1234!Pass',    fullName: 'Demo Kullanıcı',  department: 'AI Lab',                title: 'Demo Hesabı',                manager: 'AI Lab Yöneticisi', bio: 'Demo kullanıcı — sistemi keşfetmek için.' },
-  { email: 'ayse.yilmaz@klab.test',   password: 'Ayse1234!Pass',    fullName: 'Ayşe Yılmaz',     department: 'Veri Bilimleri',         title: 'Kıdemli Veri Bilimcisi',     manager: 'Cem Aslan',         bio: 'NLP & öneri sistemleri üzerine çalışıyor; LangChain ve Hugging Face ekosisteminde yetkin.' },
+  { email: 'ayse.yilmaz@klab.test',   password: 'Ayse1234!Pass',    fullName: 'Ayşe Yılmaz',     department: 'Veri Bilimleri',         title: 'Kıdemli Veri Bilimcisi',     manager: 'Cem Aslan',         bio: 'NLP & öneri sistemleri üzerine çalışıyor; LangChain ve Hugging Face ekosisteminde yetkin.', governanceRole: 'analitik_danisman' },
   { email: 'mehmet.demir@klab.test',  password: 'Mehmet1234!',      fullName: 'Mehmet Demir',    department: 'Bireysel Bankacılık',    title: 'Ürün Yöneticisi',            manager: 'Pınar Korkmaz',     bio: 'Müşteri deneyimi ve dijital onboarding ürünlerini yönetiyor.' },
   { email: 'zeynep.kaya@klab.test',   password: 'Zeynep1234!Pass',  fullName: 'Zeynep Kaya',     department: 'Risk Yönetimi',          title: 'Risk Analisti',              manager: 'Tolga Aydın',       bio: 'Kredi risk modellemesi ve dolandırıcılık tespiti odaklı.' },
   { email: 'emre.aksoy@klab.test',    password: 'Emre1234!Pass',    fullName: 'Emre Aksoy',      department: 'BT Operasyonları',       title: 'DevOps Mühendisi',           manager: 'Berk Erdoğan',      bio: 'Kubernetes, AWS ve CI/CD pipeline tasarımı.' },
   { email: 'selin.dogan@klab.test',   password: 'Selin1234!Pass',   fullName: 'Selin Doğan',     department: 'Müşteri Deneyimi',       title: 'UX Tasarımcısı',             manager: 'Pınar Korkmaz',     bio: 'Mobil bankacılık akışlarını araştırıyor; Figma + kullanıcı testleri.' },
-  { email: 'burak.sahin@klab.test',   password: 'Burak1234!Pass',   fullName: 'Burak Şahin',     department: 'AI Lab',                 title: 'ML Mühendisi',               manager: 'Cem Aslan',         bio: 'LLM fine-tuning ve RAG mimarileri.' },
+  { email: 'burak.sahin@klab.test',   password: 'Burak1234!Pass',   fullName: 'Burak Şahin',     department: 'AI Lab',                 title: 'ML Mühendisi',               manager: 'Cem Aslan',         bio: 'LLM fine-tuning ve RAG mimarileri.', governanceRole: 'yz_arge' },
   { email: 'defne.arslan@klab.test',  password: 'Defne1234!Pass',   fullName: 'Defne Arslan',    department: 'Yatırım Bankacılığı',    title: 'Kantitatif Analist',         manager: 'Tolga Aydın',       bio: 'Sayısal portföy optimizasyonu, time-series forecasting.' },
   { email: 'kerem.ozturk@klab.test',  password: 'Kerem1234!Pass',   fullName: 'Kerem Öztürk',    department: 'Bireysel Bankacılık',    title: 'Yazılım Geliştirici',        manager: 'Pınar Korkmaz',     bio: 'React + Next.js, müşteri portalı geliştiriyor.' },
   { email: 'elif.celik@klab.test',    password: 'Elif1234!Pass',    fullName: 'Elif Çelik',      department: 'Veri Bilimleri',         title: 'Veri Mühendisi',             manager: 'Cem Aslan',         bio: 'Streaming pipeline\'lar (Kafka + Flink), data quality.' },
@@ -82,11 +131,12 @@ interface DemoAdminSeed {
   password: string;
   fullName: string;
   role: 'admin' | 'super_admin';
+  governanceRole?: 'analitik_danisman' | 'lab_muhendisi' | 'yz_arge';
 }
 
 const DEMO_ADMINS: DemoAdminSeed[] = [
   { email: 'admin@klab.test',     password: 'Admin1234!Pass',  fullName: 'Demo Admin',          role: 'super_admin' },
-  { email: 'ai.admin@klab.test',  password: 'AILab1234!Pass',  fullName: 'AI Lab Yöneticisi',   role: 'admin' },
+  { email: 'ai.admin@klab.test',  password: 'AILab1234!Pass',  fullName: 'AI Lab Yöneticisi',   role: 'admin', governanceRole: 'yz_arge' },
 ];
 
 /* ============================================================
@@ -367,14 +417,26 @@ export async function seedRooms(): Promise<void> {
   }
 
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO rooms (id, code, name, district, neighborhood, capacity, description, theme)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO rooms (id, code, name, district, neighborhood, capacity, description, theme, equipment)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const txn = db.transaction((rooms: RoomSeed[]) => {
     for (const room of rooms) {
-      const name = `${room.district} · ${room.neighborhood}`;
-      insert.run(nanoid(), room.code, name, room.district, room.neighborhood, room.capacity, room.description, room.theme);
+      // Yeni dünyada tüm odalar Yapay Zeka Laboratuvarı'na ait. `name` sabit
+      // tutuldu, ekipman bilgisi ayrı `equipment` kolonunda.
+      const name = 'Yapay Zeka Laboratuvarı';
+      insert.run(
+        nanoid(),
+        room.code,
+        name,
+        room.district,
+        room.neighborhood,
+        room.capacity,
+        room.description,
+        room.theme,
+        room.equipment
+      );
     }
   });
 
@@ -392,13 +454,23 @@ export async function seedUsers(): Promise<void> {
   }
 
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO users (id, email, password_hash, full_name, department, title, manager, bio)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO users (id, email, password_hash, full_name, department, title, manager, bio, governance_role)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const u of DEMO_USERS) {
     const hash = await argon2.hash(u.password, ARGON2_OPTIONS);
-    insert.run(nanoid(), u.email, hash, u.fullName, u.department ?? null, u.title ?? null, u.manager ?? null, u.bio ?? null);
+    insert.run(
+      nanoid(),
+      u.email,
+      hash,
+      u.fullName,
+      u.department ?? null,
+      u.title ?? null,
+      u.manager ?? null,
+      u.bio ?? null,
+      u.governanceRole ?? null
+    );
   }
   console.log(`[SEED] ${DEMO_USERS.length} user eklendi.`);
 }
@@ -413,13 +485,13 @@ export async function seedAdmins(): Promise<void> {
   }
 
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO admins (id, email, password_hash, full_name, role)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO admins (id, email, password_hash, full_name, role, governance_role)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
 
   for (const a of DEMO_ADMINS) {
     const hash = await argon2.hash(a.password, ARGON2_OPTIONS);
-    insert.run(nanoid(), a.email, hash, a.fullName, a.role);
+    insert.run(nanoid(), a.email, hash, a.fullName, a.role, a.governanceRole ?? null);
   }
   console.log(`[SEED] ${DEMO_ADMINS.length} admin eklendi.`);
 }
@@ -455,7 +527,8 @@ export async function seedBookings(): Promise<void> {
   let inserted = 0;
   for (const b of BOOKINGS) {
     const userId = userByEmail.get(b.userEmail);
-    const roomId = roomByCode.get(b.roomCode);
+    // Eski demo verilerindeki KT-01..KT-10 kodlarını yeni AILAB pod kodlarına çevir.
+    const roomId = roomByCode.get(resolveRoomCode(b.roomCode));
     if (!userId || !roomId) {
       console.warn(`[SEED] Booking atlandı (user veya oda bulunamadı): ${b.projectName}`);
       continue;
@@ -560,17 +633,41 @@ export async function seedShowcaseEngagement(): Promise<void> {
  * LİSANS TALEPLERİ — demo verisi
  * ============================================================ */
 
-interface LicenseRequestSeed {
-  userEmail: string;
+interface LicenseToolSeed {
   licenseKey: string;
   licenseName: string;
   vendor?: string | null;
   category?: string | null;
-  reason: string;
+}
+
+interface LicenseRequestSeed {
+  userEmail: string;
+  // Birincil araç — geriye dönük license_requests kolonları + ilk item.
+  licenseKey: string;
+  licenseName: string;
+  vendor?: string | null;
+  category?: string | null;
+  // Ek araçlar (çoklu seçim) — primary ile birlikte license_request_items'a yazılır.
+  extraTools?: LicenseToolSeed[];
+  // PNG "Başvuru Formu" alanları (4.1.1)
+  requestTitle: string;
+  reason: string; // Kullanım Amacı
+  expectedBenefit: string;
+  successCriteria: string;
+  projectType: 'poc' | 'integration';
+  estimatedDurationDays?: number | null;
+  dataToUse: string;
+  technicalStack?: string | null;
   durationMonths: 1 | 3 | 6 | 12;
   status: 'pending' | 'approved' | 'rejected' | 'feedback_requested';
   adminFeedback?: string;
   daysAgoCreated?: number; // default 7
+  // Yönetişim alanları
+  usesExternalApi?: boolean;
+  involvesRealData?: boolean;
+  reviewTrack?: 'standard' | 'swat';
+  /** Onaylı başvuruların ilerlediği yaşam döngüsü aşaması (kapı/onay seed'ler). */
+  targetStage?: 'development' | 'stage' | 'production' | 'live';
 }
 
 const LICENSE_REQUESTS: LicenseRequestSeed[] = [
@@ -581,11 +678,23 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'Claude Code',
     vendor: 'Anthropic',
     category: 'AI Assistant',
+    extraTools: [
+      { licenseKey: 'cursor', licenseName: 'Cursor', vendor: 'Cursor', category: 'IDE' },
+    ],
+    requestTitle: 'NLP Pipeline Prototip Hızlandırma',
     reason: 'NLP pilot ekibindeki günlük kod üretimi için Claude Code kullanmam gerekiyor. Mevcut LangChain pipeline\'larına entegre edip prototip hızını 2-3x artırmayı hedefliyorum.',
+    expectedBenefit: 'Prototip geliştirme süresinde %50-60 kısalma; sprint başına 1 ek deney koşturabilme.',
+    successCriteria: 'Pipeline iterasyon süresi 3 günden 1 güne inmeli; ekip 3 ay içinde 2 yeni model PoC\'u tamamlamalı.',
+    projectType: 'integration',
+    estimatedDurationDays: 90,
+    dataToUse: 'Anonimleştirilmiş çağrı merkezi transkriptleri (iç kaynak, ~120K kayıt).',
+    technicalStack: 'Python, LangChain, Hugging Face Transformers, FastAPI',
     durationMonths: 12,
     status: 'approved',
     adminFeedback: 'IT ekibi lisans atadı. Faturalandırma AI Lab cost center\'a.',
     daysAgoCreated: 25,
+    usesExternalApi: false,
+    targetStage: 'live',
   },
   {
     userEmail: 'furkan.polat@klab.test',
@@ -593,10 +702,19 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'Cursor',
     vendor: 'Cursor',
     category: 'IDE',
+    requestTitle: 'Computer Vision Geliştirme Ortamı',
     reason: 'Computer Vision çalışmalarında PyTorch + OpenCV kod yazımı için Cursor\'ın AI tab completion özelliği kritik. VSCode\'a geçişten sonra verimlilik %40 arttı.',
+    expectedBenefit: 'Model eğitim kodu yazım süresinde %40 azalma; doküman anlama projesinin teslimini öne çekme.',
+    successCriteria: 'OCR doğruluğu mevcut %88\'den %93\'e çıkmalı; haftalık 1 model deneyi tamamlanmalı.',
+    projectType: 'integration',
+    estimatedDurationDays: 120,
+    dataToUse: 'Açık veri (DocBank, FUNSD) + anonimleştirilmiş kurum içi form görüntüleri.',
+    technicalStack: 'Python, PyTorch, OpenCV, YOLO, DETR',
     durationMonths: 12,
     status: 'approved',
     daysAgoCreated: 60,
+    usesExternalApi: false,
+    targetStage: 'production',
   },
   {
     userEmail: 'burak.sahin@klab.test',
@@ -604,10 +722,19 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'Claude',
     vendor: 'Anthropic',
     category: 'AI Assistant',
+    requestTitle: 'RAG Mimarisi Araştırması',
     reason: 'RAG ve LLM fine-tuning araştırması için Claude Pro\'ya ihtiyacım var. Uzun context (200K) ve yüksek kalite çıktı kritik.',
+    expectedBenefit: 'Kurum içi doküman arama kalitesinde ölçülebilir artış; manuel bilgi arama süresinde tasarruf.',
+    successCriteria: 'RAG cevap isabeti (RAGAS faithfulness) ≥ 0.80; 200K context ile özetleme PoC\'u çalışır halde.',
+    projectType: 'poc',
+    estimatedDurationDays: 60,
+    dataToUse: 'Sentetik soru-cevap seti + açık erişimli kurumsal politika dokümanları.',
+    technicalStack: 'Python, LlamaIndex, ChromaDB',
     durationMonths: 6,
     status: 'approved',
     daysAgoCreated: 40,
+    usesExternalApi: false,
+    targetStage: 'stage',
   },
   {
     userEmail: 'kerem.ozturk@klab.test',
@@ -615,10 +742,19 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'GitHub Copilot',
     vendor: 'GitHub',
     category: 'AI Assistant',
+    requestTitle: 'Müşteri Portalı Geliştirme',
     reason: 'Müşteri portalı React + Next.js geliştirme için Copilot kullanıyorum, tab completion günlük 2-3 saat zaman kazandırıyor.',
+    expectedBenefit: 'Geliştirici başına günlük 2-3 saat zaman tasarrufu; sprint hızında ölçülebilir artış.',
+    successCriteria: 'Sprint velocity %20 artmalı; kod review\'da yakalanan basit hata sayısı azalmalı.',
+    projectType: 'integration',
+    estimatedDurationDays: null,
+    dataToUse: 'Veri kullanılmıyor — yalnızca uygulama kodu geliştirme aracı.',
+    technicalStack: 'TypeScript, React, Next.js',
     durationMonths: 12,
     status: 'approved',
     daysAgoCreated: 90,
+    usesExternalApi: false,
+    targetStage: 'development',
   },
 
   // Pending (admin onayı bekliyor)
@@ -628,7 +764,14 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'Cursor',
     vendor: 'Cursor',
     category: 'IDE',
-    reason: 'Risk model geliştirme için Cursor ile XGBoost + autoencoder pipelinelarını daha hızlı iterate edebilirim. Mevcut PyCharm setup\'ım yavaş.',
+    requestTitle: 'Risk Modeli İterasyon Ortamı',
+    reason: 'Risk model geliştirme için Cursor ile XGBoost + autoencoder pipeline\'larını daha hızlı iterate edebilirim. Mevcut PyCharm setup\'ım yavaş.',
+    expectedBenefit: 'Model deney döngüsünün hızlanması; çeyrek başına daha fazla risk senaryosu test edebilme.',
+    successCriteria: 'Dolandırıcılık tespit modelinde recall ≥ 0.90, false-positive oranı < %5.',
+    projectType: 'poc',
+    estimatedDurationDays: 75,
+    dataToUse: 'Sentetik işlem verisi + anonimleştirilmiş kredi risk veri seti (iç kaynak).',
+    technicalStack: 'Python, XGBoost, scikit-learn, PyTorch',
     durationMonths: 6,
     status: 'pending',
     daysAgoCreated: 3,
@@ -639,10 +782,18 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'Antigravity',
     vendor: 'Antigravity Labs',
     category: 'Diğer',
+    requestTitle: 'Quant Analiz Multi-Agent Denemesi',
     reason: 'Google\'ın yeni Antigravity araç setini Quant analiz çalışmalarında denemek istiyorum — multi-agent kod yazımı banka modeli simülasyonlarında değerli olabilir.',
+    expectedBenefit: 'Portföy optimizasyon simülasyonlarının kurulum süresinde kısalma; yeni bir araç setinin değerlendirilmesi.',
+    successCriteria: 'Multi-agent akışıyla 1 simülasyon senaryosu uçtan uca çalışır halde; karşılaştırmalı değerlendirme raporu.',
+    projectType: 'poc',
+    estimatedDurationDays: 45,
+    dataToUse: 'Açık piyasa verisi (Yahoo Finance) + sentetik portföy verisi.',
+    technicalStack: 'Python, NumPy, pandas',
     durationMonths: 3,
     status: 'pending',
     daysAgoCreated: 2,
+    reviewTrack: 'swat',
   },
   {
     userEmail: 'elif.celik@klab.test',
@@ -650,7 +801,14 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'JetBrains All',
     vendor: 'JetBrains',
     category: 'IDE',
+    requestTitle: 'Veri Pipeline Geliştirme Araçları',
     reason: 'Veri pipeline\'ı (Kafka + Flink) için tüm JetBrains paketine ihtiyacım var — özellikle DataGrip ve IntelliJ Ultimate kombinasyonu Scala/Java jobs için kritik.',
+    expectedBenefit: 'Streaming pipeline geliştirme ve hata ayıklama süresinde belirgin azalma; veri kalitesi kontrollerinin hızlanması.',
+    successCriteria: 'Pipeline ortalama gecikmesi < 2 sn; data-quality kontrol kapsamı %95\'e çıkmalı.',
+    projectType: 'integration',
+    estimatedDurationDays: 150,
+    dataToUse: 'Kurum içi streaming olay verisi (anonimleştirilmiş, Kafka topic).',
+    technicalStack: 'Scala, Java, Apache Kafka, Apache Flink',
     durationMonths: 12,
     status: 'pending',
     daysAgoCreated: 5,
@@ -661,7 +819,14 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'Figma Organization',
     vendor: 'Figma',
     category: 'Diğer',
+    requestTitle: 'Servis Tasarım Ekip Lisansı',
     reason: 'Servis tasarım çalışmaları için ekip lisansı; mevcut Pro plan tek kullanıcı için yetiyor ama 5 kişilik tasarım ekibine ölçeklenmemiz lazım.',
+    expectedBenefit: 'Tasarım ekibinin eşzamanlı çalışabilmesi; tasarım–geliştirme devir süresinde kısalma.',
+    successCriteria: '5 tasarımcı tek dosyada eşzamanlı çalışabilmeli; tasarım teslim süresi %30 kısalmalı.',
+    projectType: 'integration',
+    estimatedDurationDays: null,
+    dataToUse: 'Veri kullanılmıyor — tasarım iş birliği aracı.',
+    technicalStack: null,
     durationMonths: 12,
     status: 'pending',
     daysAgoCreated: 1,
@@ -674,11 +839,19 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'Azure OpenAI',
     vendor: 'Microsoft',
     category: 'Cloud',
+    requestTitle: 'DevOps Log Analizi',
     reason: 'DevOps pipeline\'larında AI destekli log analizi için Azure OpenAI istiyorum.',
+    expectedBenefit: 'Üretim olaylarında kök neden analiz süresinin kısalması.',
+    successCriteria: 'Olay başına ortalama teşhis süresi %40 azalmalı.',
+    projectType: 'poc',
+    estimatedDurationDays: 60,
+    dataToUse: 'Kurum içi sistem log\'ları (PII içermeyen, maskelenmiş).',
+    technicalStack: 'Python, Azure SDK',
     durationMonths: 12,
     status: 'feedback_requested',
     adminFeedback: 'Azure OpenAI lisansı yüksek bütçeli — KVKK uyumluluk, veri lokasyonu ve maliyet projeksiyonu (3-6-12 ay) içeren detaylı bir gerekçe paylaşır mısın? Türkiye region kullanılabiliyor mu?',
     daysAgoCreated: 10,
+    usesExternalApi: true,
   },
   {
     userEmail: 'onur.acar@klab.test',
@@ -686,11 +859,19 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'OpenAI API',
     vendor: 'OpenAI',
     category: 'API',
+    requestTitle: 'Sözleşme Analizi Otomasyonu',
     reason: 'Açık bankacılık API sözleşmelerini otomatik analiz etmek için OpenAI API kotası istiyorum.',
+    expectedBenefit: 'Sözleşme inceleme süresinde belirgin kısalma; manuel okuma yükünün azalması.',
+    successCriteria: 'Sözleşme başına inceleme süresi 2 saatten 20 dakikaya inmeli.',
+    projectType: 'poc',
+    estimatedDurationDays: 45,
+    dataToUse: 'Açık bankacılık örnek sözleşmeleri (kamuya açık şablonlar).',
+    technicalStack: 'Python, OpenAI SDK',
     durationMonths: 6,
     status: 'feedback_requested',
     adminFeedback: 'Müşteri verisi içerebilecek sözleşmeler için OpenAI yerine Azure OpenAI (enterprise data residency garantili) öneriyoruz. Bu alternatifi de değerlendirip tercihini iletir misin?',
     daysAgoCreated: 7,
+    usesExternalApi: true,
   },
 
   // Rejected
@@ -700,7 +881,14 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'Midjourney',
     vendor: 'Midjourney Inc.',
     category: 'Diğer',
+    requestTitle: 'Pazarlama Görsel Üretimi',
     reason: 'Pazarlama materyali için AI görsel üretici.',
+    expectedBenefit: 'Kampanya görseli üretim süresinde kısalma.',
+    successCriteria: 'Kampanya başına görsel hazırlık süresi yarıya inmeli.',
+    projectType: 'poc',
+    estimatedDurationDays: 30,
+    dataToUse: 'Veri kullanılmıyor — metinden görsel üretimi.',
+    technicalStack: null,
     durationMonths: 3,
     status: 'rejected',
     adminFeedback: 'Marka uyumluluğu açısından Midjourney prompt akışı kurumsal denetime kapalı — mevcut Stable Diffusion + brand-LoRA setup\'ımızı kullanmanı öneriyoruz (Furkan ekibi destek olabilir).',
@@ -712,13 +900,150 @@ const LICENSE_REQUESTS: LicenseRequestSeed[] = [
     licenseName: 'Replit Teams',
     vendor: 'Replit',
     category: 'Diğer',
+    requestTitle: 'Hızlı Prototipleme Ortamı',
     reason: 'Hızlı prototipleme için cloud IDE.',
+    expectedBenefit: 'Prototip kurulum süresinin kısalması.',
+    successCriteria: 'Yeni prototip ortamı 5 dakikada ayağa kalkmalı.',
+    projectType: 'poc',
+    estimatedDurationDays: 30,
+    dataToUse: 'Sentetik test verisi.',
+    technicalStack: 'Python, FastAPI',
     durationMonths: 6,
     status: 'rejected',
     adminFeedback: 'Replit cloud üzerinde kod barındırılması bilgi güvenliği politikası gereği uygun değil. Yerel geliştirme için JetBrains veya VSCode tercih edilmeli.',
     daysAgoCreated: 15,
   },
 ];
+
+/** Onaylı bir proje için yaşam döngüsü verisini (kapı/onay/olay) seed'ler. */
+const STAGE_RANK: Record<'development' | 'stage' | 'production' | 'live', number> = {
+  development: 1,
+  stage: 2,
+  production: 3,
+  live: 4,
+};
+
+/** Bir kapı için gerçekçi demo skoru üretir. */
+function demoGateScore(key: GateKey): number | null {
+  switch (key) {
+    case 'code_review':
+      return 70 + Math.floor(Math.random() * 22); // 70-91
+    case 'architecture':
+      return 85 + Math.floor(Math.random() * 12); // 85-96
+    case 'framework':
+      return 90 + Math.floor(Math.random() * 9); // 90-98
+    default:
+      return null; // build / security — geç/kal
+  }
+}
+
+function seedLifecycle(
+  db: ReturnType<typeof getDb>,
+  requestId: string,
+  level: GovernanceLevel,
+  targetStage: 'development' | 'stage' | 'production' | 'live',
+  reviewerId: string | null,
+  createdAtMs: number
+): void {
+  const rank = STAGE_RANK[targetStage];
+  const nowMs = Date.now();
+  const span = Math.max(nowMs - createdAtMs, 4 * 86400_000);
+  const stepMs = span / (rank + 1);
+  const at = (i: number) => new Date(createdAtMs + stepMs * (i + 1)).toISOString();
+
+  const stages: Array<'application' | 'development' | 'stage' | 'production' | 'live'> = [
+    'application',
+    'development',
+    'stage',
+    'production',
+    'live',
+  ];
+
+  const insertEvent = db.prepare(
+    `INSERT INTO project_stage_events
+       (id, request_id, from_stage, to_stage, actor_id, actor_type, note, created_at)
+     VALUES (?, ?, ?, ?, ?, 'admin', ?, ?)`
+  );
+  const insertGate = db.prepare(
+    `INSERT OR IGNORE INTO quality_gates
+       (id, request_id, gate_key, status, score, threshold, evaluated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+  const insertApproval = db.prepare(
+    `INSERT INTO human_approvals
+       (id, request_id, approval_type, decision, approver_id,
+        release_note, risk_assessment, decided_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+
+  // Aşama geçiş olayları (application → ... → targetStage)
+  const notes: Record<string, string> = {
+    development: 'Başvuru onaylandı — geliştirme aşamasına geçildi.',
+    stage: 'Tüm kalite kapıları yeşil — Stage aşamasına geçildi.',
+    production: 'Stage insan onayı alındı — Production aşamasına geçildi.',
+    live: 'Production onayı alındı — proje canlıya alındı.',
+  };
+  for (let i = 1; i <= rank; i++) {
+    insertEvent.run(
+      nanoid(),
+      requestId,
+      stages[i - 1],
+      stages[i],
+      reviewerId,
+      notes[stages[i]] ?? null,
+      at(i - 1)
+    );
+  }
+
+  // Kalite kapıları — development'ta karışık, stage+'da hepsi yeşil.
+  const gates = applicableGates(level);
+  gates.forEach((key, idx) => {
+    let status: 'pending' | 'passed' | 'failed' = 'passed';
+    if (rank === 1) {
+      // Geliştirme aşaması: son kapı henüz beklemede (panel ilerleme gösterir).
+      status = idx >= gates.length - 1 ? 'pending' : 'passed';
+    }
+    insertGate.run(
+      nanoid(),
+      requestId,
+      key,
+      status,
+      status === 'passed' ? demoGateScore(key) : null,
+      GATE_DEFINITIONS[key].threshold,
+      status === 'pending' ? null : at(0)
+    );
+  });
+
+  // İnsan onayları
+  if (rank >= STAGE_RANK.stage) {
+    const decided = rank >= STAGE_RANK.production;
+    insertApproval.run(
+      nanoid(),
+      requestId,
+      'stage',
+      decided ? 'approved' : 'pending',
+      decided ? reviewerId : null,
+      decided ? 'Stage ortamı incelendi, smoke testler yeşil.' : null,
+      decided ? 'Düşük risk — geri alma planı hazır.' : null,
+      decided ? at(1) : null,
+      at(1)
+    );
+  }
+  if (rank >= STAGE_RANK.production) {
+    const decided = rank >= STAGE_RANK.live;
+    insertApproval.run(
+      nanoid(),
+      requestId,
+      'production',
+      decided ? 'approved' : 'pending',
+      decided ? reviewerId : null,
+      decided ? 'Release notu onaylandı, blue-green dağıtım planlandı.' : null,
+      decided ? 'Risk değerlendirmesi tamamlandı.' : null,
+      decided ? at(2) : null,
+      at(2)
+    );
+  }
+}
 
 export async function seedLicenseRequests(): Promise<void> {
   const db = getDb();
@@ -736,46 +1061,309 @@ export async function seedLicenseRequests(): Promise<void> {
   const insert = db.prepare(`
     INSERT INTO license_requests (
       id, user_id, license_key, license_name, vendor, category,
-      reason, duration_months, status, admin_feedback,
+      reason, duration_months,
+      request_title, expected_benefit, success_criteria,
+      project_type, estimated_duration_days, data_to_use, technical_stack,
+      uses_external_api, involves_real_data, review_track,
+      lifecycle_stage, governance_level, stage_entered_at,
+      status, admin_feedback,
       reviewed_by, reviewed_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertItem = db.prepare(`
+    INSERT INTO license_request_items
+      (id, request_id, license_key, license_name, vendor, category, item_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   let count = 0;
-  for (const r of LICENSE_REQUESTS) {
-    const userId = userByEmail.get(r.userEmail);
-    if (!userId) {
-      console.warn(`[SEED] Lisans talebi atlandı (user yok): ${r.userEmail}`);
-      continue;
+  const txn = db.transaction(() => {
+    for (const r of LICENSE_REQUESTS) {
+      const userId = userByEmail.get(r.userEmail);
+      if (!userId) {
+        console.warn(`[SEED] Lisans talebi atlandı (user yok): ${r.userEmail}`);
+        continue;
+      }
+
+      const daysAgo = r.daysAgoCreated ?? 7;
+      const createdAtMs = Date.now() - daysAgo * 24 * 60 * 60 * 1000;
+      const createdAt = new Date(createdAtMs).toISOString();
+      const isReviewed = r.status !== 'pending';
+      const reviewedAt = isReviewed
+        ? new Date(Date.now() - Math.max(0, daysAgo - 2) * 24 * 60 * 60 * 1000).toISOString()
+        : null;
+
+      const level: GovernanceLevel =
+        r.projectType === 'integration' ? 'full' : 'basic';
+      const targetStage =
+        r.status === 'approved' ? (r.targetStage ?? 'development') : null;
+      const lifecycleStage = targetStage ?? 'application';
+      const stageEnteredAt = targetStage ? reviewedAt : null;
+
+      const id = nanoid();
+      insert.run(
+        id,
+        userId,
+        r.licenseKey,
+        r.licenseName,
+        r.vendor ?? null,
+        r.category ?? null,
+        r.reason,
+        r.durationMonths,
+        r.requestTitle,
+        r.expectedBenefit,
+        r.successCriteria,
+        r.projectType,
+        r.estimatedDurationDays ?? null,
+        r.dataToUse,
+        r.technicalStack ?? null,
+        r.usesExternalApi ? 1 : 0,
+        r.involvesRealData ? 1 : 0,
+        r.reviewTrack ?? 'standard',
+        lifecycleStage,
+        level,
+        stageEnteredAt,
+        r.status,
+        r.adminFeedback ?? null,
+        isReviewed ? reviewerId : null,
+        reviewedAt,
+        createdAt,
+        reviewedAt ?? createdAt
+      );
+
+      // license_request_items — birincil araç (item_order 0) + ek araçlar.
+      const tools: LicenseToolSeed[] = [
+        {
+          licenseKey: r.licenseKey,
+          licenseName: r.licenseName,
+          vendor: r.vendor ?? null,
+          category: r.category ?? null,
+        },
+        ...(r.extraTools ?? []),
+      ];
+      tools.forEach((t, idx) => {
+        insertItem.run(
+          nanoid(),
+          id,
+          t.licenseKey,
+          t.licenseName,
+          t.vendor ?? null,
+          t.category ?? null,
+          idx
+        );
+      });
+
+      // Onaylı projeler için yaşam döngüsü (kapı/onay/olay).
+      if (targetStage) {
+        seedLifecycle(db, id, level, targetStage, reviewerId, createdAtMs);
+      }
+
+      count++;
     }
+  });
+  txn();
 
-    const daysAgo = r.daysAgoCreated ?? 7;
-    const createdAt = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
-    const isReviewed = r.status !== 'pending';
-    const reviewedAt = isReviewed
-      ? new Date(Date.now() - Math.max(0, daysAgo - 2) * 24 * 60 * 60 * 1000).toISOString()
-      : null;
+  console.log(`[SEED] ${count} lisans talebi eklendi (${LICENSE_REQUESTS.filter((r) => r.status === 'approved').length} approved, ${LICENSE_REQUESTS.filter((r) => r.status === 'pending').length} pending, ${LICENSE_REQUESTS.filter((r) => r.status === 'feedback_requested').length} feedback, ${LICENSE_REQUESTS.filter((r) => r.status === 'rejected').length} rejected).`);
+}
 
+/* ============================================================
+ * BEKLEME LİSTESİ — demo verisi (öncelik yönetimi için)
+ * ============================================================ */
+
+interface WaitlistSeed {
+  userEmail: string;
+  roomCode: string;
+  periodMonths: 1 | 2 | 3;
+  projectName: string;
+  daysAgoJoined: number;
+}
+
+const WAITLIST_ENTRIES: WaitlistSeed[] = [
+  // KT-01 odası için sıra (4 kişi)
+  { userEmail: 'mehmet.demir@klab.test', roomCode: 'KT-01', periodMonths: 2, projectName: 'Kredi Skorlama Görselleştirme', daysAgoJoined: 12 },
+  { userEmail: 'selin.dogan@klab.test', roomCode: 'KT-01', periodMonths: 1, projectName: 'Mobil Onboarding UX Testi', daysAgoJoined: 9 },
+  { userEmail: 'emre.aksoy@klab.test', roomCode: 'KT-01', periodMonths: 3, projectName: 'Log Anomali Tespiti', daysAgoJoined: 5 },
+  { userEmail: 'begum.kilic@klab.test', roomCode: 'KT-01', periodMonths: 2, projectName: 'API Gateway Prototipi', daysAgoJoined: 2 },
+  // KT-04 odası için sıra (3 kişi)
+  { userEmail: 'naz.yildiz@klab.test', roomCode: 'KT-04', periodMonths: 1, projectName: 'Servis Yolculuğu Haritası', daysAgoJoined: 8 },
+  { userEmail: 'onur.acar@klab.test', roomCode: 'KT-04', periodMonths: 2, projectName: 'Açık Bankacılık Entegrasyon Denemesi', daysAgoJoined: 4 },
+  { userEmail: 'defne.arslan@klab.test', roomCode: 'KT-04', periodMonths: 3, projectName: 'Portföy Optimizasyon Simülasyonu', daysAgoJoined: 1 },
+];
+
+export async function seedWaitlist(): Promise<void> {
+  const db = getDb();
+  const existing = db.prepare('SELECT COUNT(*) as count FROM waitlist').get() as { count: number };
+  if (existing.count > 0) {
+    console.log(`[SEED] Bekleme listesi zaten yüklü (${existing.count}), atlanıyor.`);
+    return;
+  }
+
+  const users = db.prepare('SELECT id, email FROM users').all() as Array<{ id: string; email: string }>;
+  const rooms = db.prepare('SELECT id, code FROM rooms').all() as Array<{ id: string; code: string }>;
+  const userByEmail = new Map(users.map((u) => [u.email, u.id]));
+  const roomByCode = new Map(rooms.map((r) => [r.code, r.id]));
+
+  const insert = db.prepare(`
+    INSERT INTO waitlist (
+      id, user_id, room_id, period_months, desired_start_date,
+      project_name, project_description, help_needed, technologies,
+      position, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?)
+  `);
+
+  // Oda bazında position sayacı.
+  const positionByRoom = new Map<string, number>();
+  let count = 0;
+  const txn = db.transaction(() => {
+    for (const w of WAITLIST_ENTRIES) {
+      const userId = userByEmail.get(w.userEmail);
+      const roomId = roomByCode.get(resolveRoomCode(w.roomCode));
+      if (!userId || !roomId) continue;
+      const pos = (positionByRoom.get(roomId) ?? 0) + 1;
+      positionByRoom.set(roomId, pos);
+      const createdAt = new Date(Date.now() - w.daysAgoJoined * 86400000).toISOString();
+      const desiredStart = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+      insert.run(
+        nanoid(),
+        userId,
+        roomId,
+        w.periodMonths,
+        desiredStart,
+        w.projectName,
+        `${w.projectName} için ${resolveRoomCode(w.roomCode)} odasında çalışma talebi.`,
+        'Mimari danışmanlık ve model değerlendirme desteği.',
+        JSON.stringify(['Python', 'FastAPI']),
+        pos,
+        createdAt,
+        createdAt
+      );
+      count++;
+    }
+  });
+  txn();
+
+  console.log(`[SEED] ${count} bekleme listesi kaydı eklendi.`);
+}
+
+/* ============================================================
+ * BİLDİRİMLER — demo verisi (bildirim merkezi zilini doldurur)
+ * ============================================================ */
+
+interface NotificationSeed {
+  recipientEmail: string;
+  recipientType: 'user' | 'admin';
+  category: 'booking' | 'license' | 'waitlist' | 'message' | 'system';
+  title: string;
+  body: string;
+  link?: string | null;
+  read?: boolean;
+  hoursAgo?: number;
+}
+
+const NOTIFICATIONS: NotificationSeed[] = [
+  {
+    recipientEmail: 'user@klab.test',
+    recipientType: 'user',
+    category: 'system',
+    title: 'AI Lab Randevu Sistemi’ne hoş geldin',
+    body: 'Oda kiralama ve lisans başvurularını buradan takip edebilirsin.',
+    link: '/rooms',
+    read: true,
+    hoursAgo: 72,
+  },
+  {
+    recipientEmail: 'user@klab.test',
+    recipientType: 'user',
+    category: 'booking',
+    title: 'Randevu talebin onaylandı',
+    body: 'Detaylar için Taleplerim sayfasını aç.',
+    link: '/bookings',
+    read: false,
+    hoursAgo: 26,
+  },
+  {
+    recipientEmail: 'user@klab.test',
+    recipientType: 'user',
+    category: 'license',
+    title: 'Lisans başvurun için düzeltme istendi',
+    body: 'Panelinden düzenleyip yeniden gönderebilirsin.',
+    link: '/licenses',
+    read: false,
+    hoursAgo: 5,
+  },
+  {
+    recipientEmail: 'admin@klab.test',
+    recipientType: 'admin',
+    category: 'license',
+    title: 'Yeni lisans başvurusu',
+    body: 'Zeynep Kaya — "Risk Modeli İterasyon Ortamı" (Cursor)',
+    link: '/admin/licenses',
+    read: false,
+    hoursAgo: 3,
+  },
+  {
+    recipientEmail: 'admin@klab.test',
+    recipientType: 'admin',
+    category: 'booking',
+    title: 'Yeni randevu talebi geldi',
+    body: 'Admin panelinden inceleyebilirsin.',
+    link: '/admin',
+    read: false,
+    hoursAgo: 12,
+  },
+];
+
+export async function seedNotifications(): Promise<void> {
+  const db = getDb();
+  const existing = db.prepare('SELECT COUNT(*) as count FROM notifications').get() as {
+    count: number;
+  };
+  if (existing.count > 0) {
+    console.log(`[SEED] Bildirimler zaten yüklü (${existing.count}), atlanıyor.`);
+    return;
+  }
+
+  const users = db.prepare('SELECT id, email FROM users').all() as Array<{
+    id: string;
+    email: string;
+  }>;
+  const admins = db.prepare('SELECT id, email FROM admins').all() as Array<{
+    id: string;
+    email: string;
+  }>;
+  const idByEmail = new Map<string, string>([
+    ...users.map((u) => [u.email, u.id] as const),
+    ...admins.map((a) => [a.email, a.id] as const),
+  ]);
+
+  const insert = db.prepare(`
+    INSERT INTO notifications
+      (id, recipient_id, recipient_type, category, title, body, link, read, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  let count = 0;
+  for (const n of NOTIFICATIONS) {
+    const recipientId = idByEmail.get(n.recipientEmail);
+    if (!recipientId) continue;
+    const createdAt = new Date(
+      Date.now() - (n.hoursAgo ?? 1) * 60 * 60 * 1000
+    ).toISOString();
     insert.run(
       nanoid(),
-      userId,
-      r.licenseKey,
-      r.licenseName,
-      r.vendor ?? null,
-      r.category ?? null,
-      r.reason,
-      r.durationMonths,
-      r.status,
-      r.adminFeedback ?? null,
-      isReviewed ? reviewerId : null,
-      reviewedAt,
-      createdAt,
-      reviewedAt ?? createdAt
+      recipientId,
+      n.recipientType,
+      n.category,
+      n.title,
+      n.body,
+      n.link ?? null,
+      n.read ? 1 : 0,
+      createdAt
     );
     count++;
   }
 
-  console.log(`[SEED] ${count} lisans talebi eklendi (${LICENSE_REQUESTS.filter((r) => r.status === 'approved').length} approved, ${LICENSE_REQUESTS.filter((r) => r.status === 'pending').length} pending, ${LICENSE_REQUESTS.filter((r) => r.status === 'feedback_requested').length} feedback, ${LICENSE_REQUESTS.filter((r) => r.status === 'rejected').length} rejected).`);
+  console.log(`[SEED] ${count} bildirim eklendi.`);
 }
 
 export async function runSeed(): Promise<void> {
@@ -785,4 +1373,6 @@ export async function runSeed(): Promise<void> {
   await seedBookings();
   await seedShowcaseEngagement();
   await seedLicenseRequests();
+  await seedWaitlist();
+  await seedNotifications();
 }

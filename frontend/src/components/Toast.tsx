@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState } from 'react';
+import { createContext, useCallback, useContext, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 type ToastKind = 'success' | 'error' | 'info';
@@ -17,9 +17,12 @@ const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
+  // Monoton artan sayaç — Date.now()+random() float hassasiyeti nedeniyle
+  // aynı milisaniyedeki toast'lara çakışan anahtar üretebiliyordu.
+  const seq = useRef(0);
 
   const push = useCallback((kind: ToastKind, message: string) => {
-    const id = Date.now() + Math.random();
+    const id = ++seq.current;
     setItems((s) => [...s, { id, kind, message }]);
     setTimeout(() => {
       setItems((s) => s.filter((i) => i.id !== id));

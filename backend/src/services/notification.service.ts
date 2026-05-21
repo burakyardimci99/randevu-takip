@@ -231,6 +231,112 @@ export function waitlistPromotedEmail(args: {
   };
 }
 
+export function passwordResetEmail(args: {
+  to: string;
+  toName: string;
+  resetUrl: string;
+}): EmailMessage {
+  const title = '🔐 Parola sıfırlama';
+  const greeting = `Merhaba ${escapeHtml(args.toName.split(' ')[0] ?? '')},`;
+  const bodyHtml = `
+    <p>${greeting}</p>
+    <p>Hesabın için bir parola sıfırlama talebi aldık. Yeni parola belirlemek
+       için aşağıdaki bağlantıya tıkla. Bağlantı <strong>1 saat</strong> geçerlidir.</p>
+    <p style="margin-top:24px;">
+      <a href="${escapeHtml(args.resetUrl)}"
+         style="background:#0D5C3F;color:#fff;padding:10px 16px;text-decoration:none;border-radius:8px;display:inline-block;">
+        Parolamı sıfırla
+      </a>
+    </p>
+    <p style="margin-top:16px;color:#6B7280;font-size:12px;">
+      Bu talebi sen yapmadıysan bu e-postayı yok sayabilirsin — parolan değişmez.
+    </p>`;
+  const bodyText = `${greeting.replace(/<[^>]+>/g, '')}\n\nParola sıfırlama bağlantın (1 saat geçerli):\n${args.resetUrl}\n\nBu talebi sen yapmadıysan yok say.`;
+  return {
+    to: args.to,
+    subject: `[KLAB] ${title}`,
+    html: shell(title, bodyHtml),
+    text: bodyText,
+  };
+}
+
+export function licenseReviewedEmail(args: {
+  to: string;
+  toName: string;
+  requestTitle: string;
+  status: 'approved' | 'rejected' | 'feedback_requested';
+  feedback?: string | null;
+}): EmailMessage {
+  const titleMap = {
+    approved: '✓ Lisans başvurunuz onaylandı',
+    rejected: '✕ Lisans başvurunuz reddedildi',
+    feedback_requested: '💬 Lisans başvurunuz için düzeltme istendi',
+  };
+  const title = titleMap[args.status];
+  const greeting = `Merhaba ${escapeHtml(args.toName.split(' ')[0] ?? '')},`;
+  const titleLine = `<strong>${escapeHtml(args.requestTitle)}</strong>`;
+
+  let bodyHtml = `<p>${greeting}</p>`;
+  let bodyText = `${greeting.replace(/<[^>]+>/g, '')}\n\n`;
+
+  if (args.status === 'approved') {
+    bodyHtml += `<p>${titleLine} lisans başvurunuz <strong style="color:#10B981;">onaylandı</strong>. İlgili ekip lisans tahsisi için yönlendirilecek.</p>`;
+    bodyText += `"${args.requestTitle}" lisans başvurunuz onaylandı.\n`;
+  } else if (args.status === 'rejected') {
+    bodyHtml += `<p>${titleLine} lisans başvurunuz <strong style="color:#EF4444;">reddedildi</strong>.</p>`;
+    bodyText += `"${args.requestTitle}" lisans başvurunuz reddedildi.\n`;
+  } else {
+    bodyHtml += `<p>${titleLine} başvurunuz için <strong style="color:#3B82F6;">düzeltme talep edildi</strong>. Lütfen panelinizden düzenleyip yeniden gönderin.</p>`;
+    bodyText += `"${args.requestTitle}" için düzeltme talep edildi.\n`;
+  }
+
+  if (args.feedback && args.feedback.trim()) {
+    bodyHtml += `<div style="margin-top:16px;padding:12px;background:#F3F4F6;border-left:3px solid #FBBF24;border-radius:4px;">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6B7280;font-weight:bold;margin-bottom:4px;">Admin notu</div>
+      <div style="white-space:pre-wrap;">${escapeHtml(args.feedback)}</div>
+    </div>`;
+    bodyText += `\nAdmin notu:\n${args.feedback}\n`;
+  }
+
+  bodyHtml += `<p style="margin-top:24px;"><a href="${process.env.FRONTEND_ORIGIN ?? ''}/licenses" style="background:#0D5C3F;color:#fff;padding:10px 16px;text-decoration:none;border-radius:8px;display:inline-block;">Başvurularıma git</a></p>`;
+  bodyText += `\n${process.env.FRONTEND_ORIGIN ?? ''}/licenses`;
+
+  return {
+    to: args.to,
+    subject: `[KLAB] ${title} — ${args.requestTitle}`,
+    html: shell(title, bodyHtml),
+    text: bodyText,
+  };
+}
+
+export function licenseRequestedAdminEmail(args: {
+  to: string;
+  requestTitle: string;
+  tools: string;
+  submitterName: string;
+}): EmailMessage {
+  const title = '📥 Yeni lisans başvurusu';
+  const bodyHtml = `
+    <p><strong>${escapeHtml(args.submitterName)}</strong> tarafından yeni bir lisans başvurusu geldi:</p>
+    <ul>
+      <li><strong>Başlık:</strong> ${escapeHtml(args.requestTitle)}</li>
+      <li><strong>Talep edilen araçlar:</strong> ${escapeHtml(args.tools)}</li>
+    </ul>
+    <p style="margin-top:24px;">
+      <a href="${process.env.FRONTEND_ORIGIN ?? ''}/admin/licenses"
+         style="background:#0D5C3F;color:#fff;padding:10px 16px;text-decoration:none;border-radius:8px;display:inline-block;">
+        Admin paneline git
+      </a>
+    </p>`;
+  const bodyText = `${args.submitterName} tarafından yeni lisans başvurusu: "${args.requestTitle}" (${args.tools}).\n\n${process.env.FRONTEND_ORIGIN ?? ''}/admin/licenses`;
+  return {
+    to: args.to,
+    subject: `[KLAB] ${title} — ${args.requestTitle}`,
+    html: shell(title, bodyHtml),
+    text: bodyText,
+  };
+}
+
 export function bookingCreatedAdminEmail(args: {
   to: string;
   projectName: string;

@@ -358,6 +358,75 @@ function recomputePositions(roomId: string): void {
   txn();
 }
 
+export type WaitlistMove = 'up' | 'down' | 'top';
+
+/**
+ * Admin: bir waitlist kaydının sırasını değiştirir (öncelik verme).
+ * Yalnızca aynı odadaki 'waiting' kayıtlar arasında çalışır; position'lar
+ * yeni sıraya göre 1..N olarak yeniden numaralandırılır.
+ */
+export function moveWaitlistEntry(waitlistId: string, move: WaitlistMove): void {
+  const db = getDb();
+  const entry = db
+    .prepare(`SELECT id, room_id, status FROM waitlist WHERE id = ?`)
+    .get(waitlistId) as { id: string; room_id: string; status: string } | undefined;
+  if (!entry) {
+    throw new HttpError(404, 'Waitlist kaydı bulunamadı.', 'WAITLIST_ENTRY_NOT_FOUND');
+  }
+  if (entry.status !== 'waiting') {
+    throw new HttpError(
+      409,
+      'Sadece bekleyen kayıtların sırası değiştirilebilir.',
+      'WAITLIST_NOT_WAITING'
+    );
+  }
+
+  const ids = (
+    db
+      .prepare(
+        `SELECT id FROM waitlist
+         WHERE room_id = ? AND status = 'waiting'
+         ORDER BY position ASC`
+      )
+      .all(entry.room_id) as Array<{ id: string }>
+  ).map((r) => r.id);
+
+  const idx = ids.indexOf(waitlistId);
+  if (idx === -1) return;
+
+  const next = [...ids];
+  if (move === 'top' && idx > 0) {
+    next.splice(idx, 1);
+    next.unshift(waitlistId);
+  } else if (move === 'up' && idx > 0) {
+    [next[idx - 1], next[idx]] = [next[idx]!, next[idx - 1]!];
+  } else if (move === 'down' && idx < ids.length - 1) {
+    [next[idx], next[idx + 1]] = [next[idx + 1]!, next[idx]!];
+  } else {
+    return; // sınırda — değişiklik yok
+  }
+
+  const txn = db.transaction(() => {
+    next.forEach((id, i) => {
+      db.prepare(
+        `UPDATE waitlist SET position = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+      ).run(i + 1, id);
+    });
+  });
+  txn();
+
+  recordAudit({
+    eventType: 'waitlist.reordered',
+    subjectType: 'admin',
+    success: true,
+    details: { waitlistId, roomId: entry.room_id, move },
+  });
+  broadcastToAdmins({
+    type: 'waitlist.changed',
+    data: { roomId: entry.room_id, action: 'reordered' },
+  });
+}
+
 /* ============================================================
  * PROMOTE: serbest kalan oda için head-of-line user'ı booking'e çevir
  * ============================================================ */

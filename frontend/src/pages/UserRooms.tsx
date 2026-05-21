@@ -2,33 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { BookingModal } from '../components/BookingModal';
-import { RoomIllustration } from '../components/RoomIllustration';
+import { RoomHeroVisual } from '../components/RoomHeroVisual';
 import { WaitlistModal } from '../components/WaitlistModal';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
-import type { CreateBookingPayload, JoinWaitlistPayload, Room, RoomTheme } from '../types';
-
-const VALID_THEMES: RoomTheme[] = ['robot', 'pc', 'neural', 'chatbot', 'data', 'brain', 'code', 'cloud', 'vector', 'agent'];
-function themeOf(room: Room): RoomTheme {
-  return VALID_THEMES.includes(room.theme) ? room.theme : 'agent';
-}
-
-const THEME_LABELS: Record<RoomTheme, string> = {
-  robot: 'Robotics',
-  pc: 'Workstation',
-  neural: 'Neural Net',
-  chatbot: 'Chatbot',
-  data: 'Data',
-  brain: 'AI Brain',
-  code: 'Coding',
-  cloud: 'Cloud AI',
-  vector: 'Embeddings',
-  agent: 'AI Agent',
-};
-function themeLabel(theme: RoomTheme): string {
-  return THEME_LABELS[theme] ?? 'AI Lab';
-}
+import type { CreateBookingPayload, JoinWaitlistPayload, Room } from '../types';
 
 export default function UserRooms() {
   const toast = useToast();
@@ -91,7 +70,8 @@ export default function UserRooms() {
         r.name.toLowerCase().includes(q) ||
         r.district.toLowerCase().includes(q) ||
         r.neighborhood.toLowerCase().includes(q) ||
-        r.code.toLowerCase().includes(q)
+        r.code.toLowerCase().includes(q) ||
+        r.equipment.toLowerCase().includes(q)
       );
     });
   }, [rooms, search, filter]);
@@ -184,9 +164,9 @@ export default function UserRooms() {
           {filtered.map((room) => (
             <article key={room.id} className="card-hover overflow-hidden group">
               <div className="relative h-36 overflow-hidden">
-                {/* Tematik AI illüstrasyonu (her oda farklı) */}
-                <RoomIllustration
-                  theme={themeOf(room)}
+                {/* Cihaz bazlı modern AI görseli */}
+                <RoomHeroVisual
+                  room={room}
                   className="absolute inset-0 w-full h-full group-hover:scale-105 transition-transform duration-500"
                 />
                 {/* Alt gradient — text okunabilirliği için */}
@@ -202,18 +182,40 @@ export default function UserRooms() {
                     ? <span className="badge-available">● Müsait</span>
                     : <span className="badge-unavailable">● Dolu</span>}
                 </div>
-                <div className="absolute bottom-3 left-3 text-white drop-shadow-lg">
-                  <div className="text-xs opacity-85 font-medium">{room.district}</div>
-                  <div className="text-lg font-bold leading-tight">{room.neighborhood}</div>
+                <div className="absolute bottom-3 left-3 text-white drop-shadow-lg max-w-[70%]">
+                  <div className="text-xs opacity-85 font-medium truncate">
+                    {room.name}
+                  </div>
+                  <div className="text-base font-bold leading-tight truncate">
+                    {room.equipment || room.neighborhood}
+                  </div>
                 </div>
                 <div className="absolute bottom-3 right-3">
                   <span className="px-2 py-0.5 rounded-md bg-kt-gold-500/95 text-kt-green-900 text-[10px] font-bold uppercase tracking-wider">
-                    {themeLabel(themeOf(room))}
+                    {room.capacity === 1 ? '1 kişi' : `${room.capacity} kişi`}
                   </span>
                 </div>
               </div>
 
               <div className="p-4">
+                {room.equipment && (
+                  <div className="inline-flex items-center gap-1.5 mb-3 px-2 py-1 rounded-md bg-kt-violet-100 text-kt-violet-800 text-[11px] font-semibold border border-kt-violet-300">
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                      />
+                    </svg>
+                    {room.equipment}
+                  </div>
+                )}
                 <p className="text-sm text-kt-gray-600 line-clamp-2 mb-3 min-h-[40px]">
                   {room.description}
                 </p>
@@ -222,7 +224,7 @@ export default function UserRooms() {
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
                     </svg>
-                    {room.capacity} kişi
+                    {room.capacity === 1 ? '1 kişilik' : `${room.capacity} kişilik`}
                   </span>
                   {!room.isAvailable && room.nextAvailableDate && (
                     <span>Müsait: {new Date(room.nextAvailableDate).toLocaleDateString('tr-TR')}</span>

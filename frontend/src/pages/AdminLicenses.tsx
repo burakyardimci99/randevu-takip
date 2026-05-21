@@ -10,10 +10,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { AdminLicenseRequestsTab } from '../components/AdminLicenseRequestsTab';
+import { GovernanceDashboardView } from '../components/governance/GovernanceDashboardView';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
 import type {
+  LicenseBudgetReport,
   LicenseCategory,
   LicenseReport,
   LicenseSummary,
@@ -44,7 +46,7 @@ function categoryColor(category: LicenseCategory): string {
   }
 }
 
-type TabKey = 'requests' | 'software' | 'user';
+type TabKey = 'requests' | 'governance' | 'budget' | 'software' | 'user';
 
 export default function AdminLicenses() {
   const toast = useToast();
@@ -53,6 +55,8 @@ export default function AdminLicenses() {
   const [tab, setTab] = useState<TabKey>('requests');
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState<'all' | 'paid' | 'free'>('paid');
+  const [budget, setBudget] = useState<LicenseBudgetReport | null>(null);
+  const [budgetLoading, setBudgetLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,9 +70,24 @@ export default function AdminLicenses() {
     }
   }, [toast]);
 
+  const loadBudget = useCallback(async () => {
+    setBudgetLoading(true);
+    try {
+      setBudget(await api.adminLicenseBudget());
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Bütçe raporu yüklenemedi.');
+    } finally {
+      setBudgetLoading(false);
+    }
+  }, [toast]);
+
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (tab === 'budget' && !budget) void loadBudget();
+  }, [tab, budget, loadBudget]);
 
   useRealtimeEvents('admin', (type) => {
     if (
@@ -140,6 +159,26 @@ export default function AdminLicenses() {
             Talepler
           </button>
           <button
+            onClick={() => setTab('governance')}
+            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+              tab === 'governance'
+                ? 'bg-white text-kt-green-900 shadow-kt-soft'
+                : 'text-kt-gray-500 hover:text-kt-green-800'
+            }`}
+          >
+            Yönetişim
+          </button>
+          <button
+            onClick={() => setTab('budget')}
+            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+              tab === 'budget'
+                ? 'bg-white text-kt-green-900 shadow-kt-soft'
+                : 'text-kt-gray-500 hover:text-kt-green-800'
+            }`}
+          >
+            Bütçe
+          </button>
+          <button
             onClick={() => setTab('software')}
             className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
               tab === 'software'
@@ -164,6 +203,18 @@ export default function AdminLicenses() {
 
       {tab === 'requests' ? (
         <AdminLicenseRequestsTab />
+      ) : tab === 'governance' ? (
+        <GovernanceDashboardView />
+      ) : tab === 'budget' ? (
+        budgetLoading || !budget ? (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="card p-6 animate-pulse h-32" />
+            ))}
+          </div>
+        ) : (
+          <BudgetView report={budget} />
+        )
       ) : loading || !report ? (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -472,5 +523,160 @@ function UserView({ items }: { items: UserLicenseUsage[] }) {
         );
       })}
     </div>
+  );
+}
+
+/* ============================================================
+ * BUDGET VIEW — lisans taleplerinin maliyet projeksiyonu
+ * ============================================================ */
+
+function projectTypeLabel(t: 'poc' | 'integration' | 'unspecified'): string {
+  if (t === 'poc') return 'Deneysel (PoC)';
+  if (t === 'integration') return 'Kuruma Entegre';
+  return 'Belirtilmemiş';
+}
+
+function BudgetView({ report }: { report: LicenseBudgetReport }) {
+  const maxToolMonthly = Math.max(1, ...report.byTool.map((t) => t.monthlyUsd));
+
+  return (
+    <>
+      {/* Üst istatistikler */}
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <div className="card p-5 relative overflow-hidden">
+          <div className="absolute -top-3 -right-3 w-20 h-20 bg-kt-green-400/15 rounded-full blur-2xl" />
+          <div className="relative">
+            <div className="text-3xl font-extrabold text-kt-green-800 tabular-nums">
+              {fmtUsd(report.approvedMonthlyUsd)}
+            </div>
+            <div className="text-[11px] uppercase tracking-wider text-kt-gray-500 font-semibold mt-1">
+              Onaylı — aylık
+            </div>
+            <div className="text-xs text-kt-gold-700 font-semibold mt-0.5">
+              ≈ {fmtTry(report.approvedMonthlyUsd)}
+            </div>
+          </div>
+        </div>
+        <div className="card p-5">
+          <div className="text-3xl font-extrabold text-kt-green-800 tabular-nums">
+            {fmtUsd(report.approvedAnnualUsd)}
+          </div>
+          <div className="text-[11px] uppercase tracking-wider text-kt-gray-500 font-semibold mt-1">
+            Yıllık projeksiyon
+          </div>
+          <div className="text-xs text-kt-gray-500 mt-0.5">≈ {fmtTry(report.approvedAnnualUsd)}</div>
+        </div>
+        <div className="card p-5">
+          <div className="text-3xl font-extrabold text-kt-violet-600 tabular-nums">
+            {fmtUsd(report.approvedCommitmentUsd)}
+          </div>
+          <div className="text-[11px] uppercase tracking-wider text-kt-gray-500 font-semibold mt-1">
+            Toplam taahhüt
+          </div>
+          <div className="text-xs text-kt-gray-500 mt-0.5">
+            {report.approvedRequestCount} onaylı talep · talep sürelerine göre
+          </div>
+        </div>
+        <div className="card p-5">
+          <div className="text-3xl font-extrabold text-kt-gold-700 tabular-nums">
+            {fmtUsd(report.pendingMonthlyUsd)}
+          </div>
+          <div className="text-[11px] uppercase tracking-wider text-kt-gray-500 font-semibold mt-1">
+            Bekleyen — potansiyel aylık
+          </div>
+          <div className="text-xs text-kt-gray-500 mt-0.5">
+            {report.pendingRequestCount} talep onay beklerken
+          </div>
+        </div>
+      </section>
+
+      {report.approvedRequestCount === 0 && report.pendingRequestCount === 0 ? (
+        <div className="card p-12 text-center">
+          <div className="text-5xl mb-3">📊</div>
+          <h3 className="text-lg font-bold text-kt-green-800 mb-1">Henüz lisans talebi yok</h3>
+          <p className="text-sm text-kt-gray-500">
+            Talepler oluştukça maliyet projeksiyonu burada görünür.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Proje türüne göre */}
+          <div className="card p-5">
+            <h3 className="font-bold text-kt-green-900 mb-3">Proje türüne göre (onaylı)</h3>
+            {report.byProjectType.length === 0 ? (
+              <p className="text-sm text-kt-gray-400 italic">Onaylı talep yok.</p>
+            ) : (
+              <ul className="space-y-3">
+                {report.byProjectType.map((b) => (
+                  <li key={b.projectType}>
+                    <div className="flex items-center justify-between text-sm mb-1">
+                      <span className="font-semibold text-kt-green-900">
+                        {projectTypeLabel(b.projectType)}
+                      </span>
+                      <span className="tabular-nums text-kt-gray-600">
+                        {fmtUsd(b.monthlyUsd)}/ay · {b.requestCount} talep
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full bg-kt-gray-100 overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-kt-green-500 to-kt-green-700"
+                        style={{
+                          width: `${Math.round(
+                            (b.monthlyUsd / Math.max(1, report.approvedMonthlyUsd)) * 100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Araca göre */}
+          <div className="card p-5">
+            <h3 className="font-bold text-kt-green-900 mb-3">Araca göre maliyet (onaylı)</h3>
+            {report.byTool.length === 0 ? (
+              <p className="text-sm text-kt-gray-400 italic">
+                Onaylı taleplerde fiyatlı araç yok.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {report.byTool.map((t) => (
+                  <li key={t.name}>
+                    <div className="flex items-center justify-between text-sm mb-1">
+                      <span className="font-semibold text-kt-green-900">
+                        {t.name}
+                        <span className="text-xs text-kt-gray-400 font-normal ml-1.5">
+                          {t.approvedCount}× · {fmtUsd(t.unitMonthlyUsd)}/ay
+                        </span>
+                      </span>
+                      <span className="tabular-nums text-kt-gray-600">{fmtUsd(t.monthlyUsd)}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-kt-gray-100 overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-kt-gold-400 to-kt-gold-600"
+                        style={{ width: `${Math.round((t.monthlyUsd / maxToolMonthly) * 100)}%` }}
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {report.unpricedItemCount > 0 && (
+        <div className="mt-4 px-4 py-3 rounded-xl bg-kt-gold-50 border border-kt-gold-200 text-sm text-kt-gold-900">
+          <strong>{report.unpricedItemCount}</strong> araç kalemi katalogda fiyatlı değil
+          (custom / elle eklenmiş) — maliyet hesabına dahil edilmedi.
+        </div>
+      )}
+
+      <div className="text-xs text-kt-gray-400 text-right mt-4">
+        Son güncelleme: {new Date(report.generatedAt).toLocaleString('tr-TR')} · USD/TRY ≈ {USD_TRY}
+      </div>
+    </>
   );
 }

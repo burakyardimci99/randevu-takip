@@ -32,6 +32,76 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(128),
 });
 
+/** Parola sıfırlama talebi — sadece e-posta. */
+export const forgotPasswordSchema = z.object({
+  email: emailSchema,
+});
+
+/** Parola sıfırlama — token + yeni parola (politika uygulanır). */
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().trim().min(16).max(128),
+    password: passwordSchema,
+    passwordConfirm: z.string().min(1).max(128),
+  })
+  .refine((d) => d.password === d.passwordConfirm, {
+    message: 'Parolalar eşleşmiyor.',
+    path: ['passwordConfirm'],
+  });
+
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
+/** Admin: bir kullanıcının parolasını sıfırlar (parola politikası uygulanır). */
+export const adminResetUserPasswordSchema = z.object({
+  password: passwordSchema,
+});
+
+/** Admin kendi parolasını değiştirir. */
+export const changeAdminPasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(128),
+  newPassword: passwordSchema,
+});
+
+/** Admin: bir booking'i başka odaya taşır. */
+export const reassignRoomSchema = z.object({
+  roomId: z.string().trim().min(8).max(40),
+});
+
+/** Admin: bir booking'in user'ını değiştirir. */
+export const reassignUserSchema = z.object({
+  userId: z.string().trim().min(8).max(40),
+});
+
+/** Kullanıcı: yeni randevu (appointment) oluşturma. */
+export const createAppointmentSchema = z.object({
+  bookingId: z.string().trim().min(8).max(40),
+  startAt: z.string().trim().min(10).max(40), // ISO datetime
+  endAt: z.string().trim().min(10).max(40),
+  title: z.string().trim().max(120).optional(),
+  notes: z.string().trim().max(500).optional(),
+});
+
+/** Admin: booking review-track (SWAT/standard) ayarı. */
+export const setReviewTrackSchema = z.object({
+  track: z.union([z.literal('standard'), z.literal('swat')]),
+});
+
+/** Kullanıcı: aşama ilerletme talebi (opsiyonel gerekçe). */
+export const stageAdvanceRequestSchema = z.object({
+  note: z.string().trim().max(500).optional(),
+});
+
+/** Admin: stage advance talebini reddetme (opsiyonel admin notu). */
+export const rejectStageAdvanceSchema = z.object({
+  note: z.string().trim().max(500).optional(),
+});
+
+/** Admin: waitlist sırası değiştirme. */
+export const waitlistMoveSchema = z.object({
+  move: z.union([z.literal('up'), z.literal('down'), z.literal('top')]),
+});
+
 /**
  * Kullanıcı kayıt şeması.
  * - Parola politikası uygulanır (min 12 + karmaşıklık)
@@ -50,6 +120,13 @@ export const registerSchema = z.object({
       /^[A-Za-zÇĞİıÖŞÜçğıöşü' -]+$/,
       'Ad-soyad yalnızca harf, boşluk ve tire içerebilir.'
     ),
+  /**
+   * Demo amaçlı: registration sırasında yönetişim rolü seçilebilir.
+   * Prod'da kapatılmalı — sadece admin atamalı.
+   */
+  governanceRole: z
+    .union([z.literal('analitik_danisman'), z.literal('yz_arge')])
+    .optional(),
 }).refine((d) => d.password === d.passwordConfirm, {
   message: 'Parolalar eşleşmiyor.',
   path: ['passwordConfirm'],
@@ -95,6 +172,9 @@ export type ProfileUpdateInput = z.infer<typeof profileUpdateSchema>;
  */
 export const adminUserUpdateSchema = profileUpdateSchema.extend({
   status: z.union([z.literal(1), z.literal(3)]).optional(),
+  governanceRole: z
+    .union([z.literal('analitik_danisman'), z.literal('yz_arge'), z.null()])
+    .optional(),
 });
 
 export type AdminUserUpdateInput = z.infer<typeof adminUserUpdateSchema>;
@@ -231,31 +311,144 @@ const licenseKeySchema = z
   .max(60)
   .regex(/^[a-z0-9.\- ]+$/, 'Lisans tanımlayıcısı geçersiz karakter içeriyor.');
 
-export const createLicenseRequestSchema = z.object({
+/**
+ * Talep edilen tek bir AI aracı / lisansı.
+ * Form 1+ tane gönderir (çoklu seçim) — junction tablosuna yazılır.
+ */
+const licenseRequestItemSchema = z.object({
   licenseKey: licenseKeySchema,
   licenseName: z.string().trim().min(2).max(80),
   vendor: z.string().trim().max(60).nullable().optional(),
   category: z.string().trim().max(40).nullable().optional(),
+});
+
+export const createLicenseRequestSchema = z.object({
+  // Talep adı (PNG: zorunlu, kısa başlık)
+  requestTitle: z
+    .string()
+    .trim()
+    .min(5, 'Talep adı en az 5 karakter olmalı.')
+    .max(120, 'Talep adı en fazla 120 karakter olabilir.'),
+
+  // Kullanım amacı — mevcut `reason` kolonuna yazılır (PNG: zorunlu)
   reason: z
     .string()
     .trim()
-    .min(20, 'Gerekçe en az 20 karakter olmalı.')
-    .max(1000, 'Gerekçe en fazla 1000 karakter olabilir.'),
+    .min(20, 'Kullanım amacı en az 20 karakter olmalı.')
+    .max(1000, 'Kullanım amacı en fazla 1000 karakter olabilir.'),
+
+  // Beklenen fayda (PNG: zorunlu)
+  expectedBenefit: z
+    .string()
+    .trim()
+    .min(20, 'Beklenen fayda en az 20 karakter olmalı.')
+    .max(1000, 'Beklenen fayda en fazla 1000 karakter olabilir.'),
+
+  // Başarı kriteri (PNG: zorunlu)
+  successCriteria: z
+    .string()
+    .trim()
+    .min(20, 'Başarı kriteri en az 20 karakter olmalı.')
+    .max(1000, 'Başarı kriteri en fazla 1000 karakter olabilir.'),
+
+  // AI Araç / Lisans Talebi (PNG: zorunlu, çoklu seçim)
+  items: z
+    .array(licenseRequestItemSchema)
+    .min(1, 'En az bir AI aracı / lisans seçilmeli.')
+    .max(10, 'En fazla 10 AI aracı seçilebilir.'),
+
+  // Proje türü (PNG: zorunlu)
+  projectType: z.union([z.literal('poc'), z.literal('integration')]),
+
+  // Tahmini süre — gün (PNG: önerilen, opsiyonel)
+  estimatedDurationDays: z
+    .number()
+    .int()
+    .min(1)
+    .max(365)
+    .nullable()
+    .optional(),
+
+  // Kullanılacak veri (PNG: zorunlu)
+  dataToUse: z
+    .string()
+    .trim()
+    .min(10, 'Kullanılacak veri tanımı en az 10 karakter olmalı.')
+    .max(500, 'Kullanılacak veri tanımı en fazla 500 karakter olabilir.'),
+
+  // Teknik yığın (PNG: önerilen, opsiyonel)
+  technicalStack: z
+    .string()
+    .trim()
+    .max(500)
+    .nullable()
+    .optional(),
+
+  // Lisans kullanım süresi (ay) — mevcut alan, korunur
   durationMonths: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(12)]),
+
+  // Yönetişim — dış servis/API erişimi var mı (kapsam belirler)
+  usesExternalApi: z.boolean(),
+
+  // Yönetişim §5 — gerçek banka verisi / üretim / AD-LDAP beyanı.
+  // true ise başvuru otomatik reddedilir.
+  involvesRealData: z.boolean(),
 });
 
 export type CreateLicenseRequestInput = z.infer<typeof createLicenseRequestSchema>;
+export type LicenseRequestItemInput = z.infer<typeof licenseRequestItemSchema>;
 
 export const reviewLicenseRequestSchema = z.object({
   action: z.union([
     z.literal('approve'),
     z.literal('reject'),
     z.literal('request_feedback'),
+    z.literal('swat'),
   ]),
   adminFeedback: z.string().trim().max(1000).nullable().optional(),
 });
 
 export type ReviewLicenseRequestInput = z.infer<typeof reviewLicenseRequestSchema>;
+
+/* ============================================================
+ * YÖNETİŞİM — yaşam döngüsü, kalite kapıları, onaylar
+ * ============================================================ */
+
+/** Kalite kapısı sonucu (admin / CI pipeline). */
+export const gateResultSchema = z.object({
+  gateKey: z.union([
+    z.literal('build'),
+    z.literal('code_review'),
+    z.literal('architecture'),
+    z.literal('framework'),
+    z.literal('security'),
+  ]),
+  status: z.union([z.literal('pending'), z.literal('passed'), z.literal('failed')]),
+  score: z.number().int().min(0).max(100).nullable().optional(),
+  detail: z.string().trim().max(500).nullable().optional(),
+});
+
+export type GateResultInput = z.infer<typeof gateResultSchema>;
+
+/** Yaşam döngüsü ilerletme (development→stage→production→live). */
+export const advanceLifecycleSchema = z.object({
+  note: z.string().trim().max(500).nullable().optional(),
+});
+
+/** Stage / Production insan onayı kararı. */
+export const decideApprovalSchema = z.object({
+  approvalType: z.union([z.literal('stage'), z.literal('production')]),
+  decision: z.union([z.literal('approved'), z.literal('rejected')]),
+  releaseNote: z.string().trim().max(1000).nullable().optional(),
+  riskAssessment: z.string().trim().max(1000).nullable().optional(),
+});
+
+export type DecideApprovalInput = z.infer<typeof decideApprovalSchema>;
+
+/** Lab Mühendisi ataması. */
+export const assignEngineerSchema = z.object({
+  engineerId: z.string().trim().min(8).max(40),
+});
 
 export const adminLicenseRequestsFilterSchema = z.object({
   status: z

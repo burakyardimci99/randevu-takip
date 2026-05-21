@@ -26,21 +26,26 @@ interface KeyBundle {
 }
 
 function getKeyBundle(kind: SubjectKind): KeyBundle {
-  if (kind === 'user') {
+  if (kind === 'admin') {
     return {
-      privateKey: config.userJwtPrivateKey,
-      publicKey: config.userJwtPublicKey,
-      audience: config.userJwtAudience,
-      accessTtl: config.userAccessTokenTtl,
-      refreshTtl: config.userRefreshTokenTtl,
+      privateKey: config.adminJwtPrivateKey,
+      publicKey: config.adminJwtPublicKey,
+      audience: config.adminJwtAudience,
+      accessTtl: config.adminAccessTokenTtl,
+      refreshTtl: config.adminRefreshTokenTtl,
     };
   }
+  // user / danisman / arge — aynı RSA key, farklı `aud` claim'i.
+  // Bu sayede danisman token'ı /api/user/* üzerinde verifyAccessToken'da
+  // audience mismatch ile reddedilir (token cross-role kullanım engellenir).
+  const audSuffix =
+    kind === 'danisman' ? '-danisman' : kind === 'arge' ? '-arge' : '';
   return {
-    privateKey: config.adminJwtPrivateKey,
-    publicKey: config.adminJwtPublicKey,
-    audience: config.adminJwtAudience,
-    accessTtl: config.adminAccessTokenTtl,
-    refreshTtl: config.adminRefreshTokenTtl,
+    privateKey: config.userJwtPrivateKey,
+    publicKey: config.userJwtPublicKey,
+    audience: config.userJwtAudience + audSuffix,
+    accessTtl: config.userAccessTokenTtl,
+    refreshTtl: config.userRefreshTokenTtl,
   };
 }
 

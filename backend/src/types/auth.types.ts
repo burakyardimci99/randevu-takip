@@ -1,7 +1,28 @@
 /**
  * Auth type definitions.
  */
-export type SubjectKind = 'user' | 'admin';
+/**
+ * Subject token kind — yönetişim rolleri için ayrı token akışları.
+ *
+ *  user      → sıradan kullanıcı (lab odası booking yapabilir)
+ *  admin     → Lab Mühendisi (admin panel)
+ *  danisman  → Analitik Danışman (yalnızca /governance/danisman/*)
+ *  arge      → YZ / Ar-Ge Mühendisi (yalnızca /governance/arge/*)
+ *
+ * Bir user'ın hesabı bunlardan birini taşır (governance_role'e göre login'de
+ * kind belirlenir). Token'lar farklı `aud` claim'iyle imzalanır ve farklı
+ * refresh cookie path'lerine düşer — birinden alınan token diğer endpoint'lere
+ * geçerli değildir.
+ */
+export type SubjectKind = 'user' | 'admin' | 'danisman' | 'arge';
+
+/** Auth flow'larında HTTP kind eşlemesi — login response.type, refresh cookie vs. */
+export const SUBJECT_KINDS: readonly SubjectKind[] = ['user', 'admin', 'danisman', 'arge'] as const;
+
+/** Bir SubjectKind'ın user-side mi (auth.middleware için kullanılır) admin-side mi. */
+export function isUserSideKind(k: SubjectKind): boolean {
+  return k === 'user' || k === 'danisman' || k === 'arge';
+}
 
 export interface UserRecord {
   id: string;
@@ -9,6 +30,7 @@ export interface UserRecord {
   password_hash: string;
   full_name: string;
   role: 'user';
+  governance_role: 'analitik_danisman' | 'yz_arge' | null;
   department: string | null;
   title: string | null;
   manager: string | null;
@@ -40,6 +62,8 @@ export interface JwtPayload {
   type: SubjectKind;
   role: string;
   email: string;
+  /** User'lar için yönetişim rolü (varsa). Admin'ler için undefined. */
+  governanceRole?: 'analitik_danisman' | 'yz_arge' | null;
 }
 
 export interface AuthContext {
@@ -47,6 +71,8 @@ export interface AuthContext {
   subjectType: SubjectKind;
   email: string;
   role: string;
+  /** Sadece user'lar için anlamlı. */
+  governanceRole?: 'analitik_danisman' | 'yz_arge' | null;
 }
 
 declare global {

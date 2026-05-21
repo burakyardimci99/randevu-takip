@@ -5,9 +5,12 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Profile from './pages/Profile';
 import UserRooms from './pages/UserRooms';
 import UserBookings from './pages/UserBookings';
+import UserCalendar from './pages/UserCalendar';
 import UserFAQ from './pages/UserFAQ';
 import UserLicenses from './pages/UserLicenses';
 import UserWaitlist from './pages/UserWaitlist';
@@ -15,6 +18,7 @@ import Showcase from './pages/Showcase';
 import PrivacySettings from './pages/PrivacySettings';
 import PublicProfile from './pages/PublicProfile';
 import AdminDashboard from './pages/AdminDashboard';
+import AdminRooms from './pages/AdminRooms';
 import AdminUsers from './pages/AdminUsers';
 import AdminAnalytics from './pages/AdminAnalytics';
 import AdminCalendar from './pages/AdminCalendar';
@@ -22,6 +26,9 @@ import AdminWaitlist from './pages/AdminWaitlist';
 import AdminSecurity from './pages/AdminSecurity';
 import AdminAuditLog from './pages/AdminAuditLog';
 import AdminLicenses from './pages/AdminLicenses';
+import AdminProjects from './pages/AdminProjects';
+import ArgeDashboard from './pages/ArgeDashboard';
+import DanismanDashboard from './pages/DanismanDashboard';
 
 export default function App() {
   return (
@@ -32,6 +39,8 @@ export default function App() {
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/showcase" element={<Showcase />} />
             <Route path="/u/:userId" element={<PublicProfile />} />
             {/* Eski URL'ler /login'e yönlendirilir — backwards compat */}
@@ -66,6 +75,14 @@ export default function App() {
               element={
                 <ProtectedRoute kind="user">
                   <UserWaitlist />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/takvim"
+              element={
+                <ProtectedRoute kind="user">
+                  <UserCalendar />
                 </ProtectedRoute>
               }
             />
@@ -127,6 +144,14 @@ export default function App() {
               }
             />
             <Route
+              path="/admin/rooms"
+              element={
+                <ProtectedRoute kind="admin">
+                  <AdminRooms />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/admin/waitlist"
               element={
                 <ProtectedRoute kind="admin">
@@ -155,6 +180,32 @@ export default function App() {
               element={
                 <ProtectedRoute kind="admin">
                   <AdminLicenses />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/projects"
+              element={
+                <ProtectedRoute kind="admin">
+                  <AdminProjects />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Yönetişim rolü dashboard'ları — her biri kendi kind'ında */}
+            <Route
+              path="/danisman"
+              element={
+                <ProtectedRoute kind="danisman">
+                  <DanismanDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/arge"
+              element={
+                <ProtectedRoute kind="arge">
+                  <ArgeDashboard />
                 </ProtectedRoute>
               }
             />

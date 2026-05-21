@@ -5,11 +5,13 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { requireUser } from '../middleware/auth.middleware';
 import {
+  createAppointmentSchema,
   createBookingSchema,
   createLicenseRequestSchema,
   joinWaitlistSchema,
   profileUpdateSchema,
   similarSearchSchema,
+  stageAdvanceRequestSchema,
 } from '../validators/schemas';
 import { listRooms } from '../services/room.service';
 import {
@@ -17,8 +19,15 @@ import {
   deleteBooking,
   getBookingByIdForUser,
   listUserBookings,
+  requestStageAdvance,
   updateBooking,
 } from '../services/booking.service';
+import {
+  cancelAppointment,
+  createAppointment,
+  listBookingAppointments,
+  listUserAppointments,
+} from '../services/appointment.service';
 import { getUserProfile, updateUserProfile } from '../services/user.service';
 import {
   cancelWaitlist,
@@ -593,9 +602,6 @@ router.get(
   }
 );
 
-// NOT: Mevcut state-changing endpoint'ler (bookings, waitlist) henüz CSRF
-// korumalı değil — tutarlılık için bu da öyle. Tüm POST/PUT/DELETE
-// endpoint'lerini CSRF'e geçirmek ayrı bir refactor.
 router.post(
   '/licenses/requests',
   requireUser,
@@ -604,7 +610,255 @@ router.post(
       const input = createLicenseRequestSchema.parse(req.body);
       const { createLicenseRequest } = await import('../services/license-request.service');
       const created = createLicenseRequest(req.auth!.subjectId, input);
+
+      recordAudit({
+        eventType: 'license_request.created',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'user',
+        ipAddress: req.ip,
+        success: true,
+        details: {
+          requestId: created.id,
+          requestTitle: created.requestTitle,
+          itemCount: created.items.length,
+          durationMonths: created.durationMonths,
+        },
+      });
+
+      // Admin'lere yeni başvuru e-postası — otomatik reddedilen başvurular hariç.
+      if (created.status !== 'rejected') {
+        void (async () => {
+          try {
+            const { notifyAdminsLicenseRequested } = await import(
+              '../services/license-request.service'
+            );
+            await notifyAdminsLicenseRequested(created);
+          } catch {
+            /* bildirim best-effort — talep yine de oluşturuldu */
+          }
+        })();
+      }
+
       res.status(201).json({ request: created });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.put(
+  '/licenses/requests/:id',
+  requireUser,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
+      }
+      const input = createLicenseRequestSchema.parse(req.body);
+      const { updateLicenseRequest } = await import('../services/license-request.service');
+      const updated = updateLicenseRequest(req.auth!.subjectId, id, input);
+
+      recordAudit({
+        eventType: 'license_request.updated',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'user',
+        ipAddress: req.ip,
+        success: true,
+        details: { requestId: updated.id, status: updated.status },
+      });
+
+      res.json({ request: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * Başvuru/proje detayı — yönetişim demeti dahil (kalite kapıları,
+ * insan onayları, yaşam döngüsü zaman çizelgesi). IDOR: sadece kendi.
+ */
+router.get(
+  '/licenses/requests/:id',
+  requireUser,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
+      }
+      const { getUserLicenseRequestById } = await import(
+        '../services/license-request.service'
+      );
+      const request = getUserLicenseRequestById(req.auth!.subjectId, id);
+      if (!request) {
+        throw new HttpError(404, 'Talep bulunamadı.', 'LICENSE_REQUEST_NOT_FOUND');
+      }
+      const { listGatesForRequest } = await import('../services/quality-gate.service');
+      const { listApprovalsForRequest } = await import('../services/human-approval.service');
+      const { listStageEvents } = await import('../services/governance.service');
+      res.json({
+        request,
+        gates: listGatesForRequest(id),
+        approvals: listApprovalsForRequest(id),
+        stageEvents: listStageEvents(id),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/* ============ BİLDİRİM MERKEZİ ============ */
+
+router.get(
+  '/notifications',
+  requireUser,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { listNotifications, countUnreadNotifications } = await import(
+        '../services/notification-center.service'
+      );
+      const uid = req.auth!.subjectId;
+      res.json({
+        items: listNotifications(uid, 'user'),
+        unread: countUnreadNotifications(uid, 'user'),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/notifications/:id/read',
+  requireUser,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz bildirim id.', 'INVALID_ID');
+      }
+      const { markNotificationRead } = await import(
+        '../services/notification-center.service'
+      );
+      markNotificationRead(req.auth!.subjectId, 'user', id);
+      res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/notifications/read-all',
+  requireUser,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { markAllNotificationsRead } = await import(
+        '../services/notification-center.service'
+      );
+      const changed = markAllNotificationsRead(req.auth!.subjectId, 'user');
+      res.json({ marked: changed });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Kullanıcı: aşama ilerletme talebi oluştur (admin'den onay bekler). */
+router.post(
+  '/bookings/:id/request-advance',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
+      }
+      const { note } = stageAdvanceRequestSchema.parse(req.body ?? {});
+      const booking = requestStageAdvance(req.auth!.subjectId, id, note);
+      res.json({ booking });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/* ============ APPOINTMENTS — günlük randevular ============ */
+
+/** Kullanıcının kendi randevuları (varsayılan: scheduled, opsiyonel tarih aralığı). */
+router.get('/appointments', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const fromRaw = req.query.from;
+    const toRaw = req.query.to;
+    const includeCancelled = req.query.includeCancelled === 'true';
+    const from = typeof fromRaw === 'string' ? fromRaw : undefined;
+    const to = typeof toRaw === 'string' ? toRaw : undefined;
+    const appointments = listUserAppointments(req.auth!.subjectId, {
+      from,
+      to,
+      includeCancelled,
+    });
+    res.json({ appointments });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Bir booking'in randevuları (sahibi görür). */
+router.get(
+  '/bookings/:id/appointments',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
+      }
+      // IDOR koruması: booking sahibi mi?
+      const booking = getBookingByIdForUser(req.auth!.subjectId, id);
+      if (!booking) {
+        throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+      }
+      const appointments = listBookingAppointments(id);
+      res.json({ appointments });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Yeni randevu oluştur. */
+router.post('/appointments', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = createAppointmentSchema.parse(req.body);
+    const appointment = createAppointment(req.auth!.subjectId, input);
+    res.status(201).json({ appointment });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Randevu iptal et (kendi randevusu olmalı). */
+router.delete(
+  '/appointments/:id',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz randevu id.', 'INVALID_ID');
+      }
+      const result = cancelAppointment(req.auth!.subjectId, id, {
+        ownerCheck: true,
+        callerType: 'user',
+      });
+      res.json(result);
     } catch (err) {
       next(err);
     }

@@ -15,9 +15,12 @@ interface StatCardConfig {
   label: string;
   filter: StatusFilter;
   icon: JSX.Element;
-  bg: string;
-  iconBg: string;
-  text: string;
+  /** İkon çipi renkleri — tema ile uyumlu, durum bazlı yumuşak vurgu. */
+  iconChip: string;
+  /** Sayı rengi. */
+  valueText: string;
+  /** Aktif filtre halkası. */
+  ring: string;
   hint: string;
 }
 
@@ -26,12 +29,12 @@ const STAT_CARDS: StatCardConfig[] = [
     key: 'pending',
     label: 'Bekleyen',
     filter: 'pending',
-    bg: 'from-amber-400 to-orange-500',
-    iconBg: 'bg-white/25',
-    text: 'text-white',
+    iconChip: 'bg-kt-gold-100 text-kt-gold-700',
+    valueText: 'text-kt-gold-700',
+    ring: 'ring-kt-gold-400',
     hint: 'incelenmeyi bekliyor',
     icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     ),
@@ -40,12 +43,12 @@ const STAT_CARDS: StatCardConfig[] = [
     key: 'approved',
     label: 'Onaylanan',
     filter: 'approved',
-    bg: 'from-emerald-500 to-kt-green-700',
-    iconBg: 'bg-white/25',
-    text: 'text-white',
+    iconChip: 'bg-kt-green-100 text-kt-green-700',
+    valueText: 'text-kt-green-700',
+    ring: 'ring-kt-green-400',
     hint: 'aktif randevu',
     icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     ),
@@ -54,12 +57,12 @@ const STAT_CARDS: StatCardConfig[] = [
     key: 'feedback_requested',
     label: 'Düzeltme İstenen',
     filter: 'feedback_requested',
-    bg: 'from-sky-400 to-blue-600',
-    iconBg: 'bg-white/25',
-    text: 'text-white',
+    iconChip: 'bg-blue-100 text-blue-700',
+    valueText: 'text-blue-700',
+    ring: 'ring-blue-400',
     hint: 'kullanıcı yanıtı bekleniyor',
     icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
       </svg>
     ),
@@ -68,12 +71,12 @@ const STAT_CARDS: StatCardConfig[] = [
     key: 'rejected',
     label: 'Reddedilen',
     filter: 'rejected',
-    bg: 'from-rose-500 to-red-600',
-    iconBg: 'bg-white/25',
-    text: 'text-white',
+    iconChip: 'bg-red-100 text-red-700',
+    valueText: 'text-red-700',
+    ring: 'ring-red-400',
     hint: 'arşivlendi',
     icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     ),
@@ -82,8 +85,8 @@ const STAT_CARDS: StatCardConfig[] = [
 
 const STATUS_TABS: { key: StatusFilter; label: string; accent: string }[] = [
   { key: 'all', label: 'Tümü', accent: 'bg-kt-green-700' },
-  { key: 'pending', label: 'Bekleyen', accent: 'bg-amber-500' },
-  { key: 'approved', label: 'Onaylanan', accent: 'bg-emerald-600' },
+  { key: 'pending', label: 'Bekleyen', accent: 'bg-kt-gold-500' },
+  { key: 'approved', label: 'Onaylanan', accent: 'bg-kt-green-600' },
   { key: 'feedback_requested', label: 'Düzeltme', accent: 'bg-blue-500' },
   { key: 'rejected', label: 'Reddedilen', accent: 'bg-red-500' },
 ];
@@ -191,19 +194,57 @@ export default function AdminDashboard() {
     if (!selected) return;
     setReviewing(true);
     try {
-      await api.reviewBooking(selected.id, payload);
-      toast.push(
-        'success',
-        payload.action === 'approve'
-          ? 'Talep onaylandı.'
-          : payload.action === 'reject'
-          ? 'Talep reddedildi.'
-          : 'Düzeltme isteği kullanıcıya iletildi.'
-      );
+      const res = await api.reviewBooking(selected.id, payload);
+      if (res.autoWaitlisted && payload.action === 'approve') {
+        toast.push(
+          'info',
+          `Oda dolu — talep otomatik bekleme listesine alındı (sıra: ${res.waitlistPosition}).`
+        );
+      } else {
+        toast.push(
+          'success',
+          payload.action === 'approve'
+            ? 'Talep onaylandı.'
+            : payload.action === 'reject'
+            ? 'Talep reddedildi.'
+            : 'Düzeltme isteği kullanıcıya iletildi.'
+        );
+      }
       setSelected(null);
       await load();
     } catch (err) {
       toast.push('error', (err as Error).message || 'İşlem başarısız.');
+    } finally {
+      setReviewing(false);
+    }
+  }
+
+  async function advanceStage() {
+    if (!selected) return;
+    setReviewing(true);
+    try {
+      const res = await api.adminAdvanceBookingStage(selected.id);
+      toast.push('success', 'Proje bir sonraki aşamaya ilerletildi.');
+      // Modal'ı taze veriyle güncelle (kapatma)
+      setSelected(res.booking);
+      await load();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Aşama ilerletilemedi.');
+    } finally {
+      setReviewing(false);
+    }
+  }
+
+  async function regressStage() {
+    if (!selected) return;
+    setReviewing(true);
+    try {
+      const res = await api.adminRegressBookingStage(selected.id);
+      toast.push('success', 'Proje bir önceki aşamaya geri alındı.');
+      setSelected(res.booking);
+      await load();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Aşama geri alınamadı.');
     } finally {
       setReviewing(false);
     }
@@ -221,45 +262,85 @@ export default function AdminDashboard() {
     <AppShell kind="admin">
       {/* ============ KARŞILAMA BANDI ============ */}
       <section className="mb-6">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-kt-green-800 via-kt-green-700 to-kt-green-900 text-white p-6 md:p-8 shadow-kt-card">
-          <div className="absolute -top-20 -right-20 w-72 h-72 bg-kt-gold-500/20 rounded-full blur-3xl" />
-          <div className="absolute -bottom-16 -left-16 w-72 h-72 bg-emerald-400/10 rounded-full blur-3xl" />
-          <div className="absolute inset-0 opacity-[0.05]" style={{
-            backgroundImage: 'radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)',
-            backgroundSize: '28px 28px',
-          }} />
-
-          <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-kt-gold-400 to-kt-gold-600 text-kt-green-900 flex items-center justify-center text-2xl font-extrabold shadow-kt-gold shrink-0">
-                {admin ? initials(admin.fullName) : '··'}
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-widest text-kt-gold-300 font-semibold mb-0.5">
-                  Yönetim Paneli
+        <div className="card overflow-hidden">
+          <div className="grid md:grid-cols-[1fr_auto] gap-0">
+            {/* Sol — kullanıcı bilgisi + selam */}
+            <div className="p-5 md:p-6 flex items-center gap-4 min-w-0">
+              <div className="relative shrink-0">
+                <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br from-kt-green-700 to-kt-green-900 text-white flex items-center justify-center font-extrabold text-lg shadow-kt-soft">
+                  {admin?.fullName
+                    ?.split(' ')
+                    .map((p) => p[0])
+                    .slice(0, 2)
+                    .join('') ?? 'AD'}
                 </div>
-                <h1 className="text-2xl md:text-3xl font-extrabold">
-                  {greeting()}, {admin?.fullName?.split(' ')[0] ?? 'Admin'} 👋
+                <span
+                  className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-white"
+                  title="Çevrimiçi"
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-kt-gray-500">
+                    Yönetim Paneli
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-cyan-100 text-cyan-800 border border-cyan-300">
+                    Lab Mühendisi
+                  </span>
+                </div>
+                <h1 className="text-xl md:text-2xl font-extrabold text-kt-green-900 leading-tight truncate">
+                  {greeting()}, {admin?.fullName?.split(' ')[0] ?? 'Admin'}.
                 </h1>
-                <p className="text-white/70 text-sm mt-1">
-                  {pendingCount > 0
-                    ? `${pendingCount} talep incelemenizi bekliyor.`
-                    : 'Tüm talepler incelendi. Bravo!'}
+                <p className="text-kt-gray-500 text-sm mt-1">
+                  {pendingCount > 0 ? (
+                    <>
+                      <strong className="text-amber-700">{pendingCount}</strong>{' '}
+                      talep incelemenizi bekliyor.
+                    </>
+                  ) : (
+                    'Tüm talepler güncel — bekleyen iş yok.'
+                  )}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="text-right">
-                <div className="text-3xl font-extrabold text-kt-gold-400">{totalCount}</div>
-                <div className="text-xs uppercase tracking-widest text-white/60">Toplam Talep</div>
+            {/* Sağ — kompakt stat şeridi */}
+            <div className="flex md:flex-col md:items-stretch border-t md:border-t-0 md:border-l border-kt-gray-100 bg-kt-gray-50/40">
+              <div className="flex-1 px-5 py-3 md:py-4 flex md:flex-col items-center md:items-start gap-2 md:gap-0 border-r md:border-r-0 md:border-b border-kt-gray-100">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-amber-700 md:order-1">
+                  Bekleyen
+                </div>
+                <div className="text-2xl md:text-3xl font-extrabold text-amber-700 leading-none md:mt-1">
+                  {pendingCount}
+                </div>
               </div>
-              <div className="w-px h-12 bg-white/20" />
-              <button onClick={load} className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 backdrop-blur text-white font-semibold text-sm transition-all flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              <div className="flex-1 px-5 py-3 md:py-4 flex md:flex-col items-center md:items-start gap-2 md:gap-0 border-r md:border-r-0 md:border-b border-kt-gray-100">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-cyan-700 md:order-1">
+                  Toplam
+                </div>
+                <div className="text-2xl md:text-3xl font-extrabold text-cyan-700 leading-none md:mt-1">
+                  {totalCount}
+                </div>
+              </div>
+              <button
+                onClick={load}
+                className="px-4 py-3 md:py-4 hover:bg-kt-green-50 text-kt-green-700 font-semibold text-xs transition flex items-center justify-center gap-2"
+                title="Verileri yenile"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  />
                 </svg>
-                Yenile
+                <span>Yenile</span>
               </button>
             </div>
           </div>
@@ -275,24 +356,27 @@ export default function AdminDashboard() {
             <button
               key={s.key}
               onClick={() => setFilter(s.filter)}
-              className={`group relative overflow-hidden rounded-2xl p-5 text-left bg-gradient-to-br ${s.bg} text-white shadow-kt-soft transition-all hover:-translate-y-0.5 hover:shadow-kt-card ${
-                isActive ? 'ring-4 ring-kt-gold-400/60 ring-offset-2 ring-offset-kt-gray-50' : ''
+              className={`card p-5 text-left transition-all hover:-translate-y-0.5 hover:shadow-kt-card ${
+                isActive ? `ring-2 ${s.ring} bg-kt-gray-50/60` : ''
               }`}
             >
-              <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/10 rounded-full blur-2xl group-hover:scale-125 transition-transform duration-500" />
-              <div className="relative">
-                <div className="flex items-start justify-between mb-3">
-                  <div className={`w-11 h-11 rounded-xl ${s.iconBg} backdrop-blur flex items-center justify-center ${s.text}`}>
-                    {s.icon}
-                  </div>
-                  <span className="text-xs font-bold uppercase tracking-wider opacity-80">{s.label}</span>
+              <div className="flex items-center justify-between mb-3">
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center ${s.iconChip}`}
+                >
+                  {s.icon}
                 </div>
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-4xl font-extrabold tabular-nums">{value}</span>
-                  <span className="text-xs text-white/70 ml-1">/ {totalCount}</span>
-                </div>
-                <div className="text-xs text-white/75 mt-0.5">{s.hint}</div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-kt-gray-500">
+                  {s.label}
+                </span>
               </div>
+              <div className="flex items-baseline gap-1.5">
+                <span className={`text-4xl font-extrabold tabular-nums ${s.valueText}`}>
+                  {value}
+                </span>
+                <span className="text-xs text-kt-gray-400">/ {totalCount}</span>
+              </div>
+              <div className="text-xs text-kt-gray-500 mt-0.5">{s.hint}</div>
             </button>
           );
         })}
@@ -452,9 +536,9 @@ export default function AdminDashboard() {
                       className="w-full text-left flex items-start gap-3 group"
                     >
                       <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
-                        b.status === 'approved' ? 'bg-emerald-500' :
+                        b.status === 'approved' ? 'bg-kt-green-500' :
                         b.status === 'rejected' ? 'bg-red-500' :
-                        b.status === 'feedback_requested' ? 'bg-blue-500' : 'bg-amber-500'
+                        b.status === 'feedback_requested' ? 'bg-blue-500' : 'bg-kt-gold-500'
                       }`} />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-semibold text-kt-green-900 truncate group-hover:text-kt-gold-700 transition-colors">
@@ -492,6 +576,8 @@ export default function AdminDashboard() {
         loading={reviewing}
         onClose={() => !reviewing && setSelected(null)}
         onReview={review}
+        onAdvanceStage={advanceStage}
+        onRegressStage={regressStage}
       />
     </AppShell>
   );

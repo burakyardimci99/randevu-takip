@@ -22,6 +22,11 @@ export default function AdminSecurity() {
   const [verifying, setVerifying] = useState(false);
   const [disableCode, setDisableCode] = useState('');
   const [disabling, setDisabling] = useState(false);
+  // Parola değiştirme
+  const [currentPw, setCurrentPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [newPwConfirm, setNewPwConfirm] = useState('');
+  const [changingPw, setChangingPw] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,12 +90,40 @@ export default function AdminSecurity() {
     }
   }
 
+  const pwChecks = {
+    length: newPw.length >= 12,
+    upper: /[A-Z]/.test(newPw),
+    lower: /[a-z]/.test(newPw),
+    digit: /[0-9]/.test(newPw),
+    special: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(newPw),
+  };
+  const pwScore = Object.values(pwChecks).filter(Boolean).length;
+  const pwValid =
+    pwScore === 5 && currentPw.length > 0 && newPw === newPwConfirm;
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (changingPw || !pwValid) return;
+    setChangingPw(true);
+    try {
+      await api.adminChangePassword(currentPw, newPw);
+      toast.push('success', 'Parolan güncellendi.');
+      setCurrentPw('');
+      setNewPw('');
+      setNewPwConfirm('');
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Parola değiştirilemedi.');
+    } finally {
+      setChangingPw(false);
+    }
+  }
+
   return (
     <AppShell kind="admin">
       <div className="mb-6">
         <h1 className="text-3xl font-extrabold text-kt-green-900 mb-1">Güvenlik</h1>
         <p className="text-kt-gray-500 text-sm">
-          Çok faktörlü kimlik doğrulama (TOTP) ve oturum güvenliği yönetimi.
+          Parola, çok faktörlü kimlik doğrulama (TOTP) ve oturum güvenliği yönetimi.
         </p>
       </div>
 
@@ -253,6 +286,99 @@ export default function AdminSecurity() {
                 </li>
               ))}
             </ul>
+          </section>
+
+          {/* Parola değiştirme */}
+          <section className="card p-6">
+            <h2 className="text-lg font-bold text-kt-green-900 mb-1">Parolanı Değiştir</h2>
+            <p className="text-xs text-kt-gray-500 mb-4">
+              Mevcut parolanı doğrulayarak yeni bir parola belirle.
+            </p>
+            <form onSubmit={handleChangePassword} className="space-y-3" autoComplete="off">
+              <div>
+                <label htmlFor="cur-pw" className="label">Mevcut parola</label>
+                <input
+                  id="cur-pw"
+                  type="password"
+                  className="input"
+                  value={currentPw}
+                  onChange={(e) => setCurrentPw(e.target.value)}
+                  autoComplete="current-password"
+                  maxLength={128}
+                  disabled={changingPw}
+                />
+              </div>
+              <div>
+                <label htmlFor="new-pw" className="label">Yeni parola</label>
+                <input
+                  id="new-pw"
+                  type="password"
+                  className="input"
+                  value={newPw}
+                  onChange={(e) => setNewPw(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder="En az 12 karakter, karmaşık"
+                  maxLength={128}
+                  disabled={changingPw}
+                />
+                {newPw.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    <div className="flex gap-1">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <div
+                          key={i}
+                          className={`h-1 flex-1 rounded-full transition-colors ${
+                            i <= pwScore
+                              ? pwScore === 5
+                                ? 'bg-kt-green-500'
+                                : pwScore >= 3
+                                  ? 'bg-kt-gold-400'
+                                  : 'bg-red-400'
+                              : 'bg-kt-gray-200'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <ul className="text-xs grid grid-cols-2 gap-x-3 gap-y-0.5 text-kt-gray-600">
+                      <li className={pwChecks.length ? 'text-kt-green-700' : ''}>
+                        {pwChecks.length ? '✓' : '○'} 12+ karakter
+                      </li>
+                      <li className={pwChecks.upper ? 'text-kt-green-700' : ''}>
+                        {pwChecks.upper ? '✓' : '○'} Büyük harf
+                      </li>
+                      <li className={pwChecks.lower ? 'text-kt-green-700' : ''}>
+                        {pwChecks.lower ? '✓' : '○'} Küçük harf
+                      </li>
+                      <li className={pwChecks.digit ? 'text-kt-green-700' : ''}>
+                        {pwChecks.digit ? '✓' : '○'} Rakam
+                      </li>
+                      <li className={pwChecks.special ? 'text-kt-green-700' : ''}>
+                        {pwChecks.special ? '✓' : '○'} Özel karakter
+                      </li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+              <div>
+                <label htmlFor="new-pw-confirm" className="label">Yeni parola (tekrar)</label>
+                <input
+                  id="new-pw-confirm"
+                  type="password"
+                  className="input"
+                  value={newPwConfirm}
+                  onChange={(e) => setNewPwConfirm(e.target.value)}
+                  autoComplete="new-password"
+                  maxLength={128}
+                  disabled={changingPw}
+                />
+                {newPwConfirm.length > 0 && newPw !== newPwConfirm && (
+                  <p className="text-xs text-red-600 mt-1">Parolalar eşleşmiyor.</p>
+                )}
+              </div>
+              <button type="submit" disabled={changingPw || !pwValid} className="btn-primary">
+                {changingPw ? 'Güncelleniyor...' : 'Parolayı Değiştir'}
+              </button>
+            </form>
           </section>
         </div>
       )}

@@ -21,9 +21,18 @@ import { logger } from '../utils/logger';
 
 export const REFRESH_COOKIE_USER = 'klab_rt_user';
 export const REFRESH_COOKIE_ADMIN = 'klab_rt_admin';
+export const REFRESH_COOKIE_DANISMAN = 'klab_rt_danisman';
+export const REFRESH_COOKIE_ARGE = 'klab_rt_arge';
 
-export function refreshCookieName(kind: 'user' | 'admin'): string {
-  return kind === 'user' ? REFRESH_COOKIE_USER : REFRESH_COOKIE_ADMIN;
+import type { SubjectKind } from '../types/auth.types';
+
+export function refreshCookieName(kind: SubjectKind): string {
+  switch (kind) {
+    case 'user': return REFRESH_COOKIE_USER;
+    case 'admin': return REFRESH_COOKIE_ADMIN;
+    case 'danisman': return REFRESH_COOKIE_DANISMAN;
+    case 'arge': return REFRESH_COOKIE_ARGE;
+  }
 }
 
 interface CookieOptions {
@@ -34,8 +43,8 @@ interface CookieOptions {
   maxAge: number;
 }
 
-function refreshCookieOptions(kind: 'user' | 'admin'): CookieOptions {
-  const ttl = kind === 'user' ? config.userRefreshTokenTtl : config.adminRefreshTokenTtl;
+function refreshCookieOptions(kind: SubjectKind): CookieOptions {
+  const ttl = kind === 'admin' ? config.adminRefreshTokenTtl : config.userRefreshTokenTtl;
   return {
     httpOnly: true,
     secure: config.isProduction, // dev'de http için false
@@ -45,15 +54,15 @@ function refreshCookieOptions(kind: 'user' | 'admin'): CookieOptions {
   };
 }
 
-export function setRefreshCookie(res: Response, kind: 'user' | 'admin', token: string): void {
+export function setRefreshCookie(res: Response, kind: SubjectKind, token: string): void {
   res.cookie(refreshCookieName(kind), token, refreshCookieOptions(kind));
 }
 
-export function clearRefreshCookie(res: Response, kind: 'user' | 'admin'): void {
+export function clearRefreshCookie(res: Response, kind: SubjectKind): void {
   res.clearCookie(refreshCookieName(kind), { path: '/api' });
 }
 
-export function getRefreshCookie(req: Request, kind: 'user' | 'admin'): string | null {
+export function getRefreshCookie(req: Request, kind: SubjectKind): string | null {
   const raw = (req.cookies?.[refreshCookieName(kind)] as string | undefined) ?? null;
   return typeof raw === 'string' && raw.length >= 20 ? raw : null;
 }
@@ -67,6 +76,8 @@ const { generateToken, doubleCsrfProtection, invalidCsrfTokenError } = doubleCsr
   getSessionIdentifier: (req) =>
     (req.cookies?.[REFRESH_COOKIE_USER] as string | undefined) ??
     (req.cookies?.[REFRESH_COOKIE_ADMIN] as string | undefined) ??
+    (req.cookies?.[REFRESH_COOKIE_DANISMAN] as string | undefined) ??
+    (req.cookies?.[REFRESH_COOKIE_ARGE] as string | undefined) ??
     (req.ip ?? 'anonymous'),
   cookieName: 'klab_csrf',
   cookieOptions: {
@@ -95,7 +106,8 @@ const { generateToken, doubleCsrfProtection, invalidCsrfTokenError } = doubleCsr
  * yok: zaten her CSRF token kullanıcıya direkt veriliyor (gizli değil).
  */
 export function csrfTokenHandler(req: Request, res: Response): void {
-  const token = generateToken(req, res, { overwrite: true });
+  // generateToken(req, res, overwrite, validateOnReuse) — 3. parametre boolean.
+  const token = generateToken(req, res, true);
   res.json({ csrfToken: token });
 }
 
