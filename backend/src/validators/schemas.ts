@@ -202,6 +202,19 @@ export const createBookingSchema = z.object({
     .array(z.string().trim().min(1).max(40))
     .min(1, 'En az bir teknoloji seçin.')
     .max(20, 'En fazla 20 teknoloji seçilebilir.'),
+  // Periyodik randevu: haftanın hangi günleri (1=Pzt..7=Paz). Verilmezse tüm hafta.
+  weekdays: z
+    .array(z.number().int().min(1).max(7))
+    .min(1, 'En az bir gün seçin.')
+    .max(7)
+    .optional(),
+});
+
+// Görsel üretimi (gorsel_uretim entegrasyonu).
+export const createVisualSchema = z.object({
+  fikir: safeText(5, 400, 'Fikir'),
+  tema: z.string().trim().max(200).optional(),
+  roomId: z.string().min(8).max(40).optional(),
 });
 
 export const reviewBookingSchema = z

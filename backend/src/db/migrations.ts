@@ -1070,6 +1070,64 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: '0030',
+    name: 'rooms_type_and_specs',
+    up: (db) => {
+      // Oda kategorisi (pod / experience / tribune) + cihaz teknik özellikleri.
+      // specs: JSON dizi → [{ label, value }]. Görsel eklenmedi.
+      db.exec(`
+        ALTER TABLE rooms ADD COLUMN room_type TEXT NOT NULL DEFAULT 'pod';
+        ALTER TABLE rooms ADD COLUMN specs TEXT;
+      `);
+    },
+  },
+  {
+    id: '0031',
+    name: 'bookings_weekday_mask',
+    up: (db) => {
+      // Periyodik (gün-bazlı) randevu: booking, periyot boyunca yalnızca seçili
+      // haftanın günlerinde odayı tutar. weekday_mask = 7-bit maske
+      // (Pzt=1, Sal=2, Çar=4, Per=8, Cum=16, Cmt=32, Paz=64); 127 = tüm hafta.
+      // Çakışma artık aynı oda + tarih örtüşmesi + (mask & mask) != 0 ile hesaplanır.
+      // Mevcut booking'ler tüm haftayı tutar (geriye dönük uyumlu).
+      db.exec(`
+        ALTER TABLE bookings ADD COLUMN weekday_mask INTEGER NOT NULL DEFAULT 127;
+      `);
+    },
+  },
+  {
+    id: '0032',
+    name: 'visuals',
+    up: (db) => {
+      // AI görsel üretimi (gorsel_uretim entegrasyonu): kullanıcı bir fikir + tema
+      // girer, prompt enhance edilir, provider (Pollinations/Gemini) görsel üretir.
+      // Her görsel giriş yapan kullanıcıya (ve opsiyonel bir odaya) bağlıdır.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS visuals (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          room_id TEXT,
+          fikir TEXT NOT NULL,
+          tema TEXT,
+          prompt_en TEXT,
+          image_url TEXT,
+          seed INTEGER,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending','enhancing','generating','ready','error')),
+          error_message TEXT,
+          variant_index INTEGER NOT NULL DEFAULT 0,
+          variants TEXT,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_visuals_user ON visuals(user_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_visuals_room ON visuals(room_id, created_at DESC);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): { applied: string[] } {

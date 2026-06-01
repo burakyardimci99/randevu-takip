@@ -7,7 +7,21 @@ import { WaitlistModal } from '../components/WaitlistModal';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
+import { RoomDetailModal } from '../components/RoomDetailModal';
 import type { CreateBookingPayload, JoinWaitlistPayload, Room } from '../types';
+
+const CATEGORY_LABEL: Record<Room['roomType'], string> = {
+  pod: 'Tekli Pod',
+  experience: 'Deneyim Alanı',
+  tribune: 'Tribün',
+};
+
+const CATEGORY_FILTERS: Array<{ key: 'all' | Room['roomType']; label: string }> = [
+  { key: 'all', label: 'Tümü' },
+  { key: 'pod', label: 'Tekli Pod' },
+  { key: 'experience', label: 'Deneyim Alanı' },
+  { key: 'tribune', label: 'Tribün' },
+];
 
 export default function UserRooms() {
   const toast = useToast();
@@ -15,7 +29,10 @@ export default function UserRooms() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'available'>('all');
+  const [category, setCategory] = useState<'all' | Room['roomType']>('all');
+  const [filterDate, setFilterDate] = useState('');
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [detailRoom, setDetailRoom] = useState<Room | null>(null);
   const [waitlistRoom, setWaitlistRoom] = useState<Room | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -23,14 +40,14 @@ export default function UserRooms() {
   const loadRooms = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.listUserRooms();
+      const res = await api.listUserRooms(filterDate || undefined);
       setRooms(res.rooms);
     } catch (err) {
       toast.push('error', (err as Error).message || 'Odalar yüklenemedi.');
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, filterDate]);
 
   useEffect(() => {
     loadRooms();
@@ -65,16 +82,15 @@ export default function UserRooms() {
     const q = search.trim().toLowerCase();
     return rooms.filter((r) => {
       if (filter === 'available' && !r.isAvailable) return false;
+      if (category !== 'all' && r.roomType !== category) return false;
       if (!q) return true;
       return (
         r.name.toLowerCase().includes(q) ||
-        r.district.toLowerCase().includes(q) ||
-        r.neighborhood.toLowerCase().includes(q) ||
-        r.code.toLowerCase().includes(q) ||
-        r.equipment.toLowerCase().includes(q)
+        r.equipment.toLowerCase().includes(q) ||
+        (r.description?.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [rooms, search, filter]);
+  }, [rooms, search, filter, category]);
 
   async function submitBooking(payload: CreateBookingPayload) {
     setSubmitting(true);
@@ -140,6 +156,58 @@ export default function UserRooms() {
             </button>
           </div>
         </div>
+
+        <div className="flex flex-wrap gap-2 mt-3">
+          {CATEGORY_FILTERS.map((c) => {
+            const count =
+              c.key === 'all' ? rooms.length : rooms.filter((r) => r.roomType === c.key).length;
+            return (
+              <button
+                key={c.key}
+                onClick={() => setCategory(c.key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                  category === c.key
+                    ? 'bg-kt-violet-700 text-white border-kt-violet-700'
+                    : 'bg-white border-kt-gray-200 text-kt-gray-600 hover:border-kt-violet-300'
+                }`}
+              >
+                {c.label} ({count})
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          <label htmlFor="rooms-date" className="text-xs font-semibold text-kt-gray-600">
+            Tarihte müsait:
+          </label>
+          <input
+            id="rooms-date"
+            type="date"
+            value={filterDate}
+            min={new Date().toISOString().slice(0, 10)}
+            onChange={(e) => setFilterDate(e.target.value)}
+            className="px-3 py-1.5 rounded-lg border border-kt-gray-200 text-sm text-kt-green-800 focus:border-kt-violet-400 outline-none"
+          />
+          {filterDate && (
+            <>
+              <button
+                onClick={() => setFilterDate('')}
+                className="text-xs font-semibold text-kt-violet-700 hover:text-kt-violet-900"
+              >
+                Temizle
+              </button>
+              <span className="text-xs text-kt-gray-500">
+                {new Date(filterDate).toLocaleDateString('tr-TR', {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                })}{' '}
+                için müsaitlik
+              </span>
+            </>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -163,7 +231,12 @@ export default function UserRooms() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filtered.map((room) => (
             <article key={room.id} className="card-hover overflow-hidden group">
-              <div className="relative h-36 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setDetailRoom(room)}
+                className="relative h-36 overflow-hidden w-full block text-left"
+                aria-label={`${room.name} — detay ve özellikler`}
+              >
                 {/* Cihaz bazlı modern AI görseli */}
                 <RoomHeroVisual
                   room={room}
@@ -174,7 +247,7 @@ export default function UserRooms() {
 
                 <div className="absolute top-3 left-3">
                   <span className="px-2 py-0.5 rounded-md bg-white/25 backdrop-blur text-white text-xs font-bold tracking-wider">
-                    {room.code}
+                    {CATEGORY_LABEL[room.roomType]}
                   </span>
                 </div>
                 <div className="absolute top-3 right-3">
@@ -182,12 +255,12 @@ export default function UserRooms() {
                     ? <span className="badge-available">● Müsait</span>
                     : <span className="badge-unavailable">● Dolu</span>}
                 </div>
-                <div className="absolute bottom-3 left-3 text-white drop-shadow-lg max-w-[70%]">
-                  <div className="text-xs opacity-85 font-medium truncate">
+                <div className="absolute bottom-3 left-3 text-white drop-shadow-lg max-w-[75%]">
+                  <div className="text-lg font-extrabold leading-tight truncate">
                     {room.name}
                   </div>
-                  <div className="text-base font-bold leading-tight truncate">
-                    {room.equipment || room.neighborhood}
+                  <div className="text-xs opacity-90 font-medium truncate">
+                    {room.equipment}
                   </div>
                 </div>
                 <div className="absolute bottom-3 right-3">
@@ -195,7 +268,7 @@ export default function UserRooms() {
                     {room.capacity === 1 ? '1 kişi' : `${room.capacity} kişi`}
                   </span>
                 </div>
-              </div>
+              </button>
 
               <div className="p-4">
                 {room.equipment && (
@@ -216,9 +289,16 @@ export default function UserRooms() {
                     {room.equipment}
                   </div>
                 )}
-                <p className="text-sm text-kt-gray-600 line-clamp-2 mb-3 min-h-[40px]">
+                <p className="text-sm text-kt-gray-600 line-clamp-2 mb-2 min-h-[40px]">
                   {room.description}
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setDetailRoom(room)}
+                  className="text-xs font-semibold text-kt-violet-700 hover:text-kt-violet-900 mb-3 inline-flex items-center gap-1"
+                >
+                  Devamını göster →
+                </button>
                 <div className="flex items-center justify-between text-xs text-kt-gray-500 mb-4">
                   <span className="flex items-center gap-1">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -265,6 +345,17 @@ export default function UserRooms() {
         loading={joining}
         onClose={() => !joining && setWaitlistRoom(null)}
         onSubmit={submitWaitlist}
+      />
+
+      <RoomDetailModal
+        room={detailRoom}
+        open={!!detailRoom}
+        onClose={() => setDetailRoom(null)}
+        onBook={(r) => {
+          setDetailRoom(null);
+          if (r.isAvailable) setSelectedRoom(r);
+          else setWaitlistRoom(r);
+        }}
       />
     </AppShell>
   );

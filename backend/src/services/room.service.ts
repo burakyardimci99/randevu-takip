@@ -12,8 +12,12 @@ export interface RoomDto {
   capacity: number;
   description: string | null;
   theme: string;
-  /** Resmi cihaz adı — örn. "NVIDIA DGX SPARK", "2x MAC STUDIO", "AI Deneyim Alanı". */
+  /** Resmi cihaz adı — örn. "NVIDIA DGX Spark", "2× MAC STUDIO", "AI Deneyim Alanı". */
   equipment: string;
+  /** Oda kategorisi: tekli pod / deneyim alanı / tribün. */
+  roomType: 'pod' | 'experience' | 'tribune';
+  /** Cihaz teknik özellikleri — JSON dizi [{ label, value }] ya da null. */
+  specs: string | null;
   isAvailable: boolean;
   nextAvailableDate: string | null;
 }
@@ -28,18 +32,36 @@ interface RoomRow {
   description: string | null;
   theme: string;
   equipment: string;
+  roomType: 'pod' | 'experience' | 'tribune';
+  specs: string | null;
 }
 
 interface ActiveBooking {
   room_id: string;
+  weekday_mask: number;
+  start_date: string;
   end_date: string;
 }
 
-export function listRooms(): RoomDto[] {
+const FULL_WEEK_MASK = 127; // Pzt..Paz — tüm günler dolu demek
+
+/** YYYY-MM-DD → ISO haftanın günü (1=Pzt..7=Paz). */
+function isoWeekday(dateStr: string): number {
+  const day = new Date(`${dateStr}T00:00:00Z`).getUTCDay(); // 0=Paz..6=Cmt
+  return day === 0 ? 7 : day;
+}
+
+/**
+ * Oda listesi + uygunluk. `date` verilirse uygunluk O TARİHE göre hesaplanır
+ * (o tarihi kapsayan ve o günün maskesi set olan bir booking varsa oda dolu).
+ * Verilmezse genel uygunluk (haftanın 7 günü de dolu mu) döner.
+ */
+export function listRooms(date?: string): RoomDto[] {
   const db = getDb();
   const rooms = db
     .prepare(
-      `SELECT id, code, name, district, neighborhood, capacity, description, theme, equipment
+      `SELECT id, code, name, district, neighborhood, capacity, description, theme, equipment,
+              room_type AS roomType, specs
        FROM rooms WHERE is_active = 1 ORDER BY code`
     )
     .all() as RoomRow[];
@@ -48,28 +70,51 @@ export function listRooms(): RoomDto[] {
 
   const activeBookings = db
     .prepare(
-      `SELECT room_id, end_date FROM bookings
+      `SELECT room_id, weekday_mask, start_date, end_date FROM bookings
        WHERE status IN ('approved', 'pending', 'feedback_requested')
          AND end_date >= ?`
     )
     .all(today) as ActiveBooking[];
 
-  const busyMap = new Map<string, string>();
+  // Tarih filtresi: belirli bir gün için uygunluk.
+  if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const dayBit = 1 << (isoWeekday(date) - 1);
+    const busyOnDate = new Set<string>();
+    for (const b of activeBookings) {
+      if (b.start_date <= date && date <= b.end_date && (b.weekday_mask & dayBit) !== 0) {
+        busyOnDate.add(b.room_id);
+      }
+    }
+    return rooms.map((r) => ({
+      ...r,
+      isAvailable: !busyOnDate.has(r.id),
+      nextAvailableDate: null,
+    }));
+  }
+
+  // Gün-bazlı doluluk: oda ancak haftanın 7 günü de dolu ise "müsait değil".
+  // Kısmi (örn. yalnız Pzt+Çar) booking'lerde oda kalan günler için bookable kalır.
+  const occ = new Map<string, { mask: number; maxEnd: string }>();
   for (const b of activeBookings) {
-    const existing = busyMap.get(b.room_id);
-    if (!existing || b.end_date > existing) {
-      busyMap.set(b.room_id, b.end_date);
+    const cur = occ.get(b.room_id);
+    if (!cur) {
+      occ.set(b.room_id, { mask: b.weekday_mask, maxEnd: b.end_date });
+    } else {
+      cur.mask |= b.weekday_mask;
+      if (b.end_date > cur.maxEnd) cur.maxEnd = b.end_date;
     }
   }
 
   return rooms.map((r) => {
-    const busyUntil = busyMap.get(r.id) ?? null;
+    const info = occ.get(r.id);
+    const fullyBooked = info ? (info.mask & FULL_WEEK_MASK) === FULL_WEEK_MASK : false;
     return {
       ...r,
-      isAvailable: !busyUntil,
-      nextAvailableDate: busyUntil
-        ? new Date(new Date(busyUntil).getTime() + 86400000).toISOString().slice(0, 10)
-        : null,
+      isAvailable: !fullyBooked,
+      nextAvailableDate:
+        fullyBooked && info
+          ? new Date(new Date(info.maxEnd).getTime() + 86400000).toISOString().slice(0, 10)
+          : null,
     };
   });
 }
@@ -77,7 +122,8 @@ export function listRooms(): RoomDto[] {
 export function getRoomById(id: string): RoomRow | undefined {
   return getDb()
     .prepare(
-      `SELECT id, code, name, district, neighborhood, capacity, description, theme, equipment
+      `SELECT id, code, name, district, neighborhood, capacity, description, theme, equipment,
+              room_type AS roomType, specs
        FROM rooms WHERE id = ? AND is_active = 1 LIMIT 1`
     )
     .get(id) as RoomRow | undefined;

@@ -5,8 +5,14 @@
 import { useState } from 'react';
 import { useToast } from './Toast';
 import { api } from '../services/api';
+import type { SubjectKind } from '../types';
 
-export function SupportRequestButton() {
+interface SupportRequestButtonProps {
+  /** Hangi rol token'ıyla destek talebi atılacak (user/danisman/arge). */
+  kind?: SubjectKind;
+}
+
+export function SupportRequestButton({ kind = 'user' }: SupportRequestButtonProps) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState('');
@@ -16,7 +22,7 @@ export function SupportRequestButton() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.createSupportRequest(description.trim());
+      await api.createSupportRequest(description.trim(), kind);
       toast.push(
         'success',
         'Destek talebiniz alındı, ekibimiz en kısa sürede dönüş yapacak.'

@@ -23,44 +23,88 @@ import {
  * ============================================================ */
 
 interface RoomSeed {
+  /** Dahili sabit kimlik — booking/waitlist ref'leri bunu kullanır (kullanıcıya gösterilmez). */
   code: string;
+  /** Görünen temalı isim — örn. "CUDA", "Python", "Tribün". */
+  name: string;
+  /** Oda kategorisi. */
+  roomType: 'pod' | 'experience' | 'tribune';
   district: string;
   neighborhood: string;
   capacity: number;
   theme: string;
+  /** Cihaz adı — açıklamada da geçer. */
   equipment: string;
+  /** Teknik özellikler — JSON dizi [{ label, value }]. */
+  specs: string;
   description: string;
 }
 
+const DGX_BASE = [
+  { label: 'Çip', value: 'NVIDIA GB10 Grace Blackwell Superchip' },
+  { label: 'CPU', value: '20 çekirdek Arm (10× Cortex-X925 + 10× A725)' },
+  { label: 'GPU', value: 'Blackwell · 5. nesil Tensor Core' },
+  { label: 'Birleşik Bellek', value: '128 GB LPDDR5x' },
+  { label: 'AI Performansı', value: 'Yaklaşık 1 PFLOP (FP4)' },
+  { label: 'Depolama', value: '4 TB NVMe SSD' },
+  { label: 'Ağ', value: 'ConnectX-7 · 200 GbE' },
+];
+const MAC_BASE = [
+  { label: 'Çip', value: 'Apple M serisi (M4 Max / M3 Ultra)' },
+  { label: 'CPU', value: 'Azami 16 çekirdek' },
+  { label: 'GPU', value: 'Azami 40 çekirdek' },
+  { label: 'Birleşik Bellek', value: 'Azami 128 GB' },
+  { label: 'Depolama', value: 'Azami 8 TB SSD' },
+  { label: 'Bağlantı', value: 'Thunderbolt 5 · 10 GbE' },
+];
+function deviceSpecs(base: Array<{ label: string; value: string }>, count: number): string {
+  const cfg = { label: 'Yapılandırma', value: count === 2 ? '2× istasyon (çift kişilik)' : 'Tek istasyon' };
+  return JSON.stringify([cfg, ...base]);
+}
+const EXPERIENCE_SPECS = JSON.stringify([
+  { label: 'Kapasite', value: '15 kişi' },
+  { label: 'Donanım', value: 'Büyük sunum ekranı · hibrit konferans' },
+  { label: 'Kullanım', value: 'Workshop · eğitim · demo · topluluk etkinlikleri' },
+]);
+const TRIBUNE_SPECS = JSON.stringify([
+  { label: 'Kapasite', value: 'Yaklaşık 30 kişi (basamaklı oturma)' },
+  { label: 'Donanım', value: 'Sahne · büyük sunum ekranı · ses sistemi' },
+  { label: 'Kullanım', value: 'Demo day · sunum · etkinlik' },
+]);
+
 /**
- * Resmi AILAB envanteri — basement (-1D) zone.
+ * Resmi AILAB envanteri — basement (-1D) zone. Toplam 20 alan:
+ *  - 18 cihaz pod'u (tekli oda): isimler AI/ML araç teması (CUDA, Python, …)
+ *      · NVD pod'ları: NVIDIA DGX Spark (GPU compute) — "neural" tema, compute isimleri
+ *      · MAC pod'ları: Mac Studio (geliştirme) — "code" tema, dev isimleri
+ *      · 2× suffix: aynı pod'da 2 cihaz, capacity 2
+ *  - 1 AI Deneyim Alanı (experience): 15 kişilik workshop/demo
+ *  - 1 Tribün (tribune): basamaklı etkinlik/sunum alanı
  *
- * 18 cihaz pod'u + 1 deneyim alanı = toplam 19 oda.
- *  - NVD pod'ları: NVIDIA DGX SPARK (GPU compute) — "neural" tema
- *  - MAC pod'ları: MAC STUDIO (genel geliştirme) — "code" tema
- *  - 2x suffix: aynı pod'da 2 cihaz, capacity 2
- *  - "AI Deneyim Alanı": eğitim / demo odası, 15 kişilik workshop alanı
+ * `code` dahili sabit kimliktir (kullanıcıya gösterilmez); kullanıcı `name`'i görür,
+ * cihaz adı açıklamada + `equipment`'ta, teknik detay `specs`'te.
  */
 const ROOMS: RoomSeed[] = [
-  { code: 'AILAB -1D 1-NVD',   district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX SPARK',     description: 'NVIDIA DGX SPARK iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
-  { code: 'AILAB -1D 2-NVD',   district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX SPARK',     description: 'NVIDIA DGX SPARK iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
-  { code: 'AILAB -1D 3-NVD',   district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX SPARK',     description: 'NVIDIA DGX SPARK iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
-  { code: 'AILAB -1D 4-2xNVD', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'neural', equipment: '2x NVIDIA DGX SPARK',  description: 'Çift NVIDIA DGX SPARK iş istasyonlu pod — çift kişilik GPU çalışma alanı.' },
-  { code: 'AILAB -1D 5-2xMAC', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2x MAC STUDIO',        description: 'Çift MAC STUDIO ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
-  { code: 'AILAB -1D 6-NVD',   district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX SPARK',     description: 'NVIDIA DGX SPARK iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
-  { code: 'AILAB -1D 7-2xMAC', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2x MAC STUDIO',        description: 'Çift MAC STUDIO ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
-  { code: 'AILAB -1D 8-2xMAC', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2x MAC STUDIO',        description: 'Çift MAC STUDIO ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
-  { code: 'AILAB -1D 9-2xMAC', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2x MAC STUDIO',        description: 'Çift MAC STUDIO ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
-  { code: 'AILAB -1D 10-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
-  { code: 'AILAB -1D 11-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
-  { code: 'AILAB -1D 12-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
-  { code: 'AILAB -1D 13-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
-  { code: 'AILAB -1D 14-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
-  { code: 'AILAB -1D 15-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
-  { code: 'AILAB -1D 16-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
-  { code: 'AILAB -1D 17-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
-  { code: 'AILAB -1D 18-MAC',  district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'MAC STUDIO',           description: 'MAC STUDIO iş istasyonu — bireysel geliştirme pod’u.' },
-  { code: 'AILAB -1D AI Deneyim Alanı', district: 'AI Lab', neighborhood: '-1D', capacity: 15, theme: 'brain', equipment: 'AI Deneyim Alanı', description: '15 kişilik AI deneyim & eğitim alanı — workshop, demo ve topluluk etkinlikleri için.' },
+  { code: 'AILAB -1D 1-NVD',   name: 'CUDA',        roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX Spark',    specs: deviceSpecs(DGX_BASE, 1), description: 'NVIDIA DGX Spark iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
+  { code: 'AILAB -1D 2-NVD',   name: 'Tensor',      roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX Spark',    specs: deviceSpecs(DGX_BASE, 1), description: 'NVIDIA DGX Spark iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
+  { code: 'AILAB -1D 3-NVD',   name: 'Triton',      roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX Spark',    specs: deviceSpecs(DGX_BASE, 1), description: 'NVIDIA DGX Spark iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
+  { code: 'AILAB -1D 4-2xNVD', name: 'JAX',         roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'neural', equipment: '2× NVIDIA DGX Spark', specs: deviceSpecs(DGX_BASE, 2), description: 'Çift NVIDIA DGX Spark iş istasyonlu pod — çift kişilik GPU çalışma alanı.' },
+  { code: 'AILAB -1D 5-2xMAC', name: 'Python',      roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2× Mac Studio',      specs: deviceSpecs(MAC_BASE, 2), description: 'Çift Mac Studio ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
+  { code: 'AILAB -1D 6-NVD',   name: 'Llama',       roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'neural', equipment: 'NVIDIA DGX Spark',    specs: deviceSpecs(DGX_BASE, 1), description: 'NVIDIA DGX Spark iş istasyonu — GPU yoğun ML/DL eğitimi için tek kişilik pod.' },
+  { code: 'AILAB -1D 7-2xMAC', name: 'Jupyter',     roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2× Mac Studio',      specs: deviceSpecs(MAC_BASE, 2), description: 'Çift Mac Studio ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
+  { code: 'AILAB -1D 8-2xMAC', name: 'PyTorch',     roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2× Mac Studio',      specs: deviceSpecs(MAC_BASE, 2), description: 'Çift Mac Studio ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
+  { code: 'AILAB -1D 9-2xMAC', name: 'Pandas',      roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 2,  theme: 'code',   equipment: '2× Mac Studio',      specs: deviceSpecs(MAC_BASE, 2), description: 'Çift Mac Studio ile donatılmış pod — eşli geliştirme / prototipleme için ideal.' },
+  { code: 'AILAB -1D 10-MAC',  name: 'NumPy',       roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'Mac Studio',         specs: deviceSpecs(MAC_BASE, 1), description: 'Mac Studio iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 11-MAC',  name: 'Keras',       roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'Mac Studio',         specs: deviceSpecs(MAC_BASE, 1), description: 'Mac Studio iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 12-MAC',  name: 'Scikit',      roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'Mac Studio',         specs: deviceSpecs(MAC_BASE, 1), description: 'Mac Studio iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 13-MAC',  name: 'Conda',       roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'Mac Studio',         specs: deviceSpecs(MAC_BASE, 1), description: 'Mac Studio iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 14-MAC',  name: 'Streamlit',   roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'Mac Studio',         specs: deviceSpecs(MAC_BASE, 1), description: 'Mac Studio iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 15-MAC',  name: 'Gradio',      roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'Mac Studio',         specs: deviceSpecs(MAC_BASE, 1), description: 'Mac Studio iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 16-MAC',  name: 'HuggingFace', roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'Mac Studio',         specs: deviceSpecs(MAC_BASE, 1), description: 'Mac Studio iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 17-MAC',  name: 'Ray',         roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'Mac Studio',         specs: deviceSpecs(MAC_BASE, 1), description: 'Mac Studio iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D 18-MAC',  name: 'Polars',      roomType: 'pod', district: 'AI Lab', neighborhood: '-1D', capacity: 1,  theme: 'code',   equipment: 'Mac Studio',         specs: deviceSpecs(MAC_BASE, 1), description: 'Mac Studio iş istasyonu — bireysel geliştirme pod’u.' },
+  { code: 'AILAB -1D AI Deneyim Alanı', name: 'AI Deneyim Alanı', roomType: 'experience', district: 'AI Lab', neighborhood: '-1D', capacity: 15, theme: 'brain', equipment: 'AI Deneyim Alanı',       specs: EXPERIENCE_SPECS, description: '15 kişilik AI deneyim & eğitim alanı — workshop, demo ve topluluk etkinlikleri için.' },
+  { code: 'AILAB -1D Tribün',           name: 'Tribün',           roomType: 'tribune',    district: 'AI Lab', neighborhood: '-1D', capacity: 30, theme: 'data',  equipment: 'Tribün / Etkinlik Alanı', specs: TRIBUNE_SPECS,    description: 'Basamaklı tribün — demo day, sunum ve etkinlikler için yaklaşık 30 kişilik amfi alan.' },
 ];
 
 /**
@@ -417,25 +461,24 @@ export async function seedRooms(): Promise<void> {
   }
 
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO rooms (id, code, name, district, neighborhood, capacity, description, theme, equipment)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO rooms (id, code, name, district, neighborhood, capacity, description, theme, equipment, room_type, specs)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const txn = db.transaction((rooms: RoomSeed[]) => {
     for (const room of rooms) {
-      // Yeni dünyada tüm odalar Yapay Zeka Laboratuvarı'na ait. `name` sabit
-      // tutuldu, ekipman bilgisi ayrı `equipment` kolonunda.
-      const name = 'Yapay Zeka Laboratuvarı';
       insert.run(
         nanoid(),
         room.code,
-        name,
+        room.name,
         room.district,
         room.neighborhood,
         room.capacity,
         room.description,
         room.theme,
-        room.equipment
+        room.equipment,
+        room.roomType,
+        room.specs
       );
     }
   });

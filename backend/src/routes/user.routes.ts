@@ -10,6 +10,7 @@ import {
   createHardwareRequestSchema,
   createLicenseRequestSchema,
   createSupportRequestSchema,
+  createVisualSchema,
   joinWaitlistSchema,
   profileUpdateSchema,
   similarSearchSchema,
@@ -48,6 +49,7 @@ import {
   updateHardwareRequest,
 } from '../services/hardware-request.service';
 import { createSupportRequest } from '../services/support-request.service';
+import { createVisual, listMyVisuals, regenerateVisual } from '../services/visual.service';
 import {
   clearUserProfilePhoto,
   setUserProfilePhoto,
@@ -96,9 +98,11 @@ router.put('/profile', (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-router.get('/rooms', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/rooms', (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ rooms: listRooms() });
+    // Opsiyonel takvim filtresi: ?date=YYYY-MM-DD → uygunluk o güne göre.
+    const date = typeof req.query.date === 'string' ? req.query.date : undefined;
+    res.json({ rooms: listRooms(date) });
   } catch (err) {
     next(err);
   }
@@ -860,6 +864,41 @@ router.post('/support/requests', (req: Request, res: Response, next: NextFunctio
     });
 
     res.status(201).json({ request });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============================================================
+ * GÖRSEL ÜRETİMİ — kullanıcı (gorsel_uretim entegrasyonu)
+ * ============================================================ */
+
+router.post('/visuals', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = createVisualSchema.parse(req.body);
+    const visual = await createVisual(req.auth!.subjectId, input);
+    res.status(201).json({ visual });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/visuals', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ visuals: listMyVisuals(req.auth!.subjectId) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/visuals/:id/regenerate', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = typeof req.params.id === 'string' ? req.params.id : '';
+    if (id.length < 8 || id.length > 40) {
+      throw new HttpError(400, 'Geçersiz görsel id.', 'INVALID_ID');
+    }
+    const visual = await regenerateVisual(req.auth!.subjectId, id);
+    res.json({ visual });
   } catch (err) {
     next(err);
   }

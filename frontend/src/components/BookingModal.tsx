@@ -86,6 +86,7 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
   const [projectDescription, setProjectDescription] = useState('');
   const [helpNeeded, setHelpNeeded] = useState('');
   const [technologies, setTechnologies] = useState<string[]>([]);
+  const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]); // varsayılan: hafta içi
   const [customTech, setCustomTech] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [similar, setSimilar] = useState<SimilarBooking[]>([]);
@@ -101,6 +102,11 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
         setProjectDescription(editingBooking.projectDescription);
         setHelpNeeded(editingBooking.helpNeeded);
         setTechnologies([...editingBooking.technologies]);
+        setWeekdays(
+          editingBooking.weekdays && editingBooking.weekdays.length > 0
+            ? [...editingBooking.weekdays]
+            : [1, 2, 3, 4, 5]
+        );
       } else {
         setPeriodMonths(1);
         setStartDate(todayPlus(1));
@@ -108,6 +114,7 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
         setProjectDescription('');
         setHelpNeeded('');
         setTechnologies([]);
+        setWeekdays([1, 2, 3, 4, 5]);
       }
       setCustomTech('');
       setErrors({});
@@ -153,6 +160,10 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
     setTechnologies((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
   }
 
+  function toggleWeekday(d: number) {
+    setWeekdays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]));
+  }
+
   function addCustomTech() {
     const v = customTech.trim();
     if (v.length === 0) return;
@@ -172,6 +183,7 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
     if (projectDescription.trim().length < 20) newErrors.projectDescription = 'Proje açıklaması en az 20 karakter olmalı.';
     if (helpNeeded.trim().length < 10) newErrors.helpNeeded = 'Yardım talebi en az 10 karakter olmalı.';
     if (technologies.length === 0) newErrors.technologies = 'En az bir teknoloji seçin.';
+    if (weekdays.length === 0) newErrors.weekdays = 'En az bir gün seçin.';
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -181,6 +193,7 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
     await onSubmit({
       roomId: room.id,
       periodMonths,
+      weekdays: [...weekdays].sort((a, b) => a - b),
       startDate,
       projectName: projectName.trim(),
       projectDescription: projectDescription.trim(),
@@ -252,6 +265,40 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
               onChange={(e) => setStartDate(e.target.value)}
               required
             />
+          </div>
+
+          <div>
+            <label className="label">
+              Hangi günler? <span className="text-kt-gray-400 font-normal">(periyot boyunca)</span>
+            </label>
+            <div className="grid grid-cols-7 gap-1.5">
+              {[
+                { d: 1, l: 'Pzt' },
+                { d: 2, l: 'Sal' },
+                { d: 3, l: 'Çar' },
+                { d: 4, l: 'Per' },
+                { d: 5, l: 'Cum' },
+                { d: 6, l: 'Cmt' },
+                { d: 7, l: 'Paz' },
+              ].map(({ d, l }) => (
+                <button
+                  type="button"
+                  key={d}
+                  onClick={() => toggleWeekday(d)}
+                  className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                    weekdays.includes(d)
+                      ? 'bg-kt-gold-500 text-white shadow-kt-gold'
+                      : 'bg-kt-gray-100 text-kt-green-700 hover:bg-kt-gray-200'
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-kt-gray-500 mt-1.5">
+              Oda yalnızca seçtiğin günlerde sana ayrılır; kalan günler başka kullanıcılara açık kalır.
+            </p>
+            {errors.weekdays && <p className="text-xs text-red-600 mt-1">{errors.weekdays}</p>}
           </div>
 
           <div>

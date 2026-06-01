@@ -275,6 +275,32 @@ for (const { prefix, guard } of GOVERNANCE_ROLES) {
       }
     }
   );
+
+  // Destek talebi — danışman/ar-ge de (subject = user) destek isteyebilsin.
+  router.post(
+    `/${prefix}/support/requests`,
+    guard,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { createSupportRequestSchema } = await import('../validators/schemas');
+        const { createSupportRequest } = await import('../services/support-request.service');
+        const { recordAudit } = await import('../services/audit.service');
+        const input = createSupportRequestSchema.parse(req.body);
+        const request = createSupportRequest(req.auth!.subjectId, input.description);
+        recordAudit({
+          eventType: 'support_request.created',
+          subjectId: req.auth!.subjectId,
+          subjectType: 'user',
+          ipAddress: req.ip,
+          success: true,
+          details: { requestId: request.id, via: prefix },
+        });
+        res.status(201).json({ request });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
 }
 
 export default router;

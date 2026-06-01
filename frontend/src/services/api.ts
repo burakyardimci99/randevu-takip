@@ -64,6 +64,8 @@ import type {
   UserLicenseUsage,
   UserListItem,
   UserProfile,
+  Visual,
+  CreateVisualPayload,
   WaitlistEntry,
 } from '../types';
 import { sessionStore } from './storage';
@@ -390,8 +392,9 @@ export const api = {
 
   /* ============ ROOMS / BOOKINGS ============ */
 
-  async listUserRooms() {
-    return request<{ rooms: Room[] }>('/user/rooms', { kind: 'user' });
+  async listUserRooms(date?: string) {
+    const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+    return request<{ rooms: Room[] }>(`/user/rooms${qs}`, { kind: 'user' });
   },
 
   async listUserBookings() {
@@ -402,6 +405,27 @@ export const api = {
     return request<{ booking: Booking }>('/user/bookings', {
       method: 'POST',
       body: payload,
+      kind: 'user',
+    });
+  },
+
+  /* ============ GÖRSEL ÜRETİMİ ============ */
+
+  async createVisual(payload: CreateVisualPayload) {
+    return request<{ visual: Visual }>('/user/visuals', {
+      method: 'POST',
+      body: payload,
+      kind: 'user',
+    });
+  },
+
+  async listMyVisuals() {
+    return request<{ visuals: Visual[] }>('/user/visuals', { kind: 'user' });
+  },
+
+  async regenerateVisual(id: string) {
+    return request<{ visual: Visual }>(`/user/visuals/${id}/regenerate`, {
+      method: 'POST',
       kind: 'user',
     });
   },
@@ -1184,11 +1208,15 @@ export const api = {
 
   /* ============ DESTEK TALEPLERİ ============ */
 
-  async createSupportRequest(description: string) {
-    return request<{ request: SupportRequest }>('/user/support/requests', {
+  async createSupportRequest(description: string, kind: SubjectKind = 'user') {
+    const path =
+      kind === 'danisman' || kind === 'arge'
+        ? `/governance/${kind}/support/requests`
+        : '/user/support/requests';
+    return request<{ request: SupportRequest }>(path, {
       method: 'POST',
       body: { description },
-      kind: 'user',
+      kind,
     });
   },
 

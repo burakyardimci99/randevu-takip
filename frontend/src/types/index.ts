@@ -69,8 +69,12 @@ export interface Room {
   capacity: number;
   description: string | null;
   theme: RoomTheme;
-  /** Resmi cihaz adı — örn. "NVIDIA DGX SPARK", "2x MAC STUDIO", "AI Deneyim Alanı". */
+  /** Resmi cihaz adı — örn. "NVIDIA DGX Spark", "2× Mac Studio", "AI Deneyim Alanı". */
   equipment: string;
+  /** Oda kategorisi: tekli pod / deneyim alanı / tribün. */
+  roomType: 'pod' | 'experience' | 'tribune';
+  /** Cihaz teknik özellikleri — JSON dizi [{ label, value }] ya da null. */
+  specs: string | null;
   isAvailable: boolean;
   nextAvailableDate: string | null;
 }
@@ -105,6 +109,8 @@ export interface Booking {
   roomCode: string;
   roomName: string;
   periodMonths: number;
+  /** Periyodik randevu — haftanın seçili günleri (1=Pzt..7=Paz). */
+  weekdays: number[];
   startDate: string;
   endDate: string;
   projectName: string;
@@ -162,6 +168,8 @@ export interface AdminStats {
 export interface CreateBookingPayload {
   roomId: string;
   periodMonths: 1 | 2 | 3;
+  /** Haftanın seçili günleri (1=Pzt..7=Paz). En az 1. */
+  weekdays: number[];
   startDate: string;
   projectName: string;
   projectDescription: string;
@@ -780,4 +788,37 @@ export interface SupportRequestWithUser extends SupportRequest {
   userFullName: string;
   userEmail: string;
   userDepartment: string | null;
+}
+
+/* ---- Görsel üretimi (gorsel_uretim entegrasyonu) ---- */
+
+export type VisualStatus = 'pending' | 'enhancing' | 'generating' | 'ready' | 'error';
+
+export interface VisualVariant {
+  seed: number;
+  url: string;
+  created_at: number;
+}
+
+export interface Visual {
+  id: string;
+  userId: string;
+  roomId: string | null;
+  fikir: string;
+  tema: string | null;
+  promptEn: string | null;
+  imageUrl: string | null;
+  seed: number | null;
+  status: VisualStatus;
+  errorMessage: string | null;
+  variantIndex: number;
+  variants: VisualVariant[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateVisualPayload {
+  fikir: string;
+  tema?: string;
+  roomId?: string;
 }

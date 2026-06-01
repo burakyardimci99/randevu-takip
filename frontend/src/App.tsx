@@ -15,6 +15,7 @@ import UserFAQ from './pages/UserFAQ';
 import UserLicenses from './pages/UserLicenses';
 import UserWaitlist from './pages/UserWaitlist';
 import Chat from './pages/Chat';
+import VisualGenerator from './pages/VisualGenerator';
 import Showcase from './pages/Showcase';
 import PrivacySettings from './pages/PrivacySettings';
 import PublicProfile from './pages/PublicProfile';
@@ -102,6 +103,14 @@ export default function App() {
               element={
                 <ProtectedRoute kind="user">
                   <UserFAQ />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/gorsel"
+              element={
+                <ProtectedRoute kind="user">
+                  <VisualGenerator />
                 </ProtectedRoute>
               }
             />

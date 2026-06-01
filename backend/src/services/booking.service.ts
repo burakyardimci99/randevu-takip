@@ -49,6 +49,8 @@ export interface BookingDto {
   roomName: string;
   roomCode: string;
   periodMonths: number;
+  /** Periyodik randevu — haftanın seçili günleri (1=Pzt..7=Paz). Tüm hafta = [1..7]. */
+  weekdays: number[];
   startDate: string;
   endDate: string;
   projectName: string;
@@ -82,6 +84,7 @@ interface BookingRow {
   room_name: string;
   room_code: string;
   period_months: number;
+  weekday_mask: number;
   start_date: string;
   end_date: string;
   project_name: string;
@@ -118,6 +121,7 @@ function rowToDto(r: BookingRow): BookingDto {
     roomName: r.room_name,
     roomCode: r.room_code,
     periodMonths: r.period_months,
+    weekdays: maskToWeekdays(r.weekday_mask),
     startDate: r.start_date,
     endDate: r.end_date,
     projectName: r.project_name,
@@ -145,6 +149,27 @@ function addMonths(dateStr: string, months: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+const FULL_WEEK_MASK = 127; // Pzt..Paz tüm günler
+
+/** ISO gün dizisini (1=Pzt..7=Paz) 7-bit maskeye çevirir. Boş/undefined → tüm hafta. */
+function weekdaysToMask(weekdays?: number[]): number {
+  if (!weekdays || weekdays.length === 0) return FULL_WEEK_MASK;
+  let mask = 0;
+  for (const d of weekdays) {
+    if (d >= 1 && d <= 7) mask |= 1 << (d - 1);
+  }
+  return mask === 0 ? FULL_WEEK_MASK : mask;
+}
+
+/** Maskeyi ISO gün dizisine (1=Pzt..7=Paz) çevirir. */
+function maskToWeekdays(mask: number): number[] {
+  const days: number[] = [];
+  for (let d = 1; d <= 7; d++) {
+    if (mask & (1 << (d - 1))) days.push(d);
+  }
+  return days;
+}
+
 function isValidStartDate(dateStr: string): boolean {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -169,31 +194,39 @@ export function createBooking(userId: string, input: CreateBookingInput): Bookin
       throw new HttpError(404, 'Oda bulunamadı.', 'ROOM_NOT_FOUND');
     }
 
+    const weekdayMask = weekdaysToMask(input.weekdays);
+
     const conflict = db
       .prepare(
         `SELECT id FROM bookings
          WHERE room_id = ?
            AND status IN ('pending', 'approved', 'feedback_requested')
            AND NOT (end_date < ? OR start_date > ?)
+           AND (weekday_mask & ?) != 0
          LIMIT 1`
       )
-      .get(input.roomId, input.startDate, endDate);
+      .get(input.roomId, input.startDate, endDate, weekdayMask);
 
     if (conflict) {
-      throw new HttpError(409, 'Bu tarih aralığında oda müsait değil.', 'ROOM_NOT_AVAILABLE');
+      throw new HttpError(
+        409,
+        'Seçtiğiniz günlerde bu oda, bu tarih aralığında dolu.',
+        'ROOM_NOT_AVAILABLE'
+      );
     }
 
     const id = nanoid();
     db.prepare(
       `INSERT INTO bookings (
-        id, user_id, room_id, period_months, start_date, end_date,
+        id, user_id, room_id, period_months, weekday_mask, start_date, end_date,
         project_name, project_description, help_needed, technologies, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
     ).run(
       id,
       userId,
       input.roomId,
       input.periodMonths,
+      weekdayMask,
       input.startDate,
       endDate,
       input.projectName,
@@ -288,7 +321,8 @@ export function updateBooking(
       .get(input.roomId) as { id: string } | undefined;
     if (!room) throw new HttpError(404, 'Oda bulunamadı.', 'ROOM_NOT_FOUND');
 
-    // 3) Tarih çakışması — kendi booking'i hariç tut
+    // 3) Gün-bazlı çakışma — kendi booking'i hariç, aynı gün + tarih örtüşmesi
+    const weekdayMask = weekdaysToMask(input.weekdays);
     const conflict = db
       .prepare(
         `SELECT id FROM bookings
@@ -296,17 +330,22 @@ export function updateBooking(
            AND id != ?
            AND status IN ('pending', 'approved', 'feedback_requested')
            AND NOT (end_date < ? OR start_date > ?)
+           AND (weekday_mask & ?) != 0
          LIMIT 1`
       )
-      .get(input.roomId, bookingId, input.startDate, endDate);
+      .get(input.roomId, bookingId, input.startDate, endDate, weekdayMask);
     if (conflict) {
-      throw new HttpError(409, 'Bu tarih aralığında oda müsait değil.', 'ROOM_NOT_AVAILABLE');
+      throw new HttpError(
+        409,
+        'Seçtiğiniz günlerde bu oda, bu tarih aralığında dolu.',
+        'ROOM_NOT_AVAILABLE'
+      );
     }
 
     // 4) Güncelle: düzenleme sonrası admin tekrar incelesin → status='pending'
     db.prepare(
       `UPDATE bookings
-       SET room_id = ?, period_months = ?, start_date = ?, end_date = ?,
+       SET room_id = ?, period_months = ?, weekday_mask = ?, start_date = ?, end_date = ?,
            project_name = ?, project_description = ?, help_needed = ?, technologies = ?,
            status = 'pending', admin_feedback = NULL, reviewed_by = NULL, reviewed_at = NULL,
            updated_at = CURRENT_TIMESTAMP
@@ -314,6 +353,7 @@ export function updateBooking(
     ).run(
       input.roomId,
       input.periodMonths,
+      weekdayMask,
       input.startDate,
       endDate,
       input.projectName,
@@ -481,7 +521,7 @@ export function reviewBooking(
   const txn = db.transaction(() => {
     const existing = db
       .prepare(
-        `SELECT id, user_id, status, room_id, period_months, start_date, end_date,
+        `SELECT id, user_id, status, room_id, period_months, weekday_mask, start_date, end_date,
                 project_name, project_description, help_needed, technologies
          FROM bookings WHERE id = ?`
       )
@@ -492,6 +532,7 @@ export function reviewBooking(
           status: string;
           room_id: string;
           period_months: 1 | 2 | 3;
+          weekday_mask: number;
           start_date: string;
           end_date: string;
           project_name: string;
@@ -509,9 +550,10 @@ export function reviewBooking(
           `SELECT id FROM bookings
            WHERE room_id = ? AND id != ? AND status = 'approved'
              AND NOT (end_date < ? OR start_date > ?)
+             AND (weekday_mask & ?) != 0
            LIMIT 1`
         )
-        .get(existing.room_id, existing.id, existing.start_date, existing.end_date);
+        .get(existing.room_id, existing.id, existing.start_date, existing.end_date, existing.weekday_mask);
       if (conflict) {
         // ❗ Eski davranış 409 ROOM_CONFLICT fırlatıyordu. Yeni davranış: bu
         // booking'i otomatik olarak waitlist'e ekle, kendisini 'rejected' yap.
@@ -718,10 +760,10 @@ export function reassignBookingRoom(
   const txn = db.transaction(() => {
     const existing = db
       .prepare(
-        `SELECT id, room_id, status, start_date, end_date FROM bookings WHERE id = ?`
+        `SELECT id, room_id, status, weekday_mask, start_date, end_date FROM bookings WHERE id = ?`
       )
       .get(bookingId) as
-      | { id: string; room_id: string; status: string; start_date: string; end_date: string }
+      | { id: string; room_id: string; status: string; weekday_mask: number; start_date: string; end_date: string }
       | undefined;
     if (!existing) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
 
@@ -741,9 +783,10 @@ export function reassignBookingRoom(
           `SELECT id FROM bookings
            WHERE room_id = ? AND id != ? AND status = 'approved'
              AND NOT (end_date < ? OR start_date > ?)
+             AND (weekday_mask & ?) != 0
            LIMIT 1`
         )
-        .get(newRoomId, existing.id, existing.start_date, existing.end_date);
+        .get(newRoomId, existing.id, existing.start_date, existing.end_date, existing.weekday_mask);
       if (conflict) {
         throw new HttpError(
           409,
