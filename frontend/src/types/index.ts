@@ -336,6 +336,8 @@ export interface ShowcaseItem {
   endDate: string;
   isHighlight: boolean;
   approvedAt: string | null;
+  /** Sahibinin atadığı arkaplan görseli (kendi ürettiği visual'den) — null olabilir. */
+  showcaseImageUrl: string | null;
 }
 
 /* ============================================================
@@ -796,7 +798,12 @@ export type VisualStatus = 'pending' | 'enhancing' | 'generating' | 'ready' | 'e
 
 export interface VisualVariant {
   seed: number;
+  /** Saklandıysa iç (prompt'suz) URL, değilse dış sağlayıcı URL'i (fallback). */
   url: string;
+  /** Baytlar sunucuda saklandı mı. */
+  stored?: boolean;
+  /** Saklanan dosya uzantısı (jpg/png/webp…). */
+  ext?: string;
   created_at: number;
 }
 

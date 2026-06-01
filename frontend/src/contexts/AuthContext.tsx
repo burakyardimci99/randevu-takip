@@ -62,6 +62,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState((curr) => ({ ...curr, ...snapshot }));
   }, []);
 
+  // Refresh başarısız olunca (oturum öldü) api katmanı 'klab:session-expired'
+  // event'i atar → ilgili slot temizlenir → ProtectedRoute login'e yönlendirir,
+  // polling component'leri unmount olur (401 fırtınası kesilir).
+  useEffect(() => {
+    function onExpired(e: Event) {
+      const kind = (e as CustomEvent).detail as SubjectKind;
+      setState((curr) => {
+        const next: AuthState = { ...curr, [kind]: null };
+        if (kind === 'user') {
+          next.danisman = null;
+          next.arge = null;
+        }
+        return next;
+      });
+    }
+    window.addEventListener('klab:session-expired', onExpired);
+    return () => window.removeEventListener('klab:session-expired', onExpired);
+  }, []);
+
   /**
    * Single-session enforcement: Yeni bir kind ile login olunduğunda DİĞER tüm
    * rol session'larını (storage + state) TEMİZLE. Aksi halde sıralı login'lerde

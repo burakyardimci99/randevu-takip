@@ -15,6 +15,12 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { getDb } from '../db/schema';
 import { getPublicProfile } from '../services/public-profile.service';
 import { getShowcaseEngagement } from '../services/showcase.service';
+import {
+  isSafeVisualId,
+  safeSeed,
+  serveStoredImage,
+} from '../services/visual-store.service';
+import { HttpError } from '../middleware/error.middleware';
 
 const router = Router();
 
@@ -35,6 +41,8 @@ interface ShowcaseItem {
   endDate: string;
   isHighlight: boolean;
   approvedAt: string | null;
+  /** Kullanıcının atadığı arkaplan görseli (kendi ürettiği visual'den). */
+  showcaseImageUrl: string | null;
 }
 
 interface ShowcaseRow {
@@ -54,6 +62,7 @@ interface ShowcaseRow {
   end_date: string;
   showcase_highlight: number;
   reviewed_at: string | null;
+  showcase_image_url: string | null;
 }
 
 function parseTechs(raw: string): string[] {
@@ -73,7 +82,7 @@ router.get('/showcase', (_req: Request, res: Response, next: NextFunction) => {
       .prepare(
         `SELECT b.id, b.project_name, b.project_description, b.technologies,
                 b.period_months, b.start_date, b.end_date, b.showcase_highlight,
-                b.reviewed_at, b.user_id,
+                b.reviewed_at, b.user_id, b.showcase_image_url,
                 r.code AS room_code, r.name AS room_name, r.district, r.neighborhood, r.theme,
                 u.full_name
          FROM bookings b
@@ -102,6 +111,7 @@ router.get('/showcase', (_req: Request, res: Response, next: NextFunction) => {
       endDate: r.end_date,
       isHighlight: r.showcase_highlight === 1,
       approvedAt: r.reviewed_at,
+      showcaseImageUrl: r.showcase_image_url,
     }));
 
     res.json({ items, total: items.length });
@@ -159,6 +169,42 @@ router.get('/users/:id', (req: Request, res: Response, next: NextFunction) => {
 router.get('/showcase/engagement', (_req: Request, res: Response, next: NextFunction) => {
   try {
     res.json({ engagement: getShowcaseEngagement() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============ GÖRSEL PROXY (saklanan baytlar) ============ */
+
+/**
+ * Saklanan görsel baytlarını serve eder (veri-yönetişimi: prompt URL'de DEĞİL +
+ * provider uptime'ından bağımsız). `?v=<seed>` verilirse o varyant; verilmezse
+ * görselin güncel seed'i (DB'den). Saklanan dosya yoksa 404 — bu durumda görselin
+ * image_url'i zaten dış URL'dedir (graceful fallback), bu route hiç çağrılmaz.
+ *
+ * Public: showcase galerisi (auth'suz) arkaplan görsellerini bu URL'den yükler.
+ * id nanoid (tahmin edilemez); IDOR riski yok — yalnız saklanan görsel serve edilir.
+ */
+router.get('/visuals/:id/image', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id ?? '');
+    if (!isSafeVisualId(id)) {
+      throw new HttpError(400, 'Geçersiz görsel id.', 'INVALID_ID');
+    }
+    let seed = safeSeed(req.query.v);
+    if (seed === null) {
+      // ?v yoksa görselin güncel seed'ini DB'den çöz.
+      const row = getDb().prepare('SELECT seed FROM visuals WHERE id = ?').get(id) as
+        | { seed: number | null }
+        | undefined;
+      seed = row?.seed ?? null;
+    }
+    if (seed === null) {
+      res.status(404).end();
+      return;
+    }
+    const served = await serveStoredImage(res, id, seed);
+    if (!served) res.status(404).end();
   } catch (err) {
     next(err);
   }

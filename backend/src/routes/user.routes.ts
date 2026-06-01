@@ -11,6 +11,7 @@ import {
   createLicenseRequestSchema,
   createSupportRequestSchema,
   createVisualSchema,
+  setShowcaseImageSchema,
   joinWaitlistSchema,
   profileUpdateSchema,
   similarSearchSchema,
@@ -49,7 +50,12 @@ import {
   updateHardwareRequest,
 } from '../services/hardware-request.service';
 import { createSupportRequest } from '../services/support-request.service';
-import { createVisual, listMyVisuals, regenerateVisual } from '../services/visual.service';
+import {
+  createVisual,
+  listMyVisuals,
+  regenerateVisual,
+  setBookingShowcaseImage,
+} from '../services/visual.service';
 import {
   clearUserProfilePhoto,
   setUserProfilePhoto,
@@ -899,6 +905,21 @@ router.post('/visuals/:id/regenerate', async (req: Request, res: Response, next:
     }
     const visual = await regenerateVisual(req.auth!.subjectId, id);
     res.json({ visual });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Proje (booking) kartına görsel arkaplan ata / kaldır.
+router.put('/bookings/:id/showcase-image', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = typeof req.params.id === 'string' ? req.params.id : '';
+    if (id.length < 8 || id.length > 40) {
+      throw new HttpError(400, 'Geçersiz proje id.', 'INVALID_ID');
+    }
+    const input = setShowcaseImageSchema.parse(req.body);
+    const result = setBookingShowcaseImage(req.auth!.subjectId, id, input.visualId);
+    res.json(result);
   } catch (err) {
     next(err);
   }

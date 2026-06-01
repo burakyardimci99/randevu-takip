@@ -10,7 +10,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from './Toast';
 import { api } from '../services/api';
-import type { ShowcaseComment, ShowcaseItem } from '../types';
+import type { ShowcaseComment, ShowcaseItem, Visual } from '../types';
 
 function fmtRange(start: string, end: string): string {
   const opts: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short' };
@@ -51,6 +51,14 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentBody, setCommentBody] = useState('');
   const [sending, setSending] = useState(false);
+
+  // Arkaplan görseli — sadece projenin sahibi atayabilir.
+  const isOwner = !!user && user.id === item.authorId;
+  const [bgUrl, setBgUrl] = useState<string | null>(item.showcaseImageUrl);
+  const [showPicker, setShowPicker] = useState(false);
+  const [myVisuals, setMyVisuals] = useState<Visual[]>([]);
+  const [visualsLoading, setVisualsLoading] = useState(false);
+  const [savingBg, setSavingBg] = useState(false);
 
   async function ensureLikeStatus() {
     if (likeStatusLoaded || !user) return;
@@ -132,38 +140,106 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
     }
   }
 
+  async function openBackgroundPicker() {
+    setShowPicker(true);
+    if (myVisuals.length === 0) {
+      setVisualsLoading(true);
+      try {
+        const res = await api.listMyVisuals();
+        setMyVisuals(res.visuals.filter((v) => v.imageUrl));
+      } catch (err) {
+        toast.push('error', (err as Error).message || 'Görseller yüklenemedi.');
+      } finally {
+        setVisualsLoading(false);
+      }
+    }
+  }
+
+  async function applyBackground(visualId: string | null, url: string | null) {
+    setSavingBg(true);
+    try {
+      await api.setShowcaseImage(item.id, visualId);
+      setBgUrl(url);
+      setShowPicker(false);
+      toast.push('success', visualId ? 'Kart arkaplanı ayarlandı.' : 'Arkaplan kaldırıldı.');
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Arkaplan ayarlanamadı.');
+    } finally {
+      setSavingBg(false);
+    }
+  }
+
   // Mount sonrası like status fetch (sadece auth varsa)
   if (user && !likeStatusLoaded) {
     void ensureLikeStatus();
   }
 
   return (
+    <>
     <article
-      className={`card-hover p-5 flex flex-col h-full ${
+      className={`card-hover p-5 flex flex-col h-full relative overflow-hidden ${
         item.isHighlight ? 'ring-2 ring-kt-gold-400' : ''
       }`}
+      style={
+        bgUrl
+          ? {
+              backgroundImage: `url("${bgUrl}")`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+            }
+          : undefined
+      }
     >
+      {bgUrl && (
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/55 to-black/25 pointer-events-none" />
+      )}
+      <div className="relative z-10 flex flex-col flex-1 min-h-0">
       <div className="flex items-start justify-between mb-3">
-        <span className="text-[11px] font-bold text-kt-gold-700 tracking-wider">
+        <span
+          className={`text-[11px] font-bold tracking-wider ${
+            bgUrl ? 'text-kt-gold-300' : 'text-kt-gold-700'
+          }`}
+        >
           {item.roomCode} · {item.neighborhood}
         </span>
-        {item.isHighlight && (
-          <span className="px-2 py-0.5 rounded-md bg-kt-gold-100 text-kt-gold-800 text-[10px] font-bold uppercase tracking-wider">
-            ⭐ Öne çıkan
-          </span>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isOwner && (
+            <button
+              onClick={openBackgroundPicker}
+              className="px-2 py-0.5 rounded-md bg-kt-violet-100 text-kt-violet-800 text-[10px] font-bold border border-kt-violet-200 hover:bg-kt-violet-200 transition-colors"
+              title="Kart arkaplan görseli ata"
+            >
+              🎨 Arkaplan
+            </button>
+          )}
+          {item.isHighlight && (
+            <span className="px-2 py-0.5 rounded-md bg-kt-gold-100 text-kt-gold-800 text-[10px] font-bold uppercase tracking-wider">
+              ⭐ Öne çıkan
+            </span>
+          )}
+        </div>
       </div>
-      <h3 className="text-lg font-bold text-kt-green-900 mb-2 line-clamp-2">
+      <h3
+        className={`text-lg font-bold mb-2 line-clamp-2 ${
+          bgUrl ? 'text-white drop-shadow' : 'text-kt-green-900'
+        }`}
+      >
         {item.projectName}
       </h3>
-      <p className="text-sm text-kt-gray-600 line-clamp-3 mb-3 flex-1">
+      <p
+        className={`text-sm line-clamp-3 mb-3 flex-1 ${
+          bgUrl ? 'text-white/85 drop-shadow' : 'text-kt-gray-600'
+        }`}
+      >
         {item.projectDescription}
       </p>
       <div className="flex flex-wrap gap-1 mb-3">
         {item.technologies.slice(0, 5).map((t) => (
           <span
             key={t}
-            className="px-2 py-0.5 rounded-md bg-kt-green-50 text-kt-green-800 text-[11px] font-semibold"
+            className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${
+              bgUrl ? 'bg-white/20 text-white' : 'bg-kt-green-50 text-kt-green-800'
+            }`}
           >
             {t}
           </span>
@@ -176,7 +252,11 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
       </div>
 
       {/* Yazar + tarih */}
-      <div className="flex items-center gap-2 pt-3 border-t border-kt-gray-100">
+      <div
+        className={`flex items-center gap-2 pt-3 border-t ${
+          bgUrl ? 'border-white/25' : 'border-kt-gray-100'
+        }`}
+      >
         {authorId ? (
           <Link
             to={`/u/${authorId}`}
@@ -186,10 +266,14 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
               {initials(item.authorFullName)}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-kt-green-800 truncate group-hover:text-kt-gold-700">
+              <div
+                className={`text-xs font-semibold truncate ${
+                  bgUrl ? 'text-white group-hover:text-kt-gold-300' : 'text-kt-green-800 group-hover:text-kt-gold-700'
+                }`}
+              >
                 {item.authorFullName}
               </div>
-              <div className="text-[10px] text-kt-gray-500">
+              <div className={`text-[10px] ${bgUrl ? 'text-white/70' : 'text-kt-gray-500'}`}>
                 {fmtRange(item.startDate, item.endDate)} · {item.periodMonths} ay
               </div>
             </div>
@@ -200,10 +284,14 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
               {initials(item.authorFullName)}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-kt-green-800 truncate">
+              <div
+                className={`text-xs font-semibold truncate ${
+                  bgUrl ? 'text-white' : 'text-kt-green-800'
+                }`}
+              >
                 {item.authorFullName}
               </div>
-              <div className="text-[10px] text-kt-gray-500">
+              <div className={`text-[10px] ${bgUrl ? 'text-white/70' : 'text-kt-gray-500'}`}>
                 {fmtRange(item.startDate, item.endDate)}
               </div>
             </div>
@@ -320,6 +408,81 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
           )}
         </div>
       )}
+      </div>
     </article>
+
+    {showPicker && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+        onClick={() => setShowPicker(false)}
+      >
+        <div
+          className="bg-white rounded-2xl shadow-kt-card max-w-lg w-full max-h-[85vh] overflow-y-auto p-6"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-extrabold text-kt-green-900">Kart arkaplanı seç</h3>
+            <button
+              onClick={() => setShowPicker(false)}
+              className="p-2 rounded-lg hover:bg-kt-gray-100 text-kt-gray-500"
+              aria-label="Kapat"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {visualsLoading ? (
+            <p className="text-sm text-kt-gray-400 text-center py-8 animate-pulse">Görseller yükleniyor…</p>
+          ) : myVisuals.length === 0 ? (
+            <div className="text-center py-8 text-sm text-kt-gray-500">
+              Henüz görselin yok.{' '}
+              <Link to="/gorsel" className="text-kt-violet-700 font-semibold underline">
+                Görsel Üret
+              </Link>{' '}
+              sayfasından oluştur.
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2">
+              {bgUrl && (
+                <button
+                  onClick={() => applyBackground(null, null)}
+                  disabled={savingBg}
+                  className="aspect-square rounded-lg border-2 border-dashed border-kt-gray-300 text-xs font-semibold text-kt-gray-500 hover:border-rose-300 hover:text-rose-600 flex items-center justify-center disabled:opacity-50"
+                >
+                  Kaldır
+                </button>
+              )}
+              {myVisuals.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => applyBackground(v.id, v.imageUrl)}
+                  disabled={savingBg}
+                  title={v.fikir}
+                  className={`aspect-square rounded-lg overflow-hidden border-2 transition-colors disabled:opacity-50 ${
+                    bgUrl === v.imageUrl
+                      ? 'border-kt-violet-500'
+                      : 'border-transparent hover:border-kt-violet-300'
+                  }`}
+                >
+                  {v.imageUrl && (
+                    <img
+                      src={v.imageUrl}
+                      alt={v.fikir}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.opacity = '0.2';
+                      }}
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+    </>
   );
 }

@@ -107,7 +107,6 @@ class GeminiProvider implements ImageProvider {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ text: opts.prompt }] }] }),
-      cache: 'no-store',
     });
 
     if (!res.ok) {

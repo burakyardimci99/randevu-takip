@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { useToast } from '../components/Toast';
 import { api } from '../services/api';
+import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import type { Visual } from '../types';
 
 const THEME_SUGGESTIONS = [
@@ -38,9 +39,29 @@ export default function VisualGenerator() {
 
   function showVisual(v: Visual) {
     setCurrent(v);
-    setImgError(false);
-    setImgLoading(!!v.imageUrl);
   }
+
+  // current değiştiğinde (ilk gösterim ya da SSE güncellemesi) görsel yükleme durumu sıfırlanır.
+  useEffect(() => {
+    setImgError(false);
+    setImgLoading(!!current?.imageUrl);
+  }, [current?.id, current?.imageUrl, current?.status]);
+
+  // Async üretim: backend bitince 'visual.updated' SSE push'lar → listeyi + mevcut görseli tazele.
+  useRealtimeEvents('user', (type, data) => {
+    if (type !== 'visual.updated') return;
+    api
+      .listMyVisuals()
+      .then((res) => {
+        setGallery(res.visuals);
+        const id = (data as { id?: string } | null)?.id;
+        if (id) {
+          const updated = res.visuals.find((v) => v.id === id);
+          if (updated) setCurrent((cur) => (cur && cur.id === id ? updated : cur));
+        }
+      })
+      .catch(() => {});
+  });
 
   async function handleGenerate(e: React.FormEvent) {
     e.preventDefault();
@@ -52,11 +73,7 @@ export default function VisualGenerator() {
     try {
       const res = await api.createVisual({ fikir: fikir.trim(), tema: tema.trim() || undefined });
       showVisual(res.visual);
-      if (res.visual.status === 'error') {
-        toast.push('error', res.visual.errorMessage || 'Görsel üretilemedi.');
-      } else {
-        toast.push('success', 'Görsel üretildi.');
-      }
+      toast.push('success', 'Üretim başladı — hazır olunca otomatik görünecek.');
       loadGallery();
     } catch (err) {
       toast.push('error', (err as Error).message || 'Görsel üretilemedi.');
@@ -71,7 +88,7 @@ export default function VisualGenerator() {
     try {
       const res = await api.regenerateVisual(current.id);
       showVisual(res.visual);
-      toast.push('success', 'Yeni varyant üretildi.');
+      toast.push('success', 'Yeni varyant üretiliyor…');
       loadGallery();
     } catch (err) {
       toast.push('error', (err as Error).message || 'Yeniden üretilemedi.');
@@ -146,7 +163,15 @@ export default function VisualGenerator() {
           ) : (
             <div className="space-y-3">
               <div className="relative aspect-square rounded-xl overflow-hidden bg-kt-gray-100">
-                {current.imageUrl && !imgError ? (
+                {current.status === 'enhancing' || current.status === 'generating' ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-kt-gray-500 text-sm">
+                    <svg className="w-8 h-8 animate-spin text-kt-violet-500" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    {current.status === 'enhancing' ? 'Fikir prompt’a çevriliyor…' : 'Görsel üretiliyor…'}
+                  </div>
+                ) : current.imageUrl && !imgError ? (
                   <>
                     {imgLoading && (
                       <div className="absolute inset-0 flex items-center justify-center text-kt-gray-400 text-sm animate-pulse">
@@ -177,10 +202,18 @@ export default function VisualGenerator() {
                 <span className="text-sm font-semibold text-kt-green-900 truncate">{current.fikir}</span>
                 <button
                   onClick={handleRegenerate}
-                  disabled={generating}
+                  disabled={
+                    generating ||
+                    current.status === 'enhancing' ||
+                    current.status === 'generating'
+                  }
                   className="btn-secondary text-sm shrink-0"
                 >
-                  {generating ? '…' : 'Yeniden üret'}
+                  {generating ||
+                  current.status === 'enhancing' ||
+                  current.status === 'generating'
+                    ? '…'
+                    : 'Yeniden üret'}
                 </button>
               </div>
 

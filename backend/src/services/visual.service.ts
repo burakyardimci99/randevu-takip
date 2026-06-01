@@ -6,14 +6,20 @@
 import { nanoid } from 'nanoid';
 import { getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
-import { enhancePrompt } from './prompt-enhancer.service';
 import { getImageProvider, variantSeed } from './image-gen.service';
+import { downloadAndStore, internalImageUrl } from './visual-store.service';
+import { broadcastToUser } from './sse.service';
 
 export type VisualStatus = 'pending' | 'enhancing' | 'generating' | 'ready' | 'error';
 
 export interface VisualVariant {
   seed: number;
+  /** 'ready' görselin URL'i — diske saklandıysa iç (prompt'suz) URL, değilse dış (fallback). */
   url: string;
+  /** Baytlar sunucuda saklandı mı (provider'dan bağımsız servis). */
+  stored?: boolean;
+  /** Saklanan dosya uzantısı (jpg/png/webp…) — content-type türetimi için. */
+  ext?: string;
   created_at: number;
 }
 
@@ -119,35 +125,70 @@ export async function createVisual(userId: string, input: CreateVisualInput): Pr
      VALUES (?, ?, ?, ?, ?, 'enhancing')`
   ).run(id, userId, roomId, input.fikir.trim(), input.tema?.trim() || null);
 
+  // Üretim arkaplanda — istek bloklanmaz (UX + timeout dayanıklılığı). Bitince
+  // 'visual.updated' SSE event'i kullanıcıya push'lanır.
+  void runVisualPipeline(userId, id, input.fikir, input.tema);
+
+  return getVisualForUser(userId, id)!; // status: 'enhancing'
+}
+
+/**
+ * Üretilen görseli sunucuda saklamayı dener (veri-yönetişimi + provider
+ * bağımsızlığı). Başarılıysa prompt'suz iç URL, değilse dış URL döner (fallback).
+ */
+async function persistVariant(
+  id: string,
+  seed: number,
+  externalUrl: string
+): Promise<{ url: string; stored: boolean; ext?: string }> {
+  const result = await downloadAndStore(id, seed, externalUrl);
+  if (result) {
+    return { url: internalImageUrl(id, seed), stored: true, ext: result.ext };
+  }
+  return { url: externalUrl, stored: false };
+}
+
+/** Arkaplan boru hattı: prompt → generate → diske sakla → DB güncelle → SSE push. */
+async function runVisualPipeline(
+  userId: string,
+  id: string,
+  fikir: string,
+  tema?: string
+): Promise<void> {
+  const db = getDb();
   try {
-    const promptEn = await enhancePrompt({ fikir: input.fikir, tema: input.tema });
+    // Kullanıcı ne girdiyse onu kullan — AI prompt-enhancer (Claude/Pollinations-text) kaldırıldı.
+    const promptEn = tema && tema.trim() ? `${fikir.trim()}, ${tema.trim()}` : fikir.trim();
     db.prepare(`UPDATE visuals SET prompt_en = ?, status = 'generating', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
       promptEn,
       id
     );
 
     const result = await getImageProvider().generate({ prompt: promptEn });
+    // Üretilen görseli sunucuda sakla → image_url prompt'suz iç URL olur (fallback: dış URL).
+    const persisted = await persistVariant(id, result.seed, result.url);
     const variant: VisualVariant = {
       seed: result.seed,
-      url: result.url,
+      url: persisted.url,
+      stored: persisted.stored,
+      ext: persisted.ext,
       created_at: Math.floor(Date.now() / 1000),
     };
-
     db.prepare(
       `UPDATE visuals
        SET prompt_en = ?, image_url = ?, seed = ?, status = 'ready',
            variant_index = 0, variants = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
-    ).run(promptEn, result.url, result.seed, JSON.stringify([variant]), id);
+    ).run(promptEn, persisted.url, result.seed, JSON.stringify([variant]), id);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     db.prepare(`UPDATE visuals SET status = 'error', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
       message,
       id
     );
+  } finally {
+    broadcastToUser(userId, { type: 'visual.updated', data: { id } });
   }
-
-  return getVisualForUser(userId, id)!;
 }
 
 export async function regenerateVisual(userId: string, visualId: string): Promise<VisualDto> {
@@ -160,33 +201,83 @@ export async function regenerateVisual(userId: string, visualId: string): Promis
     throw new HttpError(409, 'Prompt henüz hazır değil.', 'PROMPT_NOT_READY');
   }
 
-  const existing = parseVariants(row.variants);
-  const newIndex = existing.length;
-  const newSeed = variantSeed(row.prompt_en, newIndex);
+  // Yeni varyant üretimi arkaplanda; istek hemen 'generating' döner, bitince SSE.
+  db.prepare(`UPDATE visuals SET status = 'generating', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(visualId);
+  void runRegeneratePipeline(userId, visualId, row.prompt_en, parseVariants(row.variants));
 
+  return getVisualForUser(userId, visualId)!; // status: 'generating'
+}
+
+async function runRegeneratePipeline(
+  userId: string,
+  visualId: string,
+  promptEn: string,
+  existing: VisualVariant[]
+): Promise<void> {
+  const db = getDb();
   try {
-    const result = await getImageProvider().generate({ prompt: row.prompt_en, seed: newSeed });
+    const newIndex = existing.length;
+    const newSeed = variantSeed(promptEn, newIndex);
+    const result = await getImageProvider().generate({ prompt: promptEn, seed: newSeed });
+    // Yeni varyantı sunucuda sakla → iç URL (fallback: dış URL).
+    const persisted = await persistVariant(visualId, result.seed, result.url);
     const variant: VisualVariant = {
       seed: result.seed,
-      url: result.url,
+      url: persisted.url,
+      stored: persisted.stored,
+      ext: persisted.ext,
       created_at: Math.floor(Date.now() / 1000),
     };
-    const variants = [...existing, variant];
-
     db.prepare(
       `UPDATE visuals
        SET image_url = ?, seed = ?, status = 'ready', variant_index = ?,
            variants = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
-    ).run(result.url, result.seed, newIndex, JSON.stringify(variants), visualId);
+    ).run(persisted.url, result.seed, newIndex, JSON.stringify([...existing, variant]), visualId);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     db.prepare(`UPDATE visuals SET status = 'error', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
       message,
       visualId
     );
-    throw new HttpError(502, `Görsel üretilemedi: ${message}`, 'GENERATION_FAILED');
+  } finally {
+    broadcastToUser(userId, { type: 'visual.updated', data: { id: visualId } });
+  }
+}
+
+/**
+ * Kullanıcının kendi projesinin (booking) Envanter kartına, kendi ürettiği bir
+ * görseli arkaplan olarak atar. visualId null ise arkaplanı kaldırır.
+ * IDOR: hem booking hem visual aynı kullanıcıya ait olmalı.
+ */
+export function setBookingShowcaseImage(
+  userId: string,
+  bookingId: string,
+  visualId: string | null
+): { showcaseImageUrl: string | null } {
+  const db = getDb();
+  const booking = db.prepare('SELECT id, user_id FROM bookings WHERE id = ?').get(bookingId) as
+    | { id: string; user_id: string }
+    | undefined;
+  if (!booking || booking.user_id !== userId) {
+    throw new HttpError(404, 'Proje bulunamadı.', 'BOOKING_NOT_FOUND');
   }
 
-  return getVisualForUser(userId, visualId)!;
+  let imageUrl: string | null = null;
+  if (visualId) {
+    const v = getRow(visualId);
+    if (!v || v.user_id !== userId) {
+      throw new HttpError(404, 'Görsel bulunamadı.', 'VISUAL_NOT_FOUND');
+    }
+    if (!v.image_url) {
+      throw new HttpError(409, 'Bu görsel henüz hazır değil.', 'VISUAL_NOT_READY');
+    }
+    imageUrl = v.image_url;
+  }
+
+  db.prepare('UPDATE bookings SET showcase_image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+    imageUrl,
+    bookingId
+  );
+  return { showcaseImageUrl: imageUrl };
 }

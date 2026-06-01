@@ -82,7 +82,30 @@ function sanitizeDetails(details?: Record<string, unknown>): string | null {
   return JSON.stringify(cleaned);
 }
 
+// Yüksek hacimli denial event'leri için in-memory dedup: aynı (eventType +
+// subject + ip) için 60sn'de tek kayıt. Tek bir oturumun retry fırtınası
+// 380k özdeş 'authz.denied' üretip DB'yi şişirmesin; gerçek sinyal (kim/nerede/
+// ne zaman) korunur, sadece tekrarlar elenir.
+const DEDUP_EVENT_TYPES = new Set<string>(['authz.denied']);
+const DEDUP_WINDOW_MS = 60_000;
+const recentAuditKeys = new Map<string, number>();
+
+function isThrottledAudit(event: AuditEvent): boolean {
+  if (!DEDUP_EVENT_TYPES.has(event.eventType)) return false;
+  const now = Date.now();
+  const key = `${event.eventType}|${event.subjectId ?? ''}|${event.ipAddress ?? ''}`;
+  if (now - (recentAuditKeys.get(key) ?? 0) < DEDUP_WINDOW_MS) return true;
+  recentAuditKeys.set(key, now);
+  if (recentAuditKeys.size > 5000) {
+    for (const [k, t] of recentAuditKeys) {
+      if (now - t > DEDUP_WINDOW_MS) recentAuditKeys.delete(k);
+    }
+  }
+  return false;
+}
+
 export function recordAudit(event: AuditEvent): void {
+  if (isThrottledAudit(event)) return;
   try {
     const db = getDb();
     db.prepare(

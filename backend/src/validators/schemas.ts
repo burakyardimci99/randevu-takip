@@ -217,6 +217,11 @@ export const createVisualSchema = z.object({
   roomId: z.string().min(8).max(40).optional(),
 });
 
+// Proje kartına görsel arkaplan atama (null = kaldır).
+export const setShowcaseImageSchema = z.object({
+  visualId: z.string().min(8).max(40).nullable(),
+});
+
 export const reviewBookingSchema = z
   .object({
     action: z.enum(['approve', 'reject', 'request_feedback']),

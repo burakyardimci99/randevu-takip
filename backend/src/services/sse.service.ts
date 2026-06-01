@@ -39,6 +39,7 @@ export type SseEventType =
   | 'hardware_request.created'
   | 'hardware_request.reviewed'
   | 'support_request.created'
+  | 'visual.updated'
   | 'ping';
 
 export interface SsePayload {

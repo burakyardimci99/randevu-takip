@@ -27,6 +27,8 @@ backend/keys/*.key
 *.sqlite
 *.sqlite3
 backend/data/
+# Sunucu tarafında saklanan üretilmiş görseller (visual proxy/store — veri-yönetişimi)
+backend/data/visuals/
 
 # Logs
 logs/

@@ -1128,6 +1128,17 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: '0033',
+    name: 'bookings_showcase_image',
+    up: (db) => {
+      // Kullanıcı, ürettiği bir görseli kendi projesinin Envanter kartına arkaplan
+      // olarak atayabilir. URL, kullanıcının kendi visual'inden kopyalanır.
+      db.exec(`
+        ALTER TABLE bookings ADD COLUMN showcase_image_url TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): { applied: string[] } {

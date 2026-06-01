@@ -121,30 +121,67 @@ export function clearCsrfCache(): void {
   csrfFetching = null;
 }
 
+// 401 fırtınası koruması: oturum ölünce onlarca istek aynı anda refresh denemesin.
+//  - Tek-uçuş: eşzamanlı 401'ler TEK refresh çağrısı paylaşır.
+//  - Cooldown: refresh başarısız olduysa kısa süre ağ'a gitmeden false döner.
+//  - Başarısızlıkta oturum temizlenir + 'klab:session-expired' event'i atılır
+//    (AuthContext bunu dinleyip login'e yönlendirir → polling component'leri durur).
+const refreshInFlight: Partial<Record<SubjectKind, Promise<boolean>>> = {};
+const refreshFailedUntil: Partial<Record<SubjectKind, number>> = {};
+const REFRESH_FAIL_COOLDOWN_MS = 5000;
+
+function notifySessionExpired(kind: SubjectKind): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('klab:session-expired', { detail: kind }));
+  }
+}
+
 async function refreshAccess(kind: SubjectKind): Promise<boolean> {
-  const session = sessionStore.get(kind);
-  if (!session) return false;
+  if (Date.now() < (refreshFailedUntil[kind] ?? 0)) return false;
 
-  // Refresh endpoint cookie ile çalışır; access token authorization header'da gerekir
-  const res = await fetch(`${API_BASE}/auth/refresh`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.tokens.accessToken}`,
-    },
-    // Body'de refresh token göndermiyoruz — cookie kullanılıyor
-    body: JSON.stringify({ refreshToken: session.tokens.refreshToken ?? '' }),
-  });
+  const existing = refreshInFlight[kind];
+  if (existing) return existing;
 
-  if (!res.ok) return false;
-  const data = (await res.json()) as AuthTokens & { type?: SubjectKind };
-  sessionStore.updateTokens(kind, {
-    accessToken: data.accessToken,
-    refreshToken: data.refreshToken,
-    expiresIn: data.expiresIn,
-  });
-  return true;
+  const p = (async (): Promise<boolean> => {
+    const session = sessionStore.get(kind);
+    if (!session) return false;
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.tokens.accessToken}`,
+        },
+        body: JSON.stringify({ refreshToken: session.tokens.refreshToken ?? '' }),
+      });
+
+      if (!res.ok) {
+        // Oturum ölü → temizle, cooldown koy, app'i bilgilendir → fırtınayı kes.
+        refreshFailedUntil[kind] = Date.now() + REFRESH_FAIL_COOLDOWN_MS;
+        sessionStore.clear(kind);
+        notifySessionExpired(kind);
+        return false;
+      }
+
+      const data = (await res.json()) as AuthTokens & { type?: SubjectKind };
+      sessionStore.updateTokens(kind, {
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        expiresIn: data.expiresIn,
+      });
+      refreshFailedUntil[kind] = 0;
+      return true;
+    } catch {
+      refreshFailedUntil[kind] = Date.now() + REFRESH_FAIL_COOLDOWN_MS;
+      return false;
+    } finally {
+      refreshInFlight[kind] = undefined;
+    }
+  })();
+
+  refreshInFlight[kind] = p;
+  return p;
 }
 
 async function request<T>(path: string, options: RequestOptions): Promise<T> {
@@ -273,6 +310,7 @@ export function subscribeEvents(
     'hardware_request.created',
     'hardware_request.reviewed',
     'support_request.created',
+    'visual.updated',
   ];
   for (const n of eventNames) source.addEventListener(n, wrap(n));
 
@@ -428,6 +466,13 @@ export const api = {
       method: 'POST',
       kind: 'user',
     });
+  },
+
+  async setShowcaseImage(bookingId: string, visualId: string | null) {
+    return request<{ showcaseImageUrl: string | null }>(
+      `/user/bookings/${bookingId}/showcase-image`,
+      { method: 'PUT', body: { visualId }, kind: 'user' }
+    );
   },
 
   async updateBooking(id: string, payload: CreateBookingPayload) {
