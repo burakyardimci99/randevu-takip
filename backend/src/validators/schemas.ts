@@ -287,6 +287,15 @@ export const similarSearchSchema = z.object({
 
 export type SimilarSearchInput = z.infer<typeof similarSearchSchema>;
 
+/** İş birliği önerisi — kullanıcının kendi booking'i referans alınır (IDOR korumalı). */
+export const collaborationSchema = z.object({
+  bookingId: z.string().min(8).max(40),
+  limit: z.number().int().min(1).max(20).optional(),
+  minSimilarity: z.number().min(0).max(1).optional(),
+});
+
+export type CollaborationInput = z.infer<typeof collaborationSchema>;
+
 /* ============================================================
  * Admin user search
  * ============================================================ */

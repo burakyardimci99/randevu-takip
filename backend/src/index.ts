@@ -24,7 +24,7 @@ import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import { csrfProtection, csrfTokenHandler } from './middleware/cookie-auth';
 import { initSseRoutes } from './services/sse.service';
 import { startWaitlistMaintenance } from './services/waitlist.service';
-import { warmupEmbeddings } from './services/embedding.service';
+import { warmupEmbeddings, backfillEmbeddings } from './services/embedding.service';
 import { startMaintenance } from './services/maintenance.service';
 import { startBackupCron } from './services/backup.service';
 import { registerEmailHandler } from './services/notification.service';
@@ -99,10 +99,20 @@ function start(): void {
     console.log(`[KLAB] Uygulanan migrationlar: ${migrationResult.applied.join(', ')}`);
   }
 
-  // Embedding modeli arka planda warm-up — semantic search ilk istek hızı için
-  warmupEmbeddings().catch((err) =>
-    logger.warn('embedding_warmup_failed', { err: (err as Error).message })
-  );
+  // Embedding modeli arka planda warm-up, ardından eksik booking embedding'lerini
+  // backfill et (idempotent — yalnız embedding'i olmayanları işler). Böylece benzer
+  // proje / iş birliği / duplicate-tespiti (#4) re-seed sonrası kutudan çıktığı gibi
+  // çalışır; manuel admin backfill gerekmez. Non-blocking.
+  warmupEmbeddings()
+    .then(() => backfillEmbeddings())
+    .then((r) => {
+      if (r.processed > 0) {
+        logger.info('embedding_backfill_done', { processed: r.processed, skipped: r.skipped });
+      }
+    })
+    .catch((err) =>
+      logger.warn('embedding_warmup_or_backfill_failed', { err: (err as Error).message })
+    );
 
   // E-posta job handler (queue üzerinden async send)
   registerEmailHandler();

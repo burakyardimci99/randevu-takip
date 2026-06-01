@@ -12,6 +12,7 @@ import {
   createSupportRequestSchema,
   createVisualSchema,
   setShowcaseImageSchema,
+  collaborationSchema,
   joinWaitlistSchema,
   profileUpdateSchema,
   similarSearchSchema,
@@ -40,6 +41,7 @@ import {
 } from '../services/waitlist.service';
 import {
   bookingTextForEmbedding,
+  detectDuplicate,
   findSimilarBookings,
 } from '../services/embedding.service';
 import { exportUserData, purgeUser } from '../services/privacy.service';
@@ -123,7 +125,7 @@ router.get('/bookings', (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-router.post('/bookings', (req: Request, res: Response, next: NextFunction) => {
+router.post('/bookings', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const input = createBookingSchema.parse(req.body);
     const booking = createBooking(req.auth!.subjectId, input);
@@ -141,7 +143,25 @@ router.post('/bookings', (req: Request, res: Response, next: NextFunction) => {
       },
     });
 
-    res.status(201).json({ booking });
+    // Otomatik duplicate-tespiti (#4) — best-effort, booking ZATEN oluştu (bloklamaz).
+    // Çok benzer mevcut bir proje varsa kullanıcıya uyarı amaçlı döndürülür.
+    let duplicateWarning = null;
+    try {
+      const embText = bookingTextForEmbedding({
+        projectName: booking.projectName,
+        projectDescription: booking.projectDescription,
+        technologies: booking.technologies,
+      });
+      duplicateWarning = await detectDuplicate({
+        queryText: embText,
+        excludeBookingId: booking.id,
+        userId: req.auth!.subjectId,
+      });
+    } catch {
+      /* tespit best-effort — booking yine de döndürülür */
+    }
+
+    res.status(201).json({ booking, duplicateWarning });
   } catch (err) {
     next(err);
   }
@@ -301,6 +321,38 @@ router.post('/similar', async (req: Request, res: Response, next: NextFunction) 
       includeOwner: req.auth!.subjectId,
     });
 
+    res.json({ results });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * İŞ BİRLİĞİ ÖNERİSİ (#4) — kullanıcının kendi booking'ine benzer, BAŞKA
+ * kullanıcıların PUBLIC (opt-in showcase) projelerini yazarıyla birlikte döner.
+ * Amaç: benzer iş yapan ekiplerle bağlantı kurma (authorId → /u/:id, sohbet).
+ * IDOR: yalnız kendi booking'i referans alınabilir. Privacy: yalnız showcase.
+ */
+router.post('/collaborations', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = collaborationSchema.parse(req.body);
+    const own = getBookingByIdForUser(req.auth!.subjectId, input.bookingId);
+    if (!own) {
+      throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+    }
+    const queryText = bookingTextForEmbedding({
+      projectName: own.projectName,
+      projectDescription: own.projectDescription,
+      technologies: own.technologies,
+    });
+    const results = await findSimilarBookings({
+      queryText,
+      excludeBookingId: own.id,
+      excludeUserId: req.auth!.subjectId, // iş birliği = BAŞKA ekiplerle
+      limit: input.limit ?? 6,
+      minSimilarity: input.minSimilarity ?? 0.3,
+      visibility: 'collaboration', // yalnız public showcase, yazar ifşalı
+    });
     res.json({ results });
   } catch (err) {
     next(err);

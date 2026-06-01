@@ -222,6 +222,12 @@ export interface SimilarBooking {
   roomCode: string;
   roomName: string;
   userFullName: string;
+  /**
+   * Proje sahibinin user id'si — yalnız ifşa edilen (anonim OLMAYAN) sonuçlarda
+   * dolu. İş birliği önerisinde "Bağlan" (public profil /u/:id) bağlantısı için.
+   * Anonim (privacy) sonuçlarda undefined.
+   */
+  authorId?: string;
   /** Sonuç çağıran kullanıcının kendi projesi mi (UI'da "Sizin projeniz" rozeti için). */
   isOwn?: boolean;
   /** True ise userFullName maskeli (privacy fix). */
@@ -252,7 +258,7 @@ export async function findSimilarBookings(args: {
   minSimilarity?: number;
   /** @deprecated visibility kullanın */
   onlyApproved?: boolean;
-  visibility?: 'showcase' | 'admin';
+  visibility?: 'showcase' | 'admin' | 'collaboration';
   includeOwner?: string;
 }): Promise<SimilarBooking[]> {
   const limit = args.limit ?? 5;
@@ -282,6 +288,11 @@ export async function findSimilarBookings(args: {
     } else {
       conditions.push("b.status = 'approved' AND b.showcase_visible = 1");
     }
+  } else if (visibility === 'collaboration') {
+    // İŞ BİRLİĞİ: yalnız BAŞKA kullanıcıların PUBLIC (opt-in showcase) projeleri.
+    // Showcase zaten herkese açık (yazar /showcase'te görünür) → yazar ifşası
+    // privacy regresyonu DEĞİL. Çağıran kendi projelerini excludeUserId ile eler.
+    conditions.push("b.status = 'approved' AND b.showcase_visible = 1");
   } else if (args.onlyApproved) {
     // Backwards compat — eski admin çağrıları
     conditions.push("b.status = 'approved'");
@@ -345,6 +356,8 @@ export async function findSimilarBookings(args: {
     }
 
     const isOwn = !!args.includeOwner && row.user_id === args.includeOwner;
+    // showcase görünürlüğünde başkasının projesi maskelenir. collaboration/admin'de
+    // ifşa edilir (showcase projeleri zaten public → yazar gösterilir).
     const anonymize = visibility === 'showcase' && !isOwn;
 
     scored.push({
@@ -357,6 +370,8 @@ export async function findSimilarBookings(args: {
       roomCode: row.room_code,
       roomName: row.room_name,
       userFullName: anonymize ? 'AI Lab Ekibi' : row.user_full_name,
+      // Yalnız ifşa edilen sonuçlarda authorId ver (anonim olanda gizli kalır).
+      authorId: anonymize ? undefined : row.user_id,
       isOwn,
       anonymized: anonymize,
       createdAt: row.created_at,
@@ -367,7 +382,53 @@ export async function findSimilarBookings(args: {
   return scored.slice(0, limit);
 }
 
+export interface DuplicateMatch {
+  bookingId: string;
+  projectName: string;
+  similarity: number;
+  /** Çağıranın KENDİ projesi mi (en yaygın gerçek vaka: yanlışlıkla 2. kez gönderim). */
+  isOwn: boolean;
+  /** Sahip adı — kendi/own ya da public showcase için gerçek; aksi halde maskeli. */
+  authorFullName: string;
+  roomCode: string;
+}
 
+/**
+ * Yeni booking için OTOMATİK duplicate-tespiti (#4).
+ *
+ * Yüksek benzerlik eşiğinin (varsayılan 0.85) üstündeki TEK en yakın projeyi döner.
+ * Kapsam (privacy): çağıranın kendi geçmiş projeleri + opt-in public showcase
+ * projeleri (showcase visibility + includeOwner). Başkasının GİZLİ projesi ifşa
+ * edilmez. Bloklamaz — yalnız uyarı amaçlı.
+ */
+export async function detectDuplicate(args: {
+  queryText: string;
+  excludeBookingId?: string;
+  userId: string;
+  threshold?: number;
+}): Promise<DuplicateMatch | null> {
+  // 0.80: Türkçe parafraz mükerrerlerini yakalar (gözlem: aynı projenin yeniden
+  // ifadesi ~0.82-0.85, alakasız projeler <~0.5 → net ayrım). MiniLM cosine.
+  const threshold = args.threshold ?? 0.8;
+  const results = await findSimilarBookings({
+    queryText: args.queryText,
+    excludeBookingId: args.excludeBookingId,
+    limit: 1,
+    minSimilarity: threshold,
+    visibility: 'showcase',
+    includeOwner: args.userId,
+  });
+  const top = results[0];
+  if (!top) return null;
+  return {
+    bookingId: top.bookingId,
+    projectName: top.projectName,
+    similarity: top.similarity,
+    isOwn: !!top.isOwn,
+    authorFullName: top.userFullName,
+    roomCode: top.roomCode,
+  };
+}
 
 /**
  * Henüz embedding'i hesaplanmamış mevcut booking'leri arka planda işle.

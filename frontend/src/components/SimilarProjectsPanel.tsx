@@ -10,6 +10,7 @@
  *  - Etiketler + kullanıcı (geçmiş ekiplerle bağlantı kurma ipucu)
  *  - "Geçmişte yapılmış" hint'i
  */
+import { Link } from 'react-router-dom';
 import type { SimilarBooking } from '../types';
 
 interface SimilarProjectsPanelProps {
@@ -17,6 +18,11 @@ interface SimilarProjectsPanelProps {
   loading: boolean;
   /** En az kaç karakterlik input girilince sorgu açılır — UI hint için. */
   minQueryLength?: number;
+  /**
+   * 'similar' (varsayılan): geçmiş benzer projeler.
+   * 'collaboration': iş birliği önerisi — başka ekiplerle bağlantı (#4).
+   */
+  variant?: 'similar' | 'collaboration';
 }
 
 function similarityBar(score: number): { width: string; cls: string; label: string } {
@@ -61,28 +67,42 @@ export function SimilarProjectsPanel({
   results,
   loading,
   minQueryLength,
+  variant = 'similar',
 }: SimilarProjectsPanelProps) {
+  const isCollab = variant === 'collaboration';
   return (
     <div className="rounded-xl border border-kt-gold-200 bg-kt-gold-50/30 p-4">
       <div className="flex items-start gap-2 mb-3">
         <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-kt-gold-400 to-kt-gold-600 text-kt-green-900 flex items-center justify-center shrink-0">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M13 10V3L4 14h7v7l9-11h-7z"
-            />
-          </svg>
+          {isCollab ? (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a4 4 0 10-3-6.7"
+              />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M13 10V3L4 14h7v7l9-11h-7z"
+              />
+            </svg>
+          )}
         </div>
         <div className="flex-1">
           <h4 className="text-sm font-bold text-kt-green-900 flex items-center gap-2">
-            Geçmişte benzer projeler
+            {isCollab ? 'İş birliği önerileri' : 'Geçmişte benzer projeler'}
             {loading && (
               <span className="inline-block w-3 h-3 border-2 border-kt-gold-400 border-t-transparent rounded-full animate-spin" />
             )}
           </h4>
           <p className="text-[11px] text-kt-gray-500 mt-0.5">
-            AI Lab'da daha önce yapılmış benzer projeler — fikir + ekip bağlantısı için.
+            {isCollab
+              ? 'Benzer iş yapan ekipler — bağlantı kurun, deneyim paylaşın.'
+              : "AI Lab'da daha önce yapılmış benzer projeler — fikir + ekip bağlantısı için."}
           </p>
         </div>
       </div>
@@ -91,9 +111,11 @@ export function SimilarProjectsPanel({
         <div className="text-xs text-kt-gray-500 italic py-2">Aranıyor…</div>
       ) : results.length === 0 ? (
         <div className="text-xs text-kt-gray-500 italic py-2">
-          {minQueryLength
-            ? `Daha fazla detay yazın (min ${minQueryLength} karakter), benzerler görünsün.`
-            : 'Henüz eşleşen proje yok — projeniz özgün görünüyor.'}
+          {isCollab
+            ? 'Henüz iş birliği önerisi yok — benzer public proje bulunamadı.'
+            : minQueryLength
+              ? `Daha fazla detay yazın (min ${minQueryLength} karakter), benzerler görünsün.`
+              : 'Henüz eşleşen proje yok — projeniz özgün görünüyor.'}
         </div>
       ) : (
         <ul className="space-y-2">
@@ -162,6 +184,20 @@ export function SimilarProjectsPanel({
                         {t}
                       </span>
                     ))}
+                  </div>
+                )}
+                {/* İş birliği: ifşa edilen (anonim olmayan) başka ekibin profiline "Bağlan". */}
+                {r.authorId && !r.isOwn && (
+                  <div className="mt-2 pt-2 border-t border-kt-gold-100 flex justify-end">
+                    <Link
+                      to={`/u/${r.authorId}`}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-kt-gold-700 hover:text-kt-gold-800"
+                    >
+                      {r.userFullName} ile bağlan
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </Link>
                   </div>
                 )}
               </li>

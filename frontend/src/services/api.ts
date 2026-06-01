@@ -56,6 +56,7 @@ import type {
   ShowcaseEngagement,
   ShowcaseItem,
   SimilarBooking,
+  DuplicateMatch,
   StageEvent,
   SubjectKind,
   SupportRequest,
@@ -440,11 +441,15 @@ export const api = {
   },
 
   async createBooking(payload: CreateBookingPayload) {
-    return request<{ booking: Booking }>('/user/bookings', {
-      method: 'POST',
-      body: payload,
-      kind: 'user',
-    });
+    // Yanıt: oluşturulan booking + (varsa) otomatik duplicate-tespiti uyarısı (#4).
+    return request<{ booking: Booking; duplicateWarning: DuplicateMatch | null }>(
+      '/user/bookings',
+      {
+        method: 'POST',
+        body: payload,
+        kind: 'user',
+      }
+    );
   },
 
   /* ============ GÖRSEL ÜRETİMİ ============ */
@@ -1065,6 +1070,18 @@ export const api = {
     minSimilarity?: number;
   }) {
     return request<{ results: SimilarBooking[] }>('/user/similar', {
+      method: 'POST',
+      body: payload,
+      kind: 'user',
+    });
+  },
+
+  /**
+   * İş birliği önerisi (#4) — kendi booking'ine benzer, BAŞKA ekiplerin public
+   * projeleri (yazar ifşalı → "Bağlan"). IDOR: yalnız kendi bookingId'si.
+   */
+  async userCollaborations(payload: { bookingId: string; limit?: number; minSimilarity?: number }) {
+    return request<{ results: SimilarBooking[] }>('/user/collaborations', {
       method: 'POST',
       body: payload,
       kind: 'user',

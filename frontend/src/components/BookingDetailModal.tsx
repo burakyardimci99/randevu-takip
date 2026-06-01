@@ -97,10 +97,12 @@ export function BookingDetailModal({
     };
   }, [open, booking, viewerRole]);
 
-  // Modal açılınca benzer projeleri çek — sadece admin için (endpoint admin-gated).
+  // Modal açılınca benzer/iş birliği projelerini çek.
+  //  - admin: bu projeye benzer geçmiş projeler (admin-gated semantic search).
+  //  - user (kendi booking'i): İŞ BİRLİĞİ önerisi — benzer iş yapan başka ekipler (#4).
   // Danışman/Ar-Ge ileride kendi endpoint'iyle entegre edilecek.
   useEffect(() => {
-    if (!open || !booking || viewerRole !== 'admin') {
+    if (!open || !booking || (viewerRole !== 'admin' && viewerRole !== 'user')) {
       setSimilar([]);
       return;
     }
@@ -108,11 +110,10 @@ export function BookingDetailModal({
     (async () => {
       try {
         setSimilarLoading(true);
-        const res = await api.adminFindSimilar({
-          bookingId: booking.id,
-          limit: 4,
-          minSimilarity: 0.25,
-        });
+        const res =
+          viewerRole === 'admin'
+            ? await api.adminFindSimilar({ bookingId: booking.id, limit: 4, minSimilarity: 0.25 })
+            : await api.userCollaborations({ bookingId: booking.id, limit: 6, minSimilarity: 0.3 });
         if (!cancelled) setSimilar(res.results);
       } catch {
         if (!cancelled) setSimilar([]);
@@ -331,12 +332,17 @@ export function BookingDetailModal({
             </div>
           </section>
 
-          {/* Semantic search: bu projeye benzer geçmiş projeler — sadece admin görür (endpoint admin-gated). */}
-          {viewerRole === 'admin' && (similar.length > 0 || similarLoading) && (
-            <section>
-              <SimilarProjectsPanel results={similar} loading={similarLoading} />
-            </section>
-          )}
+          {/* Benzer projeler (admin) / İş birliği önerisi (kullanıcı, #4). */}
+          {(viewerRole === 'admin' || viewerRole === 'user') &&
+            (similar.length > 0 || similarLoading) && (
+              <section>
+                <SimilarProjectsPanel
+                  results={similar}
+                  loading={similarLoading}
+                  variant={viewerRole === 'user' ? 'collaboration' : 'similar'}
+                />
+              </section>
+            )}
 
           {/* Yaşam döngüsü — onaylı booking için (Danışman görmez, çünkü onlar approve öncesi inceler). */}
           {showLifecycle && (

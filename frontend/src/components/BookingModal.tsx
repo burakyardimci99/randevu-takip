@@ -338,6 +338,26 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
             </div>
           </div>
 
+          {/* Otomatik duplicate-tespiti (#4) — çok benzer (>=%80) bir proje varsa uyar. */}
+          {(() => {
+            const dup = similar.find((s) => s.similarity >= 0.8);
+            if (!dup) return null;
+            return (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 flex items-start gap-2">
+                <svg className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.33 16a2 2 0 001.74 3z" />
+                </svg>
+                <div className="text-xs text-amber-800 leading-relaxed">
+                  <span className="font-bold">Çok benzer bir proje zaten var</span> —{' '}
+                  <span className="font-semibold">{dup.projectName}</span>
+                  {dup.isOwn ? ' (sizin projeniz)' : ` · ${dup.userFullName}`} ·{' '}
+                  <span className="tabular-nums">%{(dup.similarity * 100).toFixed(0)} benzer</span>.
+                  Mükerrer kayıt yerine mevcut projeyi gözden geçirmek isteyebilirsiniz.
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Semantic search — projeyi yazarken benzerleri göster */}
           {projectDescription.trim().length >= 30 && (similar.length > 0 || similarLoading) && (
             <SimilarProjectsPanel results={similar} loading={similarLoading} />
