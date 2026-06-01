@@ -169,6 +169,8 @@ router.post('/bookings/:id/review', (req: Request, res: Response, next: NextFunc
     }
     const input = reviewBookingSchema.parse(req.body);
     const result = reviewBooking(req.auth!.subjectId, id, input);
+    // Onay/red galeri içeriğini/sırasını değiştirebilir → showcase feed cache'ini tazele.
+    void import('../services/showcase-feed.service').then((m) => m.invalidateShowcaseFeed());
 
     recordAudit({
       eventType: 'booking.reviewed',
@@ -934,6 +936,8 @@ router.put(
       sets.push('updated_at = CURRENT_TIMESTAMP');
       params.push(id);
       db.prepare(`UPDATE bookings SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+      // Galeri görünürlüğü/highlight değişti → showcase feed cache'ini tazele.
+      void import('../services/showcase-feed.service').then((m) => m.invalidateShowcaseFeed());
       const updated = getBookingByIdAdmin(id);
       res.json({ booking: updated });
     } catch (err) {

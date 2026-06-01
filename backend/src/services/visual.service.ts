@@ -8,6 +8,7 @@ import { getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { getImageProvider, variantSeed } from './image-gen.service';
 import { downloadAndStore, internalImageUrl } from './visual-store.service';
+import { invalidateShowcaseFeed } from './showcase-feed.service';
 import { broadcastToUser } from './sse.service';
 
 export type VisualStatus = 'pending' | 'enhancing' | 'generating' | 'ready' | 'error';
@@ -279,5 +280,6 @@ export function setBookingShowcaseImage(
     imageUrl,
     bookingId
   );
+  invalidateShowcaseFeed(); // galeri kartı arkaplanı değişti → feed cache'ini tazele
   return { showcaseImageUrl: imageUrl };
 }

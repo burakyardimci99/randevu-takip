@@ -498,6 +498,8 @@ router.put(
         `UPDATE bookings SET showcase_visible = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND user_id = ?`
       ).run(visible ? 1 : 0, id, req.auth!.subjectId);
+      // Galeri içeriği değişti (proje eklendi/çıkarıldı) → showcase feed cache'ini tazele.
+      void import('../services/showcase-feed.service').then((m) => m.invalidateShowcaseFeed());
       const updated = getBookingByIdForUser(req.auth!.subjectId, id);
       res.json({ booking: updated });
     } catch (err) {

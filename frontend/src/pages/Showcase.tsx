@@ -31,14 +31,11 @@ export default function Showcase() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, t, e] = await Promise.all([
-        api.showcase(),
-        api.showcaseTechnologies(),
-        api.showcaseEngagement(),
-      ]);
-      setItems(s.items);
-      setTechs(t.technologies);
-      setEngagement(e.engagement);
+      // #3: tek istek — items + technologies + engagement birlikte gelir (3 → 1 round-trip).
+      const feed = await api.showcaseFeed();
+      setItems(feed.items);
+      setTechs(feed.technologies);
+      setEngagement(feed.engagement);
     } finally {
       setLoading(false);
     }

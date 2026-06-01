@@ -1040,6 +1040,20 @@ export const api = {
     );
   },
 
+  /**
+   * Showcase FEED — tek çağrıda items + technologies + engagement (#3).
+   * Eski 3 ayrı isteğin (showcase/technologies/engagement) yerini alır.
+   */
+  async showcaseFeed() {
+    return request<{
+      items: ShowcaseItem[];
+      total: number;
+      technologies: Array<{ technology: string; count: number }>;
+      engagement: ShowcaseEngagement;
+      generatedAt: string;
+    }>('/public/showcase/feed', { kind: 'user', auth: false, noAuth: true });
+  },
+
   /* ============ SEMANTIC SEARCH (henüz frontend tetiklenecek) ============ */
 
   async userFindSimilar(payload: {
