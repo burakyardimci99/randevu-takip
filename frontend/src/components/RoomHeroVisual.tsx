@@ -1,9 +1,10 @@
 /**
  * AILAB oda kart başlığı için modern AI / donanım temalı görsel.
  *
- *  - NVIDIA DGX SPARK pod'ları → GPU chip ışıltısı + neural mesh
- *  - MAC STUDIO pod'ları → Mac Studio silüeti + minimalist studio vibe
- *  - AI Deneyim Alanı → workshop / topluluk sahnesi (ekran + figürler)
+ *  - NVIDIA DGX SPARK pod'ları → gerçek NVIDIA DGX Spark Blackwell fotoğrafı +
+ *    cyan/emerald tinted overlay (UserRooms gradient'i okunabilirliği sağlıyor).
+ *  - MAC STUDIO pod'ları → gerçek Mac Studio fotoğrafı + slate tinted overlay.
+ *  - AI Deneyim Alanı → workshop sahnesi SVG (ekran + figürler) — gerçek fotoğraf yok.
  *
  * Pod numarasından deterministic bir hue ofseti çıkararak her odanın görsel
  * varyasyonunu sağlıyoruz (aynı tip cihaz olsa bile her kart "kendi rengini"
@@ -18,47 +19,35 @@ interface Props {
 
 type Variant = 'nvidia' | 'mac' | 'workshop';
 
-function variantFromEquipment(equipment: string): Variant {
-  const eq = equipment.toLowerCase();
+function variantFromEquipment(equipment: string | null | undefined): Variant {
+  const eq = (equipment ?? '').toLowerCase();
   if (eq.includes('nvidia') || eq.includes('dgx')) return 'nvidia';
   if (eq.includes('mac')) return 'mac';
-  return 'workshop'; // AI Deneyim Alanı + fallback
+  return 'workshop';
 }
 
 /** Oda kodundan deterministik 0..1 değeri (renk varyasyonu için). */
 function seedFromRoom(room: Room): number {
+  const code = room.code ?? room.id ?? '';
   let hash = 0;
-  for (let i = 0; i < room.code.length; i++) hash = (hash * 31 + room.code.charCodeAt(i)) | 0;
-  return ((hash % 100) + 100) / 200; // [0, 1]
+  for (let i = 0; i < code.length; i++) hash = (hash * 31 + code.charCodeAt(i)) | 0;
+  return ((hash % 100) + 100) / 200;
 }
 
-const PALETTE_NVIDIA = [
-  { from: '#064E3B', to: '#10B981', accent: '#6EE7B7' }, // emerald (NVIDIA brand vibe)
-  { from: '#022C22', to: '#059669', accent: '#34D399' },
-  { from: '#064E3B', to: '#0EA5E9', accent: '#67E8F9' }, // emerald → cyan
-];
-
-const PALETTE_MAC = [
-  { from: '#1E293B', to: '#475569', accent: '#CBD5E1' }, // slate / silver
-  { from: '#1F2937', to: '#6B7280', accent: '#E5E7EB' },
-  { from: '#0F172A', to: '#7C3AED', accent: '#C4B5FD' }, // dark + violet (Studio purple)
-];
-
-const PALETTE_WORKSHOP = [
-  { from: '#3730A3', to: '#A855F7', accent: '#F0ABFC' }, // indigo → purple (eğitim)
-];
-
-function pickPalette(variant: Variant, seed: number) {
-  if (variant === 'nvidia') return PALETTE_NVIDIA[Math.floor(seed * PALETTE_NVIDIA.length)];
-  if (variant === 'mac') return PALETTE_MAC[Math.floor(seed * PALETTE_MAC.length)];
-  return PALETTE_WORKSHOP[0];
-}
+const PALETTE_WORKSHOP = { from: '#3730A3', to: '#A855F7', accent: '#F0ABFC' };
 
 export function RoomHeroVisual({ room, className = '' }: Props) {
+  if (!room) return null;
   const variant = variantFromEquipment(room.equipment);
+
+  if (variant === 'nvidia' || variant === 'mac') {
+    return <PhotoHero variant={variant} className={className} />;
+  }
+
+  // Workshop: orijinal SVG
   const seed = seedFromRoom(room);
-  const palette = pickPalette(variant, seed);
-  const uid = room.id.slice(0, 6);
+  const palette = PALETTE_WORKSHOP;
+  const uid = (room.id ?? 'room').slice(0, 6);
 
   return (
     <svg
@@ -82,16 +71,10 @@ export function RoomHeroVisual({ room, className = '' }: Props) {
           <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
         </radialGradient>
       </defs>
-
-      {/* Zemin */}
       <rect width="400" height="200" fill={`url(#bg-${uid})`} />
-
-      {/* Atmosferik orb'lar */}
       <circle cx={70 + seed * 80} cy={40 + seed * 30} r="120" fill={`url(#glow-${uid})`} />
       <circle cx={320 - seed * 60} cy="160" r="100" fill={`url(#glow-${uid})`} opacity="0.6" />
       <circle cx={200} cy={100} r="160" fill={`url(#spot-${uid})`} />
-
-      {/* Circuit grid — incelikli, donanım vibe */}
       <g opacity="0.10" stroke={palette.accent} strokeWidth="0.4" fill="none">
         {Array.from({ length: 11 }).map((_, i) => (
           <line key={`v-${i}`} x1={i * 40} y1="0" x2={i * 40} y2="200" />
@@ -100,192 +83,67 @@ export function RoomHeroVisual({ room, className = '' }: Props) {
           <line key={`h-${i}`} x1="0" y1={i * 40} x2="400" y2={i * 40} />
         ))}
       </g>
-
-      {variant === 'nvidia' && <NvidiaArt palette={palette} dual={room.capacity > 1} />}
-      {variant === 'mac' && <MacArt palette={palette} dual={room.capacity > 1} />}
-      {variant === 'workshop' && <WorkshopArt palette={palette} />}
+      <WorkshopArt palette={palette} />
     </svg>
   );
 }
 
 /* ============================================================
- * NVIDIA — GPU chip + neural mesh
- * ============================================================ */
-function NvidiaArt({ palette, dual }: { palette: { accent: string }; dual: boolean }) {
-  const { accent } = palette;
+ * NVIDIA / MAC — gerçek fotoğraf + brand-coherent overlay
+ * ============================================================
+ * Görsel src'i public/images/ altında; brand vibe'ı korumak için her variant
+ * kendi renk tinted overlay'ini ve hafif vinyetini taşır. UserRooms zaten alt
+ * gradient + room code/title overlay'lerini ekliyor — burada sadece foto + tint.
+ */
+function PhotoHero({
+  variant,
+  className,
+}: {
+  variant: 'nvidia' | 'mac';
+  className: string;
+}) {
+  const cfg =
+    variant === 'nvidia'
+      ? {
+          src: '/images/nvidia-dgx-spark.jpg',
+          alt: 'NVIDIA DGX Spark — Blackwell',
+          // Emerald → cyan tint, NVIDIA brand vibe
+          tint: 'linear-gradient(135deg, rgba(6,78,59,0.42) 0%, rgba(8,145,178,0.32) 60%, rgba(34,211,238,0.18) 100%)',
+        }
+      : {
+          src: '/images/mac-studio.png',
+          alt: 'Apple Mac Studio',
+          // Slate + violet tint, Studio Pro vibe
+          tint: 'linear-gradient(135deg, rgba(15,23,42,0.45) 0%, rgba(71,85,105,0.30) 55%, rgba(124,58,237,0.20) 100%)',
+        };
+
   return (
-    <g transform="translate(200 100)">
-      {/* Neural mesh — sol */}
-      <g stroke={accent} strokeWidth="1" opacity="0.6">
-        <line x1="-150" y1="-50" x2="-90" y2="-30" />
-        <line x1="-150" y1="-10" x2="-90" y2="-30" />
-        <line x1="-150" y1="-10" x2="-90" y2="20" />
-        <line x1="-150" y1="40" x2="-90" y2="20" />
-        <line x1="-90" y1="-30" x2="-50" y2="0" />
-        <line x1="-90" y1="20" x2="-50" y2="0" />
-      </g>
-      {[
-        [-150, -50],
-        [-150, -10],
-        [-150, 40],
-        [-90, -30],
-        [-90, 20],
-      ].map(([x, y], i) => (
-        <circle key={i} cx={x} cy={y} r="3" fill={accent} />
-      ))}
-
-      {/* GPU chip(s) */}
-      {(dual ? [-50, 50] : [0]).map((cx, idx) => (
-        <g key={idx} transform={`translate(${cx} 0)`}>
-          {/* Chip body */}
-          <rect x="-40" y="-32" width="80" height="64" rx="6" fill="#0B1220" stroke={accent} strokeWidth="2" />
-          {/* Inner die */}
-          <rect x="-26" y="-20" width="52" height="40" rx="3" fill="#1F2937" stroke={accent} strokeWidth="1.2" opacity="0.9" />
-          {/* CUDA core grid */}
-          <g fill={accent} opacity="0.85">
-            {Array.from({ length: 4 }).map((_, r) =>
-              Array.from({ length: 6 }).map((_, c) => (
-                <rect
-                  key={`${r}-${c}`}
-                  x={-22 + c * 7.5}
-                  y={-16 + r * 9}
-                  width="5"
-                  height="6"
-                  rx="0.5"
-                />
-              ))
-            )}
-          </g>
-          {/* Pins */}
-          {Array.from({ length: 7 }).map((_, i) => (
-            <line
-              key={`top-${i}`}
-              x1={-30 + i * 10}
-              y1="-32"
-              x2={-30 + i * 10}
-              y2="-40"
-              stroke={accent}
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-          ))}
-          {Array.from({ length: 7 }).map((_, i) => (
-            <line
-              key={`bot-${i}`}
-              x1={-30 + i * 10}
-              y1="32"
-              x2={-30 + i * 10}
-              y2="40"
-              stroke={accent}
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-          ))}
-        </g>
-      ))}
-
-      {/* Top label — "GPU" tag */}
-      <text
-        x={dual ? -50 : 0}
-        y={-46}
-        textAnchor="middle"
-        fill={accent}
-        fontSize="9"
-        fontWeight="bold"
-        fontFamily="monospace"
-        letterSpacing="2"
-      >
-        DGX SPARK
-      </text>
-
-      {/* Power glow */}
-      <circle cx="60" cy="-30" r="2.5" fill={accent}>
-        <animate attributeName="opacity" values="0.4;1;0.4" dur="2s" repeatCount="indefinite" />
-      </circle>
-    </g>
+    <div className={`${className} relative`} aria-hidden="true">
+      <img
+        src={cfg.src}
+        alt={cfg.alt}
+        loading="lazy"
+        className="absolute inset-0 w-full h-full object-cover"
+      />
+      {/* Brand-coherent tint */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{ backgroundImage: cfg.tint }}
+      />
+      {/* Hafif vinyet — okunabilirliği destekler */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(ellipse at center, transparent 55%, rgba(10,22,40,0.35) 100%)',
+        }}
+      />
+    </div>
   );
 }
 
 /* ============================================================
- * MAC STUDIO — minimal silüet
- * ============================================================ */
-function MacArt({ palette, dual }: { palette: { accent: string }; dual: boolean }) {
-  const { accent } = palette;
-  return (
-    <g transform="translate(200 100)">
-      {(dual ? [-60, 60] : [0]).map((cx, idx) => (
-        <g key={idx} transform={`translate(${cx} 0)`}>
-          {/* Mac Studio body (square box) */}
-          <rect
-            x="-44"
-            y="-22"
-            width="88"
-            height="44"
-            rx="6"
-            fill="#F1F5F9"
-            stroke={accent}
-            strokeWidth="1.5"
-          />
-          {/* Top ventilation pattern */}
-          <g fill={accent} opacity="0.35">
-            {Array.from({ length: 7 }).map((_, i) => (
-              <circle key={i} cx={-30 + i * 10} cy="-15" r="1.5" />
-            ))}
-          </g>
-          {/* Apple-like central spot */}
-          <circle cx="0" cy="0" r="5" fill={accent} opacity="0.9" />
-          <circle cx="0" cy="0" r="3" fill="#F1F5F9" />
-          {/* Side ports */}
-          <rect x="-40" y="14" width="14" height="3" rx="0.5" fill={accent} opacity="0.5" />
-          <rect x="-22" y="14" width="14" height="3" rx="0.5" fill={accent} opacity="0.5" />
-          <rect x="-4" y="14" width="14" height="3" rx="0.5" fill={accent} opacity="0.5" />
-          <rect x="14" y="14" width="14" height="3" rx="0.5" fill={accent} opacity="0.5" />
-          {/* Base shadow */}
-          <ellipse cx="0" cy="30" rx="48" ry="4" fill="#000" opacity="0.25" />
-        </g>
-      ))}
-
-      {/* Floating monitor outline above */}
-      <g opacity="0.55">
-        <rect
-          x={dual ? -110 : -55}
-          y="-72"
-          width={dual ? 220 : 110}
-          height="40"
-          rx="3"
-          fill="none"
-          stroke={accent}
-          strokeWidth="1.2"
-        />
-        <line
-          x1={dual ? -28 : 0}
-          y1="-32"
-          x2={dual ? -28 : 0}
-          y2="-24"
-          stroke={accent}
-          strokeWidth="1.2"
-        />
-        <ellipse cx={dual ? -28 : 0} cy="-22" rx="20" ry="2" fill="none" stroke={accent} strokeWidth="1" />
-      </g>
-
-      <text
-        x={dual ? 60 : 0}
-        y="40"
-        textAnchor="middle"
-        fill={accent}
-        fontSize="9"
-        fontWeight="bold"
-        fontFamily="monospace"
-        letterSpacing="2"
-      >
-        MAC STUDIO
-      </text>
-    </g>
-  );
-}
-
-/* ============================================================
- * AI DENEYİM ALANI — workshop sahnesi
+ * AI DENEYİM ALANI — workshop sahnesi (gerçek foto yok)
  * ============================================================ */
 function WorkshopArt({ palette }: { palette: { accent: string } }) {
   const { accent } = palette;
@@ -327,9 +185,7 @@ function WorkshopArt({ palette }: { palette: { accent: string } }) {
       {/* Katılımcı figürleri — silüet */}
       {[-95, -55, -15, 25, 65].map((x, i) => (
         <g key={i} transform={`translate(${x} 50)`}>
-          {/* Kafa */}
           <circle cx="0" cy="-26" r="5" fill={accent} opacity="0.85" />
-          {/* Gövde */}
           <path
             d="M -8 -20 Q 0 -22 8 -20 L 6 -2 L -6 -2 Z"
             fill={accent}

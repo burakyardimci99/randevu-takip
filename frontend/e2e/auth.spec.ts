@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Landing & Auth', () => {
   test('landing açılır ve giriş kartı görünür', async ({ page }) => {
     await page.goto('/');
-    await expect(page).toHaveTitle(/Kuveyt Türk AI Lab/);
+    await expect(page).toHaveTitle(/Kuveyt Türk · Yapay Zeka Laboratuvarı/);
     await expect(page.getByRole('link', { name: /Giriş Yap/i }).first()).toBeVisible();
   });
 

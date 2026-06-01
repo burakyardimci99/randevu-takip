@@ -62,22 +62,26 @@ export default function Register() {
 
     setLoading(true);
     try {
-      const governanceRole = accountType === 'user' ? undefined : accountType;
+      // SECURITY (C2): governanceRole REGISTRATION'da atanmaz. Backend her
+      // yeni kullanıcıyı governance_role=NULL olarak kaydeder. Hesap tipi
+      // seçimi UI'da gösterilir ama 'user' dışındaki seçimler admin onayı
+      // gerektirir (admin sonradan PATCH /admin/users/:id/governance-role
+      // ile atayabilir). Burada sadece user oluşturuyoruz.
       const { subject } = await register({
         email,
         password,
         passwordConfirm,
         fullName,
-        governanceRole,
       });
-      toast.push('success', `Hoş geldiniz ${subject.fullName}! Hesabınız oluşturuldu.`);
-      const destination =
-        subject.governanceRole === 'analitik_danisman'
-          ? '/danisman'
-          : subject.governanceRole === 'yz_arge'
-            ? '/arge'
-            : '/rooms';
-      navigate(destination, { replace: true });
+      if (accountType !== 'user') {
+        toast.push(
+          'info',
+          'Hesabınız oluşturuldu. Yönetişim rolü için admin onayı gerekir; başlangıçta normal kullanıcı erişiminiz var.'
+        );
+      } else {
+        toast.push('success', `Hoş geldiniz ${subject.fullName}! Hesabınız oluşturuldu.`);
+      }
+      navigate('/rooms', { replace: true });
     } catch (err) {
       const e = err as { message?: string; issues?: Array<{ path: string; message: string }> };
       if (e.issues?.length) {

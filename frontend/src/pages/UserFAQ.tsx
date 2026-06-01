@@ -1,16 +1,34 @@
 /**
  * Sıkça Sorulan Sorular sayfası — kullanıcı self-service yardım.
  *
- * 4 kategori, 10 soru. Accordion (tek seferde 1 açık). Üstte arama kutusu
- * — soru veya cevap içinde geçen kelimeyi filtreler.
+ * Layout: split (Feature197 pattern) — solda kategori chip'leri + arama + accordion,
+ * sağda sticky preview panel (aktif sorunun kategori glow'u + cevabı + ilgili
+ * hızlı erişim CTA'ları). Mobilde tek kolon (preview panel gizlenir, cevap
+ * accordion içinde açılır — md:hidden fallback).
  *
- * Bağlantılar: ilgili sayfaya (Odalar / Lisanslarım / Profilim) doğrudan link.
+ * Bağımlılık olarak radix-accordion / framer-motion eklenmedi — saf React state
+ * + Tailwind transition'lar yeterli. Mevcut tasarım sisteminden role-badge,
+ * btn-pill, KpiCard pattern'leri kullanılıyor.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  BookOpen,
+  Calendar,
+  KeyRound,
+  User,
+  ChevronDown,
+  HelpCircle,
+  Mail,
+  ArrowRight,
+  Sparkles,
+  type LucideIcon,
+} from 'lucide-react';
 import { AppShell } from '../components/AppShell';
+import { EmptyState } from '../components/EmptyState';
 
 type FaqCategory = 'Genel' | 'Randevu Alma' | 'Lisans Talepleri' | 'Hesap & Profil';
+type Tone = 'cyan' | 'gold' | 'violet' | 'emerald';
 
 interface FaqItem {
   id: string;
@@ -18,8 +36,10 @@ interface FaqItem {
   q: string;
   /** ReactNode — link/badge/list desteği için. */
   a: React.ReactNode;
-  /** Ek arama anahtar kelimeleri (kullanıcı "envanter" yazınca showcase çıksın diye). */
+  /** Ek arama anahtar kelimeleri. */
   keywords?: string[];
+  /** Preview panel'de gösterilecek ilgili hızlı erişim linkleri. */
+  related?: { to: string; label: string }[];
 }
 
 const FAQ: FaqItem[] = [
@@ -44,6 +64,11 @@ const FAQ: FaqItem[] = [
       </>
     ),
     keywords: ['nasıl', 'kullanım'],
+    related: [
+      { to: '/rooms', label: 'Odalar' },
+      { to: '/licenses', label: 'Lisanslarım' },
+      { to: '/waitlist', label: 'Sıramda' },
+    ],
   },
   {
     id: 'talep-tipleri',
@@ -65,6 +90,10 @@ const FAQ: FaqItem[] = [
         </li>
       </ul>
     ),
+    related: [
+      { to: '/rooms', label: 'Odalar' },
+      { to: '/licenses', label: 'Lisanslarım' },
+    ],
   },
 
   /* ============ ODA KİRALAMA ============ */
@@ -83,6 +112,10 @@ const FAQ: FaqItem[] = [
       </ol>
     ),
     keywords: ['randevu', 'rezervasyon'],
+    related: [
+      { to: '/rooms', label: 'Odaları gör' },
+      { to: '/bookings', label: 'Taleplerim' },
+    ],
   },
   {
     id: 'periyot',
@@ -99,6 +132,7 @@ const FAQ: FaqItem[] = [
         <p className="mt-2">3 aydan uzun süreye ihtiyacın varsa <strong>peş peşe iki talep</strong> oluşturup ilki bittiğinde ikincisi devreye girebilir.</p>
       </>
     ),
+    related: [{ to: '/rooms', label: 'Randevu al' }],
   },
   {
     id: 'bekleme-listesi',
@@ -117,6 +151,10 @@ const FAQ: FaqItem[] = [
       </>
     ),
     keywords: ['waitlist', 'kuyruk', 'sıra'],
+    related: [
+      { to: '/waitlist', label: 'Sıramda' },
+      { to: '/rooms', label: 'Odalar' },
+    ],
   },
 
   /* ============ LİSANS TALEPLERİ ============ */
@@ -135,6 +173,7 @@ const FAQ: FaqItem[] = [
       </ol>
     ),
     keywords: ['license', 'cursor', 'claude', 'copilot'],
+    related: [{ to: '/licenses', label: 'Lisans talep et' }],
   },
   {
     id: 'mevcut-yazilimlar',
@@ -160,6 +199,7 @@ const FAQ: FaqItem[] = [
       </>
     ),
     keywords: ['araçlar', 'tools'],
+    related: [{ to: '/licenses', label: 'Lisanslarım' }],
   },
 
   /* ============ TALEP İŞ AKIŞI ============ */
@@ -184,6 +224,10 @@ const FAQ: FaqItem[] = [
       </>
     ),
     keywords: ['durum', 'status', 'onay', 'bekleme'],
+    related: [
+      { to: '/bookings', label: 'Taleplerim' },
+      { to: '/licenses', label: 'Lisanslarım' },
+    ],
   },
   {
     id: 'revize-istendi',
@@ -200,6 +244,10 @@ const FAQ: FaqItem[] = [
       </>
     ),
     keywords: ['feedback', 'reddedildi', 'rejected'],
+    related: [
+      { to: '/bookings', label: 'Taleplerim' },
+      { to: '/licenses', label: 'Lisanslarım' },
+    ],
   },
 
   /* ============ HESAP & PROFİL ============ */
@@ -223,26 +271,119 @@ const FAQ: FaqItem[] = [
       </>
     ),
     keywords: ['profile', 'avatar', 'kvkk', 'gizlilik'],
+    related: [
+      { to: '/profile', label: 'Profilim' },
+      { to: '/privacy', label: 'Gizlilik' },
+    ],
   },
 ];
 
+const CATEGORY_META: Record<FaqCategory, { icon: LucideIcon; tone: Tone; summary: string }> = {
+  Genel: {
+    icon: BookOpen,
+    tone: 'cyan',
+    summary: 'Platform hakkında temel bilgiler ve self-service süreçler.',
+  },
+  'Randevu Alma': {
+    icon: Calendar,
+    tone: 'gold',
+    summary: 'AI Lab odaları, periyotlar ve bekleme listesi kullanımı.',
+  },
+  'Lisans Talepleri': {
+    icon: KeyRound,
+    tone: 'violet',
+    summary: 'Yazılım lisansları, talep akışı ve revize/red işleyişi.',
+  },
+  'Hesap & Profil': {
+    icon: User,
+    tone: 'emerald',
+    summary: 'Profil bilgileri, gizlilik tercihleri ve KVKK aksiyonları.',
+  },
+};
+
+/** Tone başına: pill çip aktif/idle, preview panel glow ve aksent. */
+const TONE_STYLES: Record<
+  Tone,
+  {
+    chipActive: string;
+    chipIdle: string;
+    iconBg: string;
+    iconColor: string;
+    panelGlow: string;
+    accentBar: string;
+    dot: string;
+    relatedBtn: string;
+  }
+> = {
+  cyan: {
+    chipActive: 'btn-pill-primary',
+    chipIdle:
+      'bg-cyan-50 text-cyan-800 border border-cyan-200 hover:bg-cyan-100 hover:border-cyan-300',
+    iconBg: 'bg-cyan-50',
+    iconColor: 'text-cyan-700',
+    panelGlow: 'border border-kt-gray-100 shadow-sm',
+    accentBar: 'bg-cyan-500',
+    dot: 'bg-cyan-500',
+    relatedBtn:
+      'bg-white text-cyan-700 border border-cyan-200 hover:bg-cyan-50 hover:border-cyan-300',
+  },
+  gold: {
+    chipActive: 'btn-pill-warning',
+    chipIdle:
+      'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 hover:border-amber-300',
+    iconBg: 'bg-amber-50',
+    iconColor: 'text-amber-700',
+    panelGlow: 'border border-kt-gray-100 shadow-sm',
+    accentBar: 'bg-amber-500',
+    dot: 'bg-amber-500',
+    relatedBtn:
+      'bg-white text-amber-800 border border-amber-200 hover:bg-amber-50 hover:border-amber-300',
+  },
+  violet: {
+    chipActive: 'btn-pill-info',
+    chipIdle:
+      'bg-violet-50 text-violet-800 border border-violet-200 hover:bg-violet-100 hover:border-violet-300',
+    iconBg: 'bg-violet-50',
+    iconColor: 'text-violet-700',
+    panelGlow: 'border border-kt-gray-100 shadow-sm',
+    accentBar: 'bg-violet-500',
+    dot: 'bg-violet-500',
+    relatedBtn:
+      'bg-white text-violet-700 border border-violet-200 hover:bg-violet-50 hover:border-violet-300',
+  },
+  emerald: {
+    chipActive: 'btn-pill-success',
+    chipIdle:
+      'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300',
+    iconBg: 'bg-emerald-50',
+    iconColor: 'text-emerald-700',
+    panelGlow: 'border border-kt-gray-100 shadow-sm',
+    accentBar: 'bg-emerald-500',
+    dot: 'bg-emerald-500',
+    relatedBtn:
+      'bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50 hover:border-emerald-300',
+  },
+};
+
 const CATEGORIES: FaqCategory[] = ['Genel', 'Randevu Alma', 'Lisans Talepleri', 'Hesap & Profil'];
+
+type CategoryFilter = 'Tümü' | FaqCategory;
 
 export default function UserFAQ() {
   const [query, setQuery] = useState('');
-  const [openId, setOpenId] = useState<string | null>(FAQ[0].id);
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('Tümü');
+  const [openId, setOpenId] = useState<string>(FAQ[0].id);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return FAQ;
     return FAQ.filter((item) => {
+      if (categoryFilter !== 'Tümü' && item.category !== categoryFilter) return false;
+      if (!q) return true;
       if (item.q.toLowerCase().includes(q)) return true;
       if (item.keywords?.some((k) => k.toLowerCase().includes(q))) return true;
-      // Render answer to text — basit yaklaşım: sadece string ise dahil et
-      // ReactNode içinde arama tam yetkili değil ama keywords zaten bunu telafi ediyor.
       return false;
     });
-  }, [query]);
+  }, [query, categoryFilter]);
 
   const grouped = useMemo(() => {
     const map = new Map<FaqCategory, FaqItem[]>();
@@ -253,24 +394,71 @@ export default function UserFAQ() {
     return map;
   }, [filtered]);
 
+  const activeItem = useMemo(
+    () => filtered.find((f) => f.id === openId) ?? filtered[0] ?? null,
+    [filtered, openId]
+  );
+
+  // Filtre değişince açık item kaybolduysa ilk eşleşene düş (render dışında).
+  useEffect(() => {
+    if (filtered.length > 0 && !filtered.some((f) => f.id === openId)) {
+      setOpenId(filtered[0].id);
+    }
+  }, [filtered, openId]);
+
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<CategoryFilter, number>();
+    counts.set('Tümü', FAQ.length);
+    for (const cat of CATEGORIES) {
+      counts.set(cat, FAQ.filter((f) => f.category === cat).length);
+    }
+    return counts;
+  }, []);
+
   return (
     <AppShell kind="user">
-      <div className="max-w-4xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        {/* ========== HEADER ========== */}
         <header className="mb-8">
-          <div className="text-xs uppercase tracking-widest text-kt-gold-700 font-bold mb-2">
+          <div className="role-badge-cyan">
+            <span className="role-badge-dot bg-cyan-400" />
             Yardım Merkezi
           </div>
           <h1 className="text-3xl md:text-4xl font-extrabold text-kt-green-900 mb-2">
             Sıkça Sorulan Sorular
           </h1>
-          <p className="text-kt-gray-600">
-            Sistem nasıl çalışır, randevu/lisans nasıl alınır, talep süreçleri nasıl işler — hepsi burada.
+          <p className="text-kt-gray-600 max-w-2xl">
+            Sistem nasıl çalışır, randevu/lisans nasıl alınır, talep süreçleri nasıl işler — kategoriden seçin veya arayın.
           </p>
         </header>
 
-        {/* Arama */}
-        <div className="card p-4 mb-6">
-          <div className="relative">
+        {/* ========== KATEGORİ FİLTRE + ARAMA ========== */}
+        <div className="mb-6 flex flex-col lg:flex-row gap-3 lg:items-center justify-between">
+          <div className="flex gap-2 flex-wrap">
+            {(['Tümü', ...CATEGORIES] as CategoryFilter[]).map((cat) => {
+              const isActive = categoryFilter === cat;
+              const tone = cat === 'Tümü' ? 'cyan' : CATEGORY_META[cat].tone;
+              const t = TONE_STYLES[tone];
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setCategoryFilter(cat)}
+                  className={
+                    isActive
+                      ? `${t.chipActive} btn-pill-xs`
+                      : `btn-pill btn-pill-xs ${t.chipIdle}`
+                  }
+                >
+                  {isActive && <span className="btn-pill-shimmer" />}
+                  <span className="relative z-10">
+                    {cat} ({categoryCounts.get(cat) ?? 0})
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="relative w-full lg:w-80">
             <svg
               className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-kt-gray-400"
               fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
@@ -280,7 +468,7 @@ export default function UserFAQ() {
             <input
               type="search"
               className="input pl-11"
-              placeholder="Soru ara... (örn. lisans, randevu, sıra, gizlilik)"
+              placeholder="Soru ara (lisans, randevu, sıra, gizlilik)..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               maxLength={80}
@@ -288,71 +476,205 @@ export default function UserFAQ() {
           </div>
         </div>
 
-        {/* Kategori bazlı sorular */}
+        {/* ========== ANA İÇERİK (split layout) ========== */}
         {filtered.length === 0 ? (
-          <div className="card p-8 text-center text-kt-gray-500">
-            "{query}" için eşleşen soru bulunamadı. Farklı bir kelime deneyebilirsin
-            veya admin'le iletişime geçebilirsin.
-          </div>
+          <EmptyState
+            icon="search"
+            tone="cyan"
+            title={`"${query}" için eşleşen soru bulunamadı`}
+            description="Farklı bir kelime deneyin veya farklı bir kategori seçin."
+          />
         ) : (
-          <div className="space-y-6">
-            {CATEGORIES.map((cat) => {
-              const items = grouped.get(cat) ?? [];
-              if (items.length === 0) return null;
-              return (
-                <section key={cat}>
-                  <h2 className="text-xs font-bold text-kt-gold-700 uppercase tracking-widest mb-3">
-                    {cat}
-                  </h2>
-                  <div className="space-y-2">
-                    {items.map((item) => {
-                      const isOpen = openId === item.id;
-                      return (
-                        <div
-                          key={item.id}
-                          className={`card transition-shadow ${isOpen ? 'shadow-kt-card' : ''}`}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => setOpenId(isOpen ? null : item.id)}
-                            className="w-full text-left px-5 py-4 flex items-center justify-between gap-4 hover:bg-kt-gray-50 rounded-t-2xl transition-colors"
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 items-start">
+            {/* ===== SOL: kategori bazlı accordion ===== */}
+            <div className="space-y-6 min-w-0">
+              {CATEGORIES.map((cat) => {
+                const items = grouped.get(cat) ?? [];
+                if (items.length === 0) return null;
+                const meta = CATEGORY_META[cat];
+                const t = TONE_STYLES[meta.tone];
+                const Icon = meta.icon;
+                return (
+                  <section key={cat}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <span
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center ${t.iconBg} ${t.iconColor}`}
+                      >
+                        <Icon size={14} strokeWidth={2.5} />
+                      </span>
+                      <h2 className="text-xs font-bold uppercase tracking-[0.18em] text-kt-gray-500">
+                        {cat}
+                      </h2>
+                      <span className="text-[11px] font-semibold text-kt-gray-400">
+                        ({items.length})
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {items.map((item) => {
+                        const isOpen = openId === item.id;
+                        return (
+                          <article
+                            key={item.id}
+                            className={`relative overflow-hidden rounded-2xl bg-white border transition-all duration-200 ${
+                              isOpen
+                                ? 'border-kt-gray-200 shadow-sm'
+                                : 'border-kt-gray-100 hover:border-kt-gray-200'
+                            }`}
                           >
-                            <span className="font-semibold text-kt-green-900">{item.q}</span>
-                            <svg
-                              className={`w-5 h-5 text-kt-gray-400 shrink-0 transition-transform ${
-                                isOpen ? 'rotate-180' : ''
+                            {/* Sol kenar accent bar — aktifken görünür */}
+                            <span
+                              aria-hidden="true"
+                              className={`absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full transition-opacity duration-200 ${t.accentBar} ${
+                                isOpen ? 'opacity-100' : 'opacity-0'
                               }`}
-                              fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setOpenId(isOpen ? '' : item.id)}
+                              className="w-full text-left px-5 py-4 flex items-center justify-between gap-4 group"
+                              aria-expanded={isOpen}
                             >
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/>
-                            </svg>
-                          </button>
-                          {isOpen && (
-                            <div className="px-5 pb-5 pt-1 text-sm text-kt-gray-700 leading-relaxed border-t border-kt-gray-100 animate-fade-in">
-                              {item.a}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
-              );
-            })}
+                              <span
+                                className={`text-[15px] font-semibold transition-colors ${
+                                  isOpen
+                                    ? 'text-kt-green-900'
+                                    : 'text-kt-gray-700 group-hover:text-kt-green-900'
+                                }`}
+                              >
+                                {item.q}
+                              </span>
+                              <ChevronDown
+                                className={`w-4 h-4 shrink-0 text-kt-gray-400 transition-transform duration-300 ${
+                                  isOpen ? 'rotate-180 text-kt-green-700' : ''
+                                }`}
+                                strokeWidth={2.5}
+                              />
+                            </button>
+                            {/* Mobilde accordion içeriği — md ekrandan büyükte sağ panel zaten cevabı gösteriyor */}
+                            {isOpen && (
+                              <div className="md:hidden px-5 pb-5 pt-1 text-sm text-kt-gray-700 leading-relaxed border-t border-kt-gray-100 animate-fade-in">
+                                {item.a}
+                              </div>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+
+            {/* ===== SAĞ: sticky preview panel (md+ ekranlarda) ===== */}
+            <aside className="hidden md:block sticky top-24 self-start min-w-0">
+              {activeItem && <PreviewPanel item={activeItem} />}
+            </aside>
           </div>
         )}
 
-        {/* Footer */}
-        <div className="mt-10 card p-5 bg-kt-gold-50 border-kt-gold-100 text-center">
-          <p className="text-sm text-kt-green-900">
-            Sorunuzun cevabını bulamadınız mı?{' '}
-            <a href="mailto:ai.lab@klab.test" className="font-semibold text-kt-gold-700 hover:underline">
-              ai.lab@klab.test
-            </a>{' '}
-            adresine yazabilirsiniz.
-          </p>
+        {/* ========== FOOTER CTA ========== */}
+        <div className="mt-12 relative overflow-hidden rounded-2xl bg-gradient-to-br from-kt-green-950 via-kt-green-900 to-kt-green-950 p-6 md:p-8 text-center">
+          <div className="absolute inset-0 bg-neural-grid-dark opacity-30 pointer-events-none" />
+          <div className="absolute -top-16 left-1/3 w-72 h-32 bg-kt-gold-400/15 rounded-full blur-3xl pointer-events-none" />
+          <div className="relative">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-kt-gold-400/20 text-kt-gold-300 mb-3">
+              <Sparkles size={20} />
+            </div>
+            <h3 className="text-lg md:text-xl font-bold text-white mb-1">
+              Sorunuzun cevabını bulamadınız mı?
+            </h3>
+            <p className="text-white/70 text-sm mb-4">
+              AI Lab ekibi her zaman yardımcı olmaya hazır.
+            </p>
+            <a
+              href="mailto:ai.lab@klab.test"
+              className="btn-pill-gold btn-pill-sm inline-flex"
+            >
+              <span className="btn-pill-shimmer" />
+              <span className="relative z-10 flex items-center gap-2">
+                <Mail size={14} />
+                ai.lab@klab.test
+              </span>
+            </a>
+          </div>
         </div>
       </div>
     </AppShell>
+  );
+}
+
+/* ============================================================
+ * PREVIEW PANEL — sağda sticky kart (md+).
+ * Aktif sorunun kategori glow'unu + cevabını + ilgili linklerini gösterir.
+ * ============================================================ */
+function PreviewPanel({ item }: { item: FaqItem }) {
+  const meta = CATEGORY_META[item.category];
+  const t = TONE_STYLES[meta.tone];
+  const Icon = meta.icon;
+
+  return (
+    <div
+      key={item.id}
+      className={`relative overflow-hidden rounded-2xl bg-white animate-fade-in ${t.panelGlow}`}
+    >
+      {/* Üst aksan şeridi — sade tek renk */}
+      <div className={`h-1 w-full ${t.accentBar}`} />
+
+      <div className="relative p-6">
+        {/* Kategori başlığı */}
+        <div className="flex items-center gap-2.5 mb-4">
+          <span
+            className={`w-10 h-10 rounded-xl flex items-center justify-center ${t.iconBg} ${t.iconColor}`}
+          >
+            <Icon size={18} strokeWidth={2.25} />
+          </span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className={`w-1.5 h-1.5 rounded-full ${t.dot}`} />
+            <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-kt-gray-500 truncate">
+              {item.category}
+            </span>
+          </div>
+        </div>
+
+        {/* Soru başlığı */}
+        <h3 className="text-xl font-bold text-kt-green-900 mb-3 leading-tight">
+          {item.q}
+        </h3>
+
+        {/* Kategori özeti (her kart için aynı kategori summary — orientation) */}
+        <p className="text-xs text-kt-gray-500 italic mb-4 pb-4 border-b border-kt-gray-100">
+          {meta.summary}
+        </p>
+
+        {/* Cevap içeriği */}
+        <div className="text-sm text-kt-gray-700 leading-relaxed">{item.a}</div>
+
+        {/* Hızlı erişim CTA'ları */}
+        {item.related && item.related.length > 0 && (
+          <div className="mt-5 pt-5 border-t border-kt-gray-100">
+            <div className="flex items-center gap-1.5 mb-3">
+              <HelpCircle size={12} className="text-kt-gray-400" />
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-kt-gray-500">
+                İlgili sayfalar
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {item.related.map((r) => (
+                <Link
+                  key={r.to}
+                  to={r.to}
+                  className={`btn-pill btn-pill-xs ${t.relatedBtn} no-underline`}
+                >
+                  <span className="relative z-10 flex items-center gap-1.5">
+                    {r.label}
+                    <ArrowRight size={12} strokeWidth={2.5} />
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

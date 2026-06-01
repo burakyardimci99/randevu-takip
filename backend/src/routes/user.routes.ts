@@ -7,7 +7,9 @@ import { requireUser } from '../middleware/auth.middleware';
 import {
   createAppointmentSchema,
   createBookingSchema,
+  createHardwareRequestSchema,
   createLicenseRequestSchema,
+  createSupportRequestSchema,
   joinWaitlistSchema,
   profileUpdateSchema,
   similarSearchSchema,
@@ -41,16 +43,15 @@ import {
 import { exportUserData, purgeUser } from '../services/privacy.service';
 import { getUserLicenseUsage } from '../services/license.service';
 import {
+  createHardwareRequest,
+  listUserHardwareRequests,
+  updateHardwareRequest,
+} from '../services/hardware-request.service';
+import { createSupportRequest } from '../services/support-request.service';
+import {
   clearUserProfilePhoto,
   setUserProfilePhoto,
 } from '../services/profile-photo.service';
-import {
-  getThreadMeta,
-  getUnreadCountForUser,
-  listMessages,
-  markThreadRead,
-  postMessage,
-} from '../services/messages.service';
 import {
   getLikeStatus,
   getShowcaseEngagement,
@@ -319,82 +320,6 @@ router.delete('/me/photo', (req: Request, res: Response, next: NextFunction) => 
     next(err);
   }
 });
-
-/* ============ MESAJLAR (booking thread) ============ */
-
-router.get('/messages/unread', (req: Request, res: Response, next: NextFunction) => {
-  try {
-    res.json({ unread: getUnreadCountForUser(req.auth!.subjectId) });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.get(
-  '/bookings/:id/messages',
-  (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const id = String(req.params.id ?? '');
-      if (id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
-      }
-      // IDOR: bu booking user'a ait mi?
-      const own = getBookingByIdForUser(req.auth!.subjectId, id);
-      if (!own) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
-      res.json({
-        messages: listMessages(id),
-        meta: getThreadMeta(id, 'user'),
-      });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-router.post(
-  '/bookings/:id/messages',
-  (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const id = String(req.params.id ?? '');
-      if (id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
-      }
-      const body = String(req.body?.body ?? '');
-      const own = getBookingByIdForUser(req.auth!.subjectId, id);
-      if (!own) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
-      const profile = getDb()
-        .prepare('SELECT full_name FROM users WHERE id = ?')
-        .get(req.auth!.subjectId) as { full_name: string } | undefined;
-      const message = postMessage({
-        bookingId: id,
-        authorId: req.auth!.subjectId,
-        authorType: 'user',
-        authorName: profile?.full_name ?? 'Kullanıcı',
-        body,
-      });
-      res.status(201).json({ message });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-router.post(
-  '/bookings/:id/messages/read',
-  (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const id = String(req.params.id ?? '');
-      if (id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
-      }
-      const own = getBookingByIdForUser(req.auth!.subjectId, id);
-      if (!own) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
-      res.json(markThreadRead(id, 'user'));
-    } catch (err) {
-      next(err);
-    }
-  }
-);
 
 /* ============ SHOWCASE — LIKE & COMMENT ============ */
 
@@ -864,5 +789,80 @@ router.delete(
     }
   }
 );
+
+/* ============================================================
+ * DONANIM TALEPLERİ — kullanıcı
+ * ============================================================ */
+
+router.get('/hardware/requests', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ items: listUserHardwareRequests(req.auth!.subjectId) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/hardware/requests', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = createHardwareRequestSchema.parse(req.body);
+    const request = createHardwareRequest(req.auth!.subjectId, input);
+
+    recordAudit({
+      eventType: 'hardware_request.created',
+      subjectId: req.auth!.subjectId,
+      subjectType: 'user',
+      ipAddress: req.ip,
+      success: true,
+      details: {
+        requestId: request.id,
+        equipmentType: request.equipmentType,
+        quantity: request.quantity,
+      },
+    });
+
+    res.status(201).json({ request });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/hardware/requests/:id', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rawId = req.params.id;
+    const id = typeof rawId === 'string' ? rawId : '';
+    if (!id || id.length < 8 || id.length > 40) {
+      throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
+    }
+    const input = createHardwareRequestSchema.parse(req.body);
+    const request = updateHardwareRequest(req.auth!.subjectId, id, input);
+    res.json({ request });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============================================================
+ * DESTEK TALEBİ — kullanıcı
+ * ============================================================ */
+
+router.post('/support/requests', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = createSupportRequestSchema.parse(req.body);
+    const request = createSupportRequest(req.auth!.subjectId, input.description);
+
+    recordAudit({
+      eventType: 'support_request.created',
+      subjectId: req.auth!.subjectId,
+      subjectType: 'user',
+      ipAddress: req.ip,
+      success: true,
+      details: { requestId: request.id },
+    });
+
+    res.status(201).json({ request });
+  } catch (err) {
+    next(err);
+  }
+});
 
 export default router;

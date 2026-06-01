@@ -153,23 +153,12 @@ const LoginForm: React.FC<LoginFormProps> = ({
 
       <div className="relative">
         <div className="mb-8 text-center">
-          <h2 className="text-3xl font-bold mb-2 relative group inline-block">
-            <span className="absolute -inset-1 bg-gradient-to-r from-kt-gold-400/30 via-kt-violet-500/30 to-kt-gold-500/30 blur-xl opacity-75 group-hover:opacity-100 transition-all duration-500 animate-pulse" />
-            <span className="relative inline-block text-3xl font-extrabold text-white">
-              Kuveyt Türk <span className="text-shimmer">Yapay Zeka Laboratuvarı</span>
-            </span>
+          <h2 className="text-3xl font-extrabold tracking-tight text-white mb-2">
+            Kuveyt Türk <span className="text-shimmer">Yapay Zeka Laboratuvarı</span>
           </h2>
-          <div className="text-white/80 flex flex-col items-center space-y-2 mt-3">
-            <span className="relative group cursor-default">
-              <span className="absolute -inset-1 bg-gradient-to-r from-kt-gold-400/20 to-kt-violet-500/20 blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <span className="relative inline-block">Yapay zeka çalışma alanın seni bekliyor</span>
-            </span>
-            <div className="flex space-x-2 text-xs text-white/40">
-              <span className="animate-pulse">🧠</span>
-              <span className="animate-bounce">🤖</span>
-              <span className="animate-pulse">✨</span>
-            </div>
-          </div>
+          <p className="text-sm text-white/65 tracking-tight">
+            Hesabınıza giriş yaparak çalışma istasyonu randevularınıza erişin.
+          </p>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-5" autoComplete="on">

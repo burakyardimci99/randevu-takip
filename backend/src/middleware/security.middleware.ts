@@ -75,6 +75,34 @@ export const helmetMiddleware = helmet({
 });
 
 /**
+ * Permissions-Policy (formerly Feature-Policy): modern tarayıcı API'larını
+ * varsayılan olarak kapatır. Uygulamanın geo/camera/mic/usb/payment vb.
+ * kullanması gerekmiyor — saldırgan iframe veya supply-chain saldırısı ile
+ * bu API'ları çağırmaya çalışsa bile tarayıcı bloklar (defense-in-depth).
+ */
+export function permissionsPolicyMiddleware(
+  _req: import('express').Request,
+  res: import('express').Response,
+  next: import('express').NextFunction
+): void {
+  res.setHeader(
+    'Permissions-Policy',
+    [
+      'geolocation=()',
+      'camera=()',
+      'microphone=()',
+      'usb=()',
+      'payment=()',
+      'magnetometer=()',
+      'accelerometer=()',
+      'gyroscope=()',
+      'interest-cohort=()',
+    ].join(', ')
+  );
+  next();
+}
+
+/**
  * Allowed origins: ana FRONTEND_ORIGIN + dev için 127.0.0.1/localhost twin'i.
  * Vite host'u 127.0.0.1 olduğunda tarayıcı Origin'ı 127.0.0.1 gönderir;
  * localhost ile yazılmış FRONTEND_ORIGIN ile eşleşmediği için CORS reddederdi.

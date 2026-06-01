@@ -60,27 +60,24 @@
   /* ============ PILL BUTONLAR (modern variant — referans: ethereal-beams-hero) ============
      Mevcut .btn-* class'ları korunuyor (geri uyumluluk). Yeni .btn-pill-* class'ları
      hero CTA, login submit, landing eylem butonları gibi öne çıkan yerlerde kullanılır.
-     Tüm variant'lar shimmer sweep efekti taşır (hover → soldan sağa parlak ışık geçişi).
-     Renkler bizim cyan/navy/violet paletimizden — siyah/beyaz değil. */
+     Tüm variant'lar opsiyonel shimmer sweep efekti taşır (hover → soldan sağa hafif
+     ışık geçişi). Stil sade ve profesyonel — neon glow yok, solid renk + ince shadow.
+     Tasarım dili: ethereal-beams-hero (siyah/beyaz monokrom, hafif glass, subtle hover). */
   .btn-pill {
     @apply relative inline-flex items-center justify-center gap-2 rounded-full
            font-medium tracking-tight transition-all duration-200
            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kt-gold-400/40
            disabled:pointer-events-none disabled:opacity-50 overflow-hidden;
   }
-  /* Filled — primary brand glow (cyan→blue gradient) */
+  /* Filled — primary (deep navy, solid). Sade ve premium hissi. */
   .btn-pill-primary {
-    @apply btn-pill text-white shadow-glow-cyan hover:shadow-2xl
-           hover:-translate-y-0.5 active:translate-y-0;
-    background-image: linear-gradient(135deg, #06B6D4 0%, #0EA5E9 50%, #3B82F6 100%);
+    @apply btn-pill bg-kt-green-900 text-white
+           hover:bg-kt-green-800 shadow-sm hover:shadow;
   }
-  .btn-pill-primary:hover {
-    background-image: linear-gradient(135deg, #22D3EE 0%, #06B6D4 50%, #0EA5E9 100%);
-  }
-  /* Filled — gold accent (highlight CTA) */
+  /* Filled — gold accent (highlight CTA) — solid, glow yok */
   .btn-pill-gold {
-    @apply btn-pill bg-kt-gold-400 text-kt-green-950 shadow-kt-gold
-           hover:bg-kt-gold-300 hover:shadow-glow-cyan hover:-translate-y-0.5;
+    @apply btn-pill bg-kt-gold-400 text-kt-green-950
+           hover:bg-kt-gold-300 shadow-sm hover:shadow font-semibold;
   }
   /* Outline glass — dark theme (hero, landing, login bg üstünde) */
   .btn-pill-outline-dark {
@@ -100,20 +97,70 @@
   .btn-pill-ghost-light {
     @apply btn-pill text-kt-green-700 hover:bg-kt-gold-50 hover:text-kt-gold-700;
   }
-  /* Sizes — sm default; md (orta); lg (hero) */
+  /* Sizes — xs (dashboard action chip); sm default; md (orta); lg (hero) */
+  .btn-pill-xs { @apply h-8 px-3.5 text-[13px] font-semibold; }
   .btn-pill-sm { @apply h-9 px-4 text-sm; }
   .btn-pill-md { @apply h-11 px-6 text-base; }
   .btn-pill-lg { @apply h-14 px-8 text-lg font-semibold; }
 
+  /* Semantic pill variants — dashboard action chip'leri (onayla/reddet/revize/swat).
+     Sade solid renk + subtle shadow. Gradient ve neon glow yok — ethereal-beams-hero
+     tarzı profesyonel monokrom hissiyatı. Renk sadece semantik ipucu olarak
+     kullanılıyor; vurgu için boyut/pozisyon yeterli.
+       success → emerald (Onayla)
+       danger  → rose    (Reddet)
+       warning → amber   (Revize iste)
+       info    → violet  (SWAT'a gönder) */
+  .btn-pill-success {
+    @apply btn-pill bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm;
+  }
+  .btn-pill-danger {
+    @apply btn-pill bg-rose-600 text-white hover:bg-rose-700 shadow-sm;
+  }
+  .btn-pill-warning {
+    @apply btn-pill bg-amber-500 text-white hover:bg-amber-600 shadow-sm;
+  }
+  .btn-pill-info {
+    @apply btn-pill bg-violet-600 text-white hover:bg-violet-700 shadow-sm;
+  }
+  /* Neutral outline pill — light theme, "Reddet" gibi düşük-vurgu aksiyonlar için */
+  .btn-pill-neutral {
+    @apply btn-pill bg-white text-kt-gray-700 border border-kt-gray-200
+           hover:border-kt-gray-300 hover:bg-kt-gray-50 hover:text-kt-green-800;
+  }
+
+  /* ============ ROLE BADGE (dashboard üst rol etiketi) ============
+     "Analitik Danışman", "YZ / Ar-Ge Mühendisi", "Yönetici" gibi rolleri
+     sade ve profesyonel şekilde gösterir. Düz renkli pill — neon glow yok,
+     sadece ince border. Animasyonlu nokta opsiyonel olarak korunuyor. */
+  .role-badge {
+    @apply relative inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full
+           text-[11px] font-bold uppercase tracking-[0.18em]
+           border transition-colors duration-200 mb-2;
+  }
+  .role-badge-cyan {
+    @apply role-badge text-cyan-700 border-cyan-200 bg-cyan-50;
+  }
+  .role-badge-violet {
+    @apply role-badge text-violet-700 border-violet-200 bg-violet-50;
+  }
+  .role-badge-gold {
+    @apply role-badge text-amber-800 border-amber-200 bg-amber-50;
+  }
+  .role-badge-dot {
+    @apply w-1.5 h-1.5 rounded-full;
+  }
+
   /* Shimmer sweep — pill içerisinde absolute span olarak konur.
-     Parent .btn-pill:hover ile tetiklenir (descendant selector — group class'ına gerek yok).
+     Parent .btn-pill:hover ile tetiklenir. ethereal-beams-hero referansındaki gibi
+     ÇOK hafif (via-white/15) — fazla parlamasın, profesyonel kalsın.
      Kullanım: <button class="btn-pill-primary btn-pill-lg">
                  <span class="btn-pill-shimmer" />
                  <span class="relative z-10">İçerik</span>
                </button> */
   .btn-pill-shimmer {
     @apply absolute inset-0 -top-2 -bottom-2 pointer-events-none
-           bg-gradient-to-r from-transparent via-white/25 to-transparent
+           bg-gradient-to-r from-transparent via-white/15 to-transparent
            skew-x-12;
     transform: translateX(-100%);
     transition: transform 1000ms ease-out;

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/Logo';
+import { AnimatedCounter } from '../components/AnimatedCounter';
 
 export default function Landing() {
   return (
@@ -106,34 +107,44 @@ export default function Landing() {
           </div>
 
           <div className="max-w-5xl text-center animate-fade-in">
-            <div className="badge-glass-gold mb-6">
-              <span className="w-2 h-2 rounded-full bg-kt-gold-400 animate-pulse-gold" />
-              YAPAY ZEKA LABORATUVARI · DEMO
-            </div>
             <h1 className="h-hero mb-6">
-              <span className="text-white">AI Lab </span>
-              <span className="text-shimmer">pod'larını</span><br />
-              <span className="text-white">projen için planla.</span>
+              <span className="text-white">Yapay Zeka Laboratuvarı</span><br />
+              <span className="text-shimmer">çalışma alanlarını</span>{' '}
+              <span className="text-white">projeniz için planlayın.</span>
             </h1>
             <p className="h-hero-sub text-white/75 mb-6">
-              Genel Müdürlük <strong className="text-white">-1D</strong> kat AILAB zone'unda{' '}
-              <strong className="text-white">NVIDIA DGX SPARK</strong> ve{' '}
-              <strong className="text-white">MAC STUDIO</strong> donanımlı 18 pod + 15 kişilik
-              AI Deneyim Alanı. Projeni anlat, oda izni al, geleceğin gününe randevunu oluştur.
+              Genel Müdürlük <strong className="text-white">-1D</strong> kattaki Yapay Zeka
+              Laboratuvarı; <strong className="text-white">NVIDIA DGX Spark</strong> ve{' '}
+              <strong className="text-white">Mac Studio</strong> donanımlı çalışma istasyonları
+              ile 15 kişilik AI Deneyim Alanı'nı bir araya getirir. Projenizi anlatın, uygun
+              istasyon için izin alın ve sizin için en uygun tarihe randevunuzu oluşturun.
             </p>
-            <div className="flex flex-wrap justify-center items-center gap-3 mb-10 text-sm">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-100 border border-cyan-400/40 backdrop-blur-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-300" />
-                6× NVIDIA DGX SPARK
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-500/20 text-violet-100 border border-violet-400/40 backdrop-blur-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-violet-300" />
-                13× MAC STUDIO
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-kt-gold-400/20 text-kt-gold-100 border border-kt-gold-400/40 backdrop-blur-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-kt-gold-300" />
-                AI Deneyim Alanı (15 kişi)
-              </span>
+            {/* Stats grid — animated counters, magazine-style hero stats */}
+            <div className="grid grid-cols-3 gap-4 max-w-2xl mx-auto mb-10">
+              <div className="text-center">
+                <div className="text-4xl md:text-5xl font-extrabold text-white tracking-tight leading-none">
+                  <AnimatedCounter end={6} duration={1400} />
+                </div>
+                <div className="mt-2 text-[10px] md:text-xs font-bold uppercase tracking-[0.18em] text-cyan-200/90">
+                  NVIDIA DGX Spark
+                </div>
+              </div>
+              <div className="text-center border-x border-white/10">
+                <div className="text-4xl md:text-5xl font-extrabold text-white tracking-tight leading-none">
+                  <AnimatedCounter end={13} duration={1600} />
+                </div>
+                <div className="mt-2 text-[10px] md:text-xs font-bold uppercase tracking-[0.18em] text-violet-200/90">
+                  Mac Studio
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl md:text-5xl font-extrabold text-white tracking-tight leading-none">
+                  <AnimatedCounter end={15} duration={1800} />
+                </div>
+                <div className="mt-2 text-[10px] md:text-xs font-bold uppercase tracking-[0.18em] text-kt-gold-200/90">
+                  AI Deneyim Alanı
+                </div>
+              </div>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">

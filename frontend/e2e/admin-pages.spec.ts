@@ -29,7 +29,9 @@ test.describe('Admin pages', () => {
   test('güvenlik sayfası açılır + TOTP başlığı', async ({ page }) => {
     await adminLogin(page);
     await page.goto('/admin/security');
-    await expect(page.getByText(/TOTP|Authenticator/i)).toBeVisible({ timeout: 10_000 });
+    // Sayfa header'ı her zaman görünür; TOTP başlığı async status yüklemesinin ardından
+    await expect(page.getByRole('heading', { name: /^Güvenlik$/i })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: /TOTP.*Authenticator/i })).toBeVisible({ timeout: 15_000 });
   });
 
   test('bekleme sayfası açılır', async ({ page }) => {

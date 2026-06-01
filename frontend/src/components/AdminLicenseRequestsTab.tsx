@@ -61,7 +61,12 @@ const ACTION_META: Record<ReviewAction, { title: string; button: string; cls: st
   request_feedback: { title: 'için revize iste', button: 'Revize İste', cls: 'btn-primary', toast: 'revize istendi' },
 };
 
-export function AdminLicenseRequestsTab() {
+interface AdminLicenseRequestsTabProps {
+  /** Read-only görüntüleyen (danışman / Ar-Ge) için review aksiyonlarını gizler. */
+  readOnly?: boolean;
+}
+
+export function AdminLicenseRequestsTab({ readOnly = false }: AdminLicenseRequestsTabProps = {}) {
   const toast = useToast();
   const { admin } = useAuth();
   const [items, setItems] = useState<LicenseRequestWithUser[]>([]);
@@ -223,7 +228,8 @@ export function AdminLicenseRequestsTab() {
         <div className="space-y-3">
           {filtered.map((r) => {
             const badge = statusBadge(r.status);
-            const canReview = r.status === 'pending' || r.status === 'feedback_requested';
+            const canReview =
+              !readOnly && (r.status === 'pending' || r.status === 'feedback_requested');
             const title = r.requestTitle ?? r.licenseName;
             const isProject = r.status === 'approved';
             const expanded = expandedId === r.id;
@@ -344,6 +350,7 @@ export function AdminLicenseRequestsTab() {
                       admins={admins}
                       currentAdminId={admin?.id}
                       onChanged={load}
+                      readOnly={readOnly}
                     />
                   </div>
                 )}

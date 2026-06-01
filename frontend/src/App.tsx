@@ -14,6 +14,7 @@ import UserCalendar from './pages/UserCalendar';
 import UserFAQ from './pages/UserFAQ';
 import UserLicenses from './pages/UserLicenses';
 import UserWaitlist from './pages/UserWaitlist';
+import Chat from './pages/Chat';
 import Showcase from './pages/Showcase';
 import PrivacySettings from './pages/PrivacySettings';
 import PublicProfile from './pages/PublicProfile';
@@ -27,6 +28,8 @@ import AdminSecurity from './pages/AdminSecurity';
 import AdminAuditLog from './pages/AdminAuditLog';
 import AdminLicenses from './pages/AdminLicenses';
 import AdminProjects from './pages/AdminProjects';
+import AdminHardwareRequests from './pages/AdminHardwareRequests';
+import AdminSupportRequests from './pages/AdminSupportRequests';
 import ArgeDashboard from './pages/ArgeDashboard';
 import DanismanDashboard from './pages/DanismanDashboard';
 
@@ -103,6 +106,14 @@ export default function App() {
               }
             />
             <Route
+              path="/sohbet"
+              element={
+                <ProtectedRoute kind="any">
+                  <Chat />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/privacy"
               element={
                 <ProtectedRoute kind="user">
@@ -122,7 +133,7 @@ export default function App() {
             <Route
               path="/admin/users"
               element={
-                <ProtectedRoute kind="admin">
+                <ProtectedRoute kind={['admin', 'danisman', 'arge']}>
                   <AdminUsers />
                 </ProtectedRoute>
               }
@@ -138,7 +149,7 @@ export default function App() {
             <Route
               path="/admin/calendar"
               element={
-                <ProtectedRoute kind="admin">
+                <ProtectedRoute kind={['admin', 'danisman', 'arge']}>
                   <AdminCalendar />
                 </ProtectedRoute>
               }
@@ -146,7 +157,7 @@ export default function App() {
             <Route
               path="/admin/rooms"
               element={
-                <ProtectedRoute kind="admin">
+                <ProtectedRoute kind={['admin', 'danisman', 'arge']}>
                   <AdminRooms />
                 </ProtectedRoute>
               }
@@ -178,7 +189,7 @@ export default function App() {
             <Route
               path="/admin/licenses"
               element={
-                <ProtectedRoute kind="admin">
+                <ProtectedRoute kind={['admin', 'danisman', 'arge']}>
                   <AdminLicenses />
                 </ProtectedRoute>
               }
@@ -186,8 +197,24 @@ export default function App() {
             <Route
               path="/admin/projects"
               element={
-                <ProtectedRoute kind="admin">
+                <ProtectedRoute kind={['admin', 'danisman', 'arge']}>
                   <AdminProjects />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/hardware"
+              element={
+                <ProtectedRoute kind="admin">
+                  <AdminHardwareRequests />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/support"
+              element={
+                <ProtectedRoute kind="admin">
+                  <AdminSupportRequests />
                 </ProtectedRoute>
               }
             />

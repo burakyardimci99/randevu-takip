@@ -28,7 +28,8 @@ interface AuthContextValue extends AuthState {
     password: string;
     passwordConfirm: string;
     fullName: string;
-    governanceRole?: 'analitik_danisman' | 'yz_arge';
+    // governanceRole REMOVED (C2) — registration self-service ile yönetişim
+    // rolü atanamaz; admin atar.
   }) => Promise<{ kind: SubjectKind; subject: AuthUser }>;
   loginUser: (email: string, password: string) => Promise<void>;
   loginAdmin: (email: string, password: string) => Promise<void>;
@@ -54,11 +55,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const s = sessionStore.get(k);
       snapshot[k] = s ? s.subject : null;
     }
+    // Sayfa yenilemesinde de governance role'lara göre rol slot'larını çapraz doldur.
+    const u = snapshot.user;
+    if (u && u.governanceRole === 'analitik_danisman' && !snapshot.danisman) snapshot.danisman = u;
+    if (u && u.governanceRole === 'yz_arge' && !snapshot.arge) snapshot.arge = u;
     setState((curr) => ({ ...curr, ...snapshot }));
   }, []);
 
+  /**
+   * Single-session enforcement: Yeni bir kind ile login olunduğunda DİĞER tüm
+   * rol session'larını (storage + state) TEMİZLE. Aksi halde sıralı login'lerde
+   * sessionStorage'da birden çok token birikir ve URL'den /admin /danisman /arge
+   * arası serbestçe gezilebilir (privilege escalation by stale session).
+   *
+   * Tek istisna: 'user' kind'ı governanceRole taşıyorsa, o rolün slot'u da
+   * AYNI subject ile doldurulur — danisman/arge zaten user tipindeki bir
+   * hesabın türevidir, ayrı bir login değildir.
+   */
   const applySession = useCallback((kind: SubjectKind, subject: AuthUser) => {
-    setState((s) => ({ ...s, [kind]: subject }));
+    // 1. Diğer kind'ların storage'ını da temizle (sessionStore.clear hem token hem state)
+    for (const k of ALL_KINDS) {
+      if (k !== kind) sessionStore.clear(k);
+    }
+    // 2. State'i sıfırla: yalnız bu kind set edilmiş olsun
+    setState(() => {
+      const fresh: AuthState = {
+        user: null,
+        admin: null,
+        danisman: null,
+        arge: null,
+        loading: false,
+      };
+      fresh[kind] = subject;
+      // 3. Governance-rolüne göre çapraz slot (aynı subject ile — ekstra login değil)
+      if (kind === 'user' && subject.governanceRole === 'analitik_danisman') {
+        fresh.danisman = subject;
+      } else if (kind === 'user' && subject.governanceRole === 'yz_arge') {
+        fresh.arge = subject;
+      }
+      return fresh;
+    });
   }, []);
 
   const login = useCallback(
@@ -81,7 +117,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password: string;
       passwordConfirm: string;
       fullName: string;
-      governanceRole?: 'analitik_danisman' | 'yz_arge';
     }) => {
       const res = await api.register(payload);
       sessionStore.save(

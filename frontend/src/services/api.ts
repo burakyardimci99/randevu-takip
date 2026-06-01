@@ -32,8 +32,13 @@ import type {
   HumanApproval,
   QualityGate,
   RoomWithOccupancy,
-  BookingMessage,
+  ChatContact,
+  ChatMessage,
   CreateBookingPayload,
+  CreateHardwareRequestPayload,
+  HardwareRequest,
+  HardwareRequestStatus,
+  HardwareRequestWithUser,
   JoinWaitlistPayload,
   LicenseBudgetReport,
   LicenseReport,
@@ -51,8 +56,11 @@ import type {
   ShowcaseEngagement,
   ShowcaseItem,
   SimilarBooking,
+  StageEvent,
   SubjectKind,
-  ThreadMeta,
+  SupportRequest,
+  SupportRequestStatus,
+  SupportRequestWithUser,
   UserLicenseUsage,
   UserListItem,
   UserProfile,
@@ -212,6 +220,17 @@ async function request<T>(path: string, options: RequestOptions): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * Bildirim endpoint base path'i. user/admin doğrudan `/{kind}` altında route'lanır;
+ * danışman ve ar-ge ise governance router'ında (`/governance/{kind}`) yaşar — token
+ * audience'ları ayrı olduğu için user/admin route'larına düşemezler.
+ */
+function notificationBase(kind: SubjectKind): string {
+  return kind === 'danisman' || kind === 'arge'
+    ? `/governance/${kind}`
+    : `/${kind}`;
+}
+
 /* ============================================================
  * SSE — real-time stream
  * ============================================================ */
@@ -247,10 +266,29 @@ export function subscribeEvents(
     'booking.reviewed',
     'booking.withdrawn',
     'waitlist.changed',
+    'appointment.changed',
+    'chat.message',
+    'hardware_request.created',
+    'hardware_request.reviewed',
+    'support_request.created',
   ];
   for (const n of eventNames) source.addEventListener(n, wrap(n));
 
   return { close: () => source.close(), source };
+}
+
+/**
+ * Aktif personel oturumunun kind'ı. `/api/admin/*` endpoint'leri artık GET
+ * isteklerinde danışman/arge token'ı da kabul ediyor (read-only). Tek-oturum
+ * politikası gereği aynı anda yalnızca bir staff oturumu açıktır; bu yüzden
+ * admin api metotları sabit 'admin' yerine aktif staff kind'ını kullanır.
+ * Sıf admin → 'admin' (davranış değişmez); danışman/arge → kendi token'ı.
+ */
+function staffKind(): SubjectKind {
+  if (sessionStore.get('admin')) return 'admin';
+  if (sessionStore.get('danisman')) return 'danisman';
+  if (sessionStore.get('arge')) return 'arge';
+  return 'admin';
 }
 
 /* ============================================================
@@ -274,7 +312,7 @@ export const api = {
     password: string;
     passwordConfirm: string;
     fullName: string;
-    governanceRole?: 'analitik_danisman' | 'yz_arge';
+    // governanceRole REMOVED (C2) — backend reddediyor zaten, type'tan da kaldırıldı.
   }) {
     return request<{
       accessToken: string;
@@ -329,7 +367,7 @@ export const api = {
     }>('/admin/auth/login', {
       method: 'POST',
       body: { email, password },
-      kind: 'admin',
+      kind: staffKind(),
       auth: false,
     });
   },
@@ -344,7 +382,7 @@ export const api = {
 
   async logoutAdmin() {
     try {
-      await request('/auth/logout', { method: 'POST', kind: 'admin' });
+      await request('/auth/logout', { method: 'POST', kind: staffKind() });
     } finally {
       sessionStore.clear('admin');
     }
@@ -469,7 +507,7 @@ export const api = {
 
   async listAdminBookings(status?: string) {
     const qs = status ? `?status=${encodeURIComponent(status)}` : '';
-    return request<{ bookings: Booking[] }>(`/admin/bookings${qs}`, { kind: 'admin' });
+    return request<{ bookings: Booking[] }>(`/admin/bookings${qs}`, { kind: staffKind() });
   },
 
   async reviewBooking(id: string, payload: ReviewBookingPayload) {
@@ -480,24 +518,24 @@ export const api = {
     }>(`/admin/bookings/${id}/review`, {
       method: 'POST',
       body: payload,
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
   async adminStats() {
-    return request<{ stats: AdminStats }>('/admin/stats', { kind: 'admin' });
+    return request<{ stats: AdminStats }>('/admin/stats', { kind: staffKind() });
   },
 
   async adminAnalytics() {
-    return request<AnalyticsResponse>('/admin/analytics', { kind: 'admin' });
+    return request<AnalyticsResponse>('/admin/analytics', { kind: staffKind() });
   },
 
   async adminLicenses() {
-    return request<LicenseReport>('/admin/licenses', { kind: 'admin' });
+    return request<LicenseReport>('/admin/licenses', { kind: staffKind() });
   },
 
   async adminLicenseBudget() {
-    return request<LicenseBudgetReport>('/admin/licenses/budget', { kind: 'admin' });
+    return request<LicenseBudgetReport>('/admin/licenses/budget', { kind: staffKind() });
   },
 
   async myLicenseUsage() {
@@ -505,14 +543,14 @@ export const api = {
   },
 
   async adminListWaitlist() {
-    return request<{ entries: WaitlistEntry[] }>('/admin/waitlist', { kind: 'admin' });
+    return request<{ entries: WaitlistEntry[] }>('/admin/waitlist', { kind: staffKind() });
   },
 
   /** Admin: waitlist sırası değiştirme (öncelik verme). */
   async adminMoveWaitlist(id: string, move: 'up' | 'down' | 'top') {
     return request<{ entries: WaitlistEntry[] }>(
       `/admin/waitlist/${encodeURIComponent(id)}/move`,
-      { method: 'POST', body: { move }, kind: 'admin' }
+      { method: 'POST', body: { move }, kind: staffKind() }
     );
   },
 
@@ -520,21 +558,21 @@ export const api = {
 
   async adminRoomsOccupancy() {
     return request<{ rooms: RoomWithOccupancy[] }>('/admin/rooms/occupancy', {
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
   async adminReassignBooking(bookingId: string, roomId: string) {
     return request<{ booking: Booking }>(
       `/admin/bookings/${encodeURIComponent(bookingId)}/reassign`,
-      { method: 'POST', body: { roomId }, kind: 'admin' }
+      { method: 'POST', body: { roomId }, kind: staffKind() }
     );
   },
 
   async adminReassignBookingUser(bookingId: string, userId: string) {
     return request<{ booking: Booking }>(
       `/admin/bookings/${encodeURIComponent(bookingId)}/reassign-user`,
-      { method: 'POST', body: { userId }, kind: 'admin' }
+      { method: 'POST', body: { userId }, kind: staffKind() }
     );
   },
 
@@ -546,35 +584,43 @@ export const api = {
       wasApproved: boolean;
     }>(`/admin/bookings/${encodeURIComponent(bookingId)}`, {
       method: 'DELETE',
-      kind: 'admin',
+      kind: staffKind(),
     });
+  },
+
+  /** Booking detayı + yaşam döngüsü zaman çizelgesi (modal "Geçmiş" tab'ı için). */
+  async adminGetBookingDetail(bookingId: string) {
+    return request<{ booking: Booking; stageEvents: StageEvent[] }>(
+      `/admin/bookings/${encodeURIComponent(bookingId)}`,
+      { kind: staffKind() }
+    );
   },
 
   async adminAdvanceBookingStage(bookingId: string) {
     return request<{ booking: Booking }>(
       `/admin/bookings/${encodeURIComponent(bookingId)}/advance-stage`,
-      { method: 'POST', kind: 'admin' }
+      { method: 'POST', kind: staffKind() }
     );
   },
 
   async adminRegressBookingStage(bookingId: string) {
     return request<{ booking: Booking }>(
       `/admin/bookings/${encodeURIComponent(bookingId)}/regress-stage`,
-      { method: 'POST', kind: 'admin' }
+      { method: 'POST', kind: staffKind() }
     );
   },
 
   async adminSetBookingReviewTrack(bookingId: string, track: 'standard' | 'swat') {
     return request<{ booking: Booking }>(
       `/admin/bookings/${encodeURIComponent(bookingId)}/review-track`,
-      { method: 'POST', body: { track }, kind: 'admin' }
+      { method: 'POST', body: { track }, kind: staffKind() }
     );
   },
 
   async adminRejectStageAdvanceRequest(bookingId: string, note?: string) {
     return request<{ booking: Booking }>(
       `/admin/bookings/${encodeURIComponent(bookingId)}/advance-request`,
-      { method: 'DELETE', body: { note }, kind: 'admin' }
+      { method: 'DELETE', body: { note }, kind: staffKind() }
     );
   },
 
@@ -657,14 +703,14 @@ export const api = {
     const query = qs.toString() ? `?${qs.toString()}` : '';
     return request<{ appointments: Appointment[] }>(
       `/admin/appointments${query}`,
-      { kind: 'admin' }
+      { kind: staffKind() }
     );
   },
 
   async adminCancelAppointment(id: string) {
     return request<{ cancelled: boolean }>(
       `/admin/appointments/${encodeURIComponent(id)}`,
-      { method: 'DELETE', kind: 'admin' }
+      { method: 'DELETE', kind: staffKind() }
     );
   },
 
@@ -673,7 +719,7 @@ export const api = {
   async adminResetUserPassword(userId: string, password: string) {
     return request<{ message: string }>(
       `/admin/users/${encodeURIComponent(userId)}/reset-password`,
-      { method: 'POST', body: { password }, kind: 'admin' }
+      { method: 'POST', body: { password }, kind: staffKind() }
     );
   },
 
@@ -681,32 +727,32 @@ export const api = {
     return request<{ message: string }>('/admin/auth/change-password', {
       method: 'POST',
       body: { currentPassword, newPassword },
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
   async toggleAdminShowcase(id: string, payload: { visible?: boolean; highlight?: boolean }) {
     return request<{ booking: Booking }>(
       `/admin/bookings/${encodeURIComponent(id)}/showcase`,
-      { method: 'PUT', body: payload, kind: 'admin' }
+      { method: 'PUT', body: payload, kind: staffKind() }
     );
   },
 
   /* ============ ADMIN MFA ============ */
 
   async mfaStatus() {
-    return request<MfaStatus>('/admin/mfa/status', { kind: 'admin' });
+    return request<MfaStatus>('/admin/mfa/status', { kind: staffKind() });
   },
 
   async mfaEnroll() {
-    return request<MfaEnrollResult>('/admin/mfa/enroll', { method: 'POST', kind: 'admin' });
+    return request<MfaEnrollResult>('/admin/mfa/enroll', { method: 'POST', kind: staffKind() });
   },
 
   async mfaVerify(code: string) {
     return request<{ verified: boolean; usedBackupCode: boolean }>('/admin/mfa/verify', {
       method: 'POST',
       body: { code },
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
@@ -714,7 +760,7 @@ export const api = {
     return request<{ disabled: boolean }>('/admin/mfa/disable', {
       method: 'POST',
       body: { code },
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
@@ -741,18 +787,18 @@ export const api = {
     if (filters.department) qs.set('department', filters.department);
     if (filters.hasBookings) qs.set('hasBookings', filters.hasBookings);
     const query = qs.toString() ? `?${qs.toString()}` : '';
-    return request<{ users: UserListItem[] }>(`/admin/users${query}`, { kind: 'admin' });
+    return request<{ users: UserListItem[] }>(`/admin/users${query}`, { kind: staffKind() });
   },
 
   async adminListDepartments() {
     return request<{ departments: string[] }>('/admin/users/meta/departments', {
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
   async adminGetUser(id: string) {
     return request<{ user: UserProfile }>(`/admin/users/${encodeURIComponent(id)}`, {
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
@@ -760,21 +806,21 @@ export const api = {
     return request<{ user: UserProfile }>(`/admin/users/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: payload,
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
   async adminDeleteUser(id: string) {
     return request<{ deleted: boolean }>(`/admin/users/${encodeURIComponent(id)}`, {
       method: 'DELETE',
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
   async adminRestoreUser(id: string) {
     return request<{ user: UserProfile }>(
       `/admin/users/${encodeURIComponent(id)}/restore`,
-      { method: 'POST', kind: 'admin' }
+      { method: 'POST', kind: staffKind() }
     );
   },
 
@@ -795,78 +841,63 @@ export const api = {
     });
   },
 
-  /* ============ MESAJLAR (BOOKING THREAD) ============ */
+  /* ============ GENEL SOHBET (rol-bağımsız chat) ============ */
 
-  async userUnreadCount() {
-    return request<{ unread: number }>('/user/messages/unread', { kind: 'user' });
+  async chatContacts(kind: SubjectKind) {
+    return request<{ contacts: ChatContact[] }>('/chat/contacts', { kind });
   },
 
-  async adminUnreadCount() {
-    return request<{ unread: number }>('/admin/messages/unread', { kind: 'admin' });
+  async chatConversation(kind: SubjectKind, peerId: string) {
+    return request<{ messages: ChatMessage[]; markedRead: number }>(
+      `/chat/conversations/${encodeURIComponent(peerId)}`,
+      { kind }
+    );
+  },
+
+  async chatSend(
+    kind: SubjectKind,
+    recipientId: string,
+    recipientKind: 'user' | 'admin',
+    body: string
+  ) {
+    return request<{ message: ChatMessage }>('/chat/messages', {
+      method: 'POST',
+      body: { recipientId, recipientKind, body },
+      kind,
+    });
+  },
+
+  async chatMarkRead(kind: SubjectKind, peerId: string) {
+    return request<{ markedRead: number }>(
+      `/chat/conversations/${encodeURIComponent(peerId)}/read`,
+      { method: 'POST', kind }
+    );
+  },
+
+  async chatUnread(kind: SubjectKind) {
+    return request<{ unread: number }>('/chat/unread', { kind });
   },
 
   /* ============ BİLDİRİM MERKEZİ ============ */
 
   async listNotifications(kind: SubjectKind) {
     return request<{ items: AppNotification[]; unread: number }>(
-      `/${kind}/notifications`,
+      `${notificationBase(kind)}/notifications`,
       { kind }
     );
   },
 
   async markNotificationRead(kind: SubjectKind, id: string) {
-    return request<void>(`/${kind}/notifications/${encodeURIComponent(id)}/read`, {
-      method: 'POST',
-      kind,
-    });
+    return request<void>(
+      `${notificationBase(kind)}/notifications/${encodeURIComponent(id)}/read`,
+      { method: 'POST', kind }
+    );
   },
 
   async markAllNotificationsRead(kind: SubjectKind) {
-    return request<{ marked: number }>(`/${kind}/notifications/read-all`, {
-      method: 'POST',
-      kind,
-    });
-  },
-
-  async userListMessages(bookingId: string) {
-    return request<{ messages: BookingMessage[]; meta: ThreadMeta }>(
-      `/user/bookings/${encodeURIComponent(bookingId)}/messages`,
-      { kind: 'user' }
-    );
-  },
-
-  async userPostMessage(bookingId: string, body: string) {
-    return request<{ message: BookingMessage }>(
-      `/user/bookings/${encodeURIComponent(bookingId)}/messages`,
-      { method: 'POST', body: { body }, kind: 'user' }
-    );
-  },
-
-  async userMarkRead(bookingId: string) {
-    return request<{ updated: number }>(
-      `/user/bookings/${encodeURIComponent(bookingId)}/messages/read`,
-      { method: 'POST', kind: 'user' }
-    );
-  },
-
-  async adminListMessages(bookingId: string) {
-    return request<{ messages: BookingMessage[]; meta: ThreadMeta }>(
-      `/admin/bookings/${encodeURIComponent(bookingId)}/messages`,
-      { kind: 'admin' }
-    );
-  },
-
-  async adminPostMessage(bookingId: string, body: string) {
-    return request<{ message: BookingMessage }>(
-      `/admin/bookings/${encodeURIComponent(bookingId)}/messages`,
-      { method: 'POST', body: { body }, kind: 'admin' }
-    );
-  },
-
-  async adminMarkRead(bookingId: string) {
-    return request<{ updated: number }>(
-      `/admin/bookings/${encodeURIComponent(bookingId)}/messages/read`,
-      { method: 'POST', kind: 'admin' }
+    return request<{ marked: number }>(
+      `${notificationBase(kind)}/notifications/read-all`,
+      { method: 'POST', kind }
     );
   },
 
@@ -968,7 +999,7 @@ export const api = {
     return request<{ results: SimilarBooking[] }>('/admin/similar', {
       method: 'POST',
       body: payload,
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
@@ -1018,7 +1049,7 @@ export const api = {
     const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
     return request<{ items: LicenseRequestWithUser[] }>(
       `/admin/licenses/requests${qs}`,
-      { kind: 'admin' }
+      { kind: staffKind() }
     );
   },
 
@@ -1031,7 +1062,7 @@ export const api = {
   ) {
     return request<{ request: LicenseRequestWithUser }>(
       `/admin/licenses/requests/${encodeURIComponent(requestId)}/review`,
-      { method: 'POST', body: payload, kind: 'admin' }
+      { method: 'POST', body: payload, kind: staffKind() }
     );
   },
 
@@ -1040,40 +1071,40 @@ export const api = {
   async adminLicenseRequestDetail(requestId: string) {
     return request<GovernanceBundle>(
       `/admin/licenses/requests/${encodeURIComponent(requestId)}`,
-      { kind: 'admin' }
+      { kind: staffKind() }
     );
   },
 
   async adminGovernanceDashboard() {
     return request<GovernanceDashboard>('/admin/licenses/governance/dashboard', {
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
   async adminGovernanceAdmins() {
     return request<{ admins: GovernanceAdmin[] }>('/admin/governance/admins', {
-      kind: 'admin',
+      kind: staffKind(),
     });
   },
 
   async adminAdvanceLifecycle(requestId: string, note?: string | null) {
     return request<{ request: LicenseRequestWithUser; transition: { fromStage: string; toStage: string } }>(
       `/admin/licenses/requests/${encodeURIComponent(requestId)}/advance`,
-      { method: 'POST', body: { note: note ?? null }, kind: 'admin' }
+      { method: 'POST', body: { note: note ?? null }, kind: staffKind() }
     );
   },
 
   async adminAssignEngineer(requestId: string, engineerId: string) {
     return request<{ request: LicenseRequestWithUser }>(
       `/admin/licenses/requests/${encodeURIComponent(requestId)}/assign-engineer`,
-      { method: 'POST', body: { engineerId }, kind: 'admin' }
+      { method: 'POST', body: { engineerId }, kind: staffKind() }
     );
   },
 
   async adminUpgradeProjectType(requestId: string) {
     return request<{ request: LicenseRequestWithUser }>(
       `/admin/licenses/requests/${encodeURIComponent(requestId)}/upgrade-type`,
-      { method: 'POST', kind: 'admin' }
+      { method: 'POST', kind: staffKind() }
     );
   },
 
@@ -1088,7 +1119,7 @@ export const api = {
   ) {
     return request<{ gate: QualityGate }>(
       `/admin/licenses/requests/${encodeURIComponent(requestId)}/gates`,
-      { method: 'PUT', body: payload, kind: 'admin' }
+      { method: 'PUT', body: payload, kind: staffKind() }
     );
   },
 
@@ -1103,7 +1134,76 @@ export const api = {
   ) {
     return request<{ request: LicenseRequestWithUser; approval: HumanApproval }>(
       `/admin/licenses/requests/${encodeURIComponent(requestId)}/approval`,
-      { method: 'POST', body: payload, kind: 'admin' }
+      { method: 'POST', body: payload, kind: staffKind() }
+    );
+  },
+
+  /* ============ DONANIM TALEPLERİ ============ */
+
+  async listMyHardwareRequests() {
+    return request<{ items: HardwareRequest[] }>('/user/hardware/requests', {
+      kind: 'user',
+    });
+  },
+
+  async createHardwareRequest(payload: CreateHardwareRequestPayload) {
+    return request<{ request: HardwareRequest }>('/user/hardware/requests', {
+      method: 'POST',
+      body: payload,
+      kind: 'user',
+    });
+  },
+
+  async updateHardwareRequest(id: string, payload: CreateHardwareRequestPayload) {
+    return request<{ request: HardwareRequest }>(
+      `/user/hardware/requests/${encodeURIComponent(id)}`,
+      { method: 'PUT', body: payload, kind: 'user' }
+    );
+  },
+
+  async adminListHardwareRequests(statusFilter?: HardwareRequestStatus) {
+    const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return request<{ items: HardwareRequestWithUser[] }>(
+      `/admin/hardware/requests${qs}`,
+      { kind: staffKind() }
+    );
+  },
+
+  async adminReviewHardwareRequest(
+    id: string,
+    payload: {
+      action: 'approve' | 'reject' | 'request_feedback';
+      adminFeedback?: string | null;
+    }
+  ) {
+    return request<{ request: HardwareRequestWithUser }>(
+      `/admin/hardware/requests/${encodeURIComponent(id)}/review`,
+      { method: 'POST', body: payload, kind: staffKind() }
+    );
+  },
+
+  /* ============ DESTEK TALEPLERİ ============ */
+
+  async createSupportRequest(description: string) {
+    return request<{ request: SupportRequest }>('/user/support/requests', {
+      method: 'POST',
+      body: { description },
+      kind: 'user',
+    });
+  },
+
+  async adminListSupportRequests(statusFilter?: SupportRequestStatus) {
+    const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return request<{ items: SupportRequestWithUser[] }>(
+      `/admin/support/requests${qs}`,
+      { kind: staffKind() }
+    );
+  },
+
+  async adminResolveSupportRequest(id: string) {
+    return request<{ request: SupportRequestWithUser }>(
+      `/admin/support/requests/${encodeURIComponent(id)}/resolve`,
+      { method: 'POST', kind: staffKind() }
     );
   },
 };

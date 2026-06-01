@@ -13,6 +13,17 @@ import {
   StatusDonut,
   TopTechnologies,
 } from '../components/AnalyticsCharts';
+import { KpiCard } from '../components/KpiCard';
+import { BentoGrid, BentoTile } from '../components/BentoGrid';
+import {
+  FileText,
+  Users,
+  CheckCircle2,
+  Clock,
+  RefreshCw,
+  XCircle,
+  ListOrdered,
+} from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
@@ -92,44 +103,61 @@ export default function AdminAnalytics() {
         </div>
       ) : (
         <>
-          {/* Top stat row */}
-          <section className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
-            {[
-              { label: 'Toplam talep', value: data.totals.bookings, color: 'text-kt-green-800' },
-              { label: 'Aktif kullanıcı', value: data.totals.users, color: 'text-kt-green-700' },
-              { label: 'Onaylanan', value: data.totals.approved, color: 'text-emerald-700' },
-              { label: 'Bekleyen', value: data.totals.pending, color: 'text-amber-700' },
-              { label: 'Düzeltme', value: data.totals.feedbackRequested, color: 'text-blue-700' },
-              { label: 'Reddedilen', value: data.totals.rejected, color: 'text-rose-700' },
-              { label: 'Sırada', value: data.totals.activeWaitlist, color: 'text-kt-gold-700' },
-            ].map((s) => (
-              <div key={s.label} className="card p-4">
-                <div className={`text-2xl font-extrabold tabular-nums ${s.color}`}>{s.value}</div>
-                <div className="text-[11px] uppercase tracking-wider text-kt-gray-500 font-semibold mt-0.5">
-                  {s.label}
-                </div>
-              </div>
-            ))}
+          {/* Top stat row — sparkline'lı 4 ana KPI + compact 3 yardımcı */}
+          <section className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <KpiCard
+              icon={FileText}
+              label="Toplam Talep"
+              value={data.totals.bookings}
+              tone="cyan"
+              sparkline={data.dailyBookings.map((d) => d.created)}
+            />
+            <KpiCard
+              icon={CheckCircle2}
+              label="Onaylanan"
+              value={data.totals.approved}
+              tone="emerald"
+              sparkline={data.dailyBookings.map((d) => d.approved)}
+            />
+            <KpiCard
+              icon={XCircle}
+              label="Reddedilen"
+              value={data.totals.rejected}
+              tone="rose"
+              sparkline={data.dailyBookings.map((d) => d.rejected)}
+            />
+            <KpiCard
+              icon={Clock}
+              label="Bekleyen"
+              value={data.totals.pending}
+              tone="gold"
+              compact
+            />
+          </section>
+          <section className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <KpiCard icon={Users} label="Aktif Kullanıcı" value={data.totals.users} tone="cyan" compact />
+            <KpiCard icon={RefreshCw} label="Düzeltme" value={data.totals.feedbackRequested} tone="violet" compact />
+            <KpiCard icon={ListOrdered} label="Bekleme Sırası" value={data.totals.activeWaitlist} tone="gold" compact />
           </section>
 
-          {/* Grids */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <section className="card p-5 lg:col-span-2">
+          {/* Charts — Bento layout (asimetrik tile grid, ilk satırda 2+1, ikinci satırda 1+1) */}
+          <BentoGrid cols={3} className="mb-3">
+            <BentoTile colSpan={2}>
               <DailyBookingsChart data={data.dailyBookings} />
-            </section>
-            <section className="card p-5">
+            </BentoTile>
+            <BentoTile>
               <StatusDonut data={data.statusBreakdown} />
-            </section>
-          </div>
+            </BentoTile>
+          </BentoGrid>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-            <section className="card p-5">
+          <BentoGrid cols={2} className="mb-4">
+            <BentoTile>
               <RoomUsageChart data={data.roomUsage} />
-            </section>
-            <section className="card p-5">
+            </BentoTile>
+            <BentoTile>
               <TopTechnologies data={data.topTechnologies} />
-            </section>
-          </div>
+            </BentoTile>
+          </BentoGrid>
 
           {/* Top users */}
           <section className="card p-5">

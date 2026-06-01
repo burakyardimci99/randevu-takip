@@ -78,13 +78,16 @@ function rowToStageEvent(row: StageEventRow): StageEvent {
   };
 }
 
+/** Yaşam döngüsü geçiş aktörünün tipi — audit zaman çizelgesi için. */
+export type StageActorType = 'user' | 'admin' | 'danisman' | 'arge' | 'system';
+
 /** Bir yaşam döngüsü geçişini audit zaman çizelgesine kaydeder. */
 export function recordStageEvent(args: {
   requestId: string;
   fromStage: string | null;
   toStage: string;
   actorId?: string | null;
-  actorType?: 'user' | 'admin' | 'system';
+  actorType?: StageActorType;
   note?: string | null;
 }): void {
   const db = getDb();
@@ -231,7 +234,11 @@ function loadLifecycleRow(requestId: string): RequestLifecycleRow {
  * Başvuru onaylandığında çağrılır (reviewLicenseRequest → approve).
  * Projeyi 'development' aşamasına taşır, kalite kapılarını oluşturur.
  */
-export function onApplicationApproved(requestId: string, actorId: string): void {
+export function onApplicationApproved(
+  requestId: string,
+  actorId: string,
+  actorType: StageActorType = 'admin'
+): void {
   const db = getDb();
   const row = loadLifecycleRow(requestId);
   if (row.lifecycle_stage !== 'application') return; // idempotent
@@ -248,7 +255,7 @@ export function onApplicationApproved(requestId: string, actorId: string): void 
     fromStage: 'application',
     toStage: 'development',
     actorId,
-    actorType: 'admin',
+    actorType,
     note: 'Başvuru onaylandı — geliştirme aşamasına geçildi.',
   });
 }

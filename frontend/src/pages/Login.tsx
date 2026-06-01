@@ -150,11 +150,6 @@ export default function Login() {
           registerHref="/register"
           forgotHref="/forgot-password"
         />
-
-        <p className="text-center text-xs text-white/60 mt-6 backdrop-blur-sm bg-black/20 px-3 py-1.5 rounded-lg inline-block">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-kt-gold-400 mr-2 align-middle animate-pulse-gold" />
-          Demo ortam · RS256 ile güvenli oturum · Gerçek müşteri verisi kullanmayın
-        </p>
       </div>
     </div>
   );

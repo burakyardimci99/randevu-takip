@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '../services/api';
-import type { Booking, LifecycleStage, ReviewBookingPayload, SimilarBooking } from '../types';
+import type { Booking, LifecycleStage, ReviewBookingPayload, SimilarBooking, StageEvent } from '../types';
 import { ProjectLifecycleBar } from './governance/ProjectLifecycleBar';
 import { SimilarProjectsPanel } from './SimilarProjectsPanel';
 import { StatusBadge } from './StatusBadge';
-import { BookingThread } from './BookingThread';
+import { ModernTimeline } from './ModernTimeline';
 
 const STAGE_LABEL: Record<LifecycleStage, string> = {
   application: 'Başvuru',
@@ -64,6 +64,38 @@ export function BookingDetailModal({
   const [error, setError] = useState<string | null>(null);
   const [similar, setSimilar] = useState<SimilarBooking[]>([]);
   const [similarLoading, setSimilarLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'overview' | 'history'>('overview');
+  const [stageEvents, setStageEvents] = useState<StageEvent[]>([]);
+  const [stageEventsLoading, setStageEventsLoading] = useState(false);
+
+  // Modal her açıldığında "Genel" tab'ı ile başla
+  useEffect(() => {
+    if (open) setActiveTab('overview');
+  }, [open, booking?.id]);
+
+  // Yaşam döngüsü olaylarını çek — sadece admin endpoint var (henüz danisman/arge yok).
+  // Booking onaylıysa history tab gösterilebilir.
+  useEffect(() => {
+    if (!open || !booking || viewerRole !== 'admin') {
+      setStageEvents([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        setStageEventsLoading(true);
+        const res = await api.adminGetBookingDetail(booking.id);
+        if (!cancelled) setStageEvents(res.stageEvents);
+      } catch {
+        if (!cancelled) setStageEvents([]);
+      } finally {
+        if (!cancelled) setStageEventsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, booking, viewerRole]);
 
   // Modal açılınca benzer projeleri çek — sadece admin için (endpoint admin-gated).
   // Danışman/Ar-Ge ileride kendi endpoint'iyle entegre edilecek.
@@ -190,7 +222,52 @@ export function BookingDetailModal({
           </div>
         </div>
 
+        {/* Tab navigation — sadece admin için "Geçmiş" tab'ı eklenir (endpoint admin-only).
+            Diğer roller direkt "Genel" görünür kalır. */}
+        {viewerRole === 'admin' && (
+          <div className="px-6 border-b border-kt-gray-100 bg-white flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveTab('overview')}
+              className={`px-4 py-3 text-sm font-semibold transition border-b-2 -mb-px ${
+                activeTab === 'overview'
+                  ? 'text-kt-green-900 border-kt-gold-400'
+                  : 'text-kt-gray-500 border-transparent hover:text-kt-green-800'
+              }`}
+            >
+              Genel
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('history')}
+              className={`px-4 py-3 text-sm font-semibold transition border-b-2 -mb-px flex items-center gap-1.5 ${
+                activeTab === 'history'
+                  ? 'text-kt-green-900 border-kt-gold-400'
+                  : 'text-kt-gray-500 border-transparent hover:text-kt-green-800'
+              }`}
+            >
+              Geçmiş
+              {(stageEvents?.length ?? 0) > 0 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-kt-gold-100 text-kt-gold-700">
+                  {(stageEvents?.length ?? 0)}
+                </span>
+              )}
+            </button>
+          </div>
+        )}
+
         <div className="overflow-y-auto scrollbar-thin px-6 py-5 space-y-5 flex-1">
+          {activeTab === 'history' && viewerRole === 'admin' ? (
+            <section>
+              <h3 className="font-bold text-kt-green-900 mb-3">Yaşam Döngüsü Zaman Çizelgesi</h3>
+              {stageEventsLoading ? (
+                <p className="text-sm text-kt-gray-500">Yükleniyor…</p>
+              ) : (
+                <ModernTimeline events={stageEvents ?? []} />
+              )}
+            </section>
+          ) : (
+            <>
           {isReReview && (
             <div className="flex items-start gap-3 p-4 rounded-xl bg-kt-gold-50 border border-kt-gold-200 text-kt-gold-900">
               <svg className="w-5 h-5 mt-0.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -258,14 +335,6 @@ export function BookingDetailModal({
           {viewerRole === 'admin' && (similar.length > 0 || similarLoading) && (
             <section>
               <SimilarProjectsPanel results={similar} loading={similarLoading} />
-            </section>
-          )}
-
-          {/* Booking conversation thread — admin/user thread'i destekliyor. Danışman/Ar-Ge thread'i
-              ileride backend endpoint'i (governance route) ile bağlanacak. */}
-          {(viewerRole === 'admin' || viewerRole === 'user') && (
-            <section>
-              <BookingThread bookingId={booking.id} viewerKind={viewerRole} compact />
             </section>
           )}
 
@@ -423,10 +492,16 @@ export function BookingDetailModal({
               {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
             </section>
           )}
+            </>
+          )}
         </div>
 
-        {/* Action footer — role-aware. Hiçbir aksiyon yoksa sadece "Kapat" gösterilir. */}
+        {/* Action footer — role-aware. History tab açıkken sadece "Kapat" gösterilir. */}
         <div className="px-6 py-4 border-t border-kt-gray-100 bg-kt-gray-50 flex flex-wrap items-center justify-end gap-2">
+          {activeTab === 'history' ? (
+            <button onClick={onClose} className="btn-ghost" disabled={loading}>Kapat</button>
+          ) : (
+          <>
           {mode === 'idle' && (
             <>
               <button onClick={onClose} className="btn-ghost" disabled={loading}>Kapat</button>
@@ -464,6 +539,8 @@ export function BookingDetailModal({
                 </button>
               )}
             </>
+          )}
+          </>
           )}
         </div>
       </div>

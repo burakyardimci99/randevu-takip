@@ -1,0 +1,70 @@
+name: CI
+
+# Backend + frontend için tip kontrolü, test, build ve bağımlılık CVE taraması.
+# Tip/build/test başarısızlığı PR'ı bloklar; lint ve audit bilgilendirme amaçlıdır.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend — typecheck + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Bağımlılıkları kur
+        run: npm ci
+
+      - name: JWT anahtarlarını üret (testler için gerekli)
+        run: npm run keys:generate
+
+      - name: Tip kontrolü + build (tsc, noEmitOnError)
+        run: npm run build
+
+      - name: Testler (vitest)
+        run: npm test
+
+      - name: Bağımlılık CVE taraması
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
+
+  frontend:
+    name: Frontend — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Bağımlılıkları kur
+        run: npm ci
+
+      - name: Tip kontrolü + production build (tsc -b && vite build)
+        run: npm run build
+
+      - name: Lint (eslint)
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Bağımlılık CVE taraması
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true

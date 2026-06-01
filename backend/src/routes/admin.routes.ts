@@ -7,6 +7,7 @@ import {
   requireAdmin,
   requireAdminRole,
   requireGovernanceRole,
+  requireStaff,
 } from '../middleware/auth.middleware';
 import {
   adminLicenseRequestsFilterSchema,
@@ -18,14 +19,17 @@ import {
   changeAdminPasswordSchema,
   decideApprovalSchema,
   gateResultSchema,
+  hardwareRequestsFilterSchema,
   mfaVerifySchema,
   reassignRoomSchema,
   reassignUserSchema,
   rejectStageAdvanceSchema,
   reviewBookingSchema,
+  reviewHardwareRequestSchema,
   reviewLicenseRequestSchema,
   setReviewTrackSchema,
   similarSearchSchema,
+  supportRequestsFilterSchema,
   waitlistMoveSchema,
 } from '../validators/schemas';
 import {
@@ -79,12 +83,13 @@ import {
 } from '../services/audit-viewer.service';
 import { getLicenseReport, LICENSE_CATALOG } from '../services/license.service';
 import {
-  getThreadMeta,
-  getUnreadCountForAdmin,
-  listMessages,
-  markThreadRead,
-  postMessage,
-} from '../services/messages.service';
+  listAdminHardwareRequests,
+  reviewHardwareRequest,
+} from '../services/hardware-request.service';
+import {
+  listAdminSupportRequests,
+  resolveSupportRequest,
+} from '../services/support-request.service';
 import { listBackups, runBackupOnce } from '../services/backup.service';
 import { csrfProtection } from '../middleware/cookie-auth';
 import { HttpError } from '../middleware/error.middleware';
@@ -92,8 +97,25 @@ import { getDb } from '../db/schema';
 
 const router = Router();
 
-router.use(requireAdmin);
-router.use(requireAdminRole('admin', 'super_admin'));
+// Erişim politikası:
+//  - GET (read-only) → requireStaff: admin + Analitik Danışman + YZ/Ar-Ge.
+//    Governance rolleri admin panel sayfalarını (oda, takvim, proje, kullanıcı,
+//    lisans) görüntüleyebilir ama değiştiremez.
+//  - Mutasyonlar (POST/PUT/PATCH/DELETE) → requireAdmin + admin rol kontrolü.
+router.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method === 'GET') {
+    requireStaff(req, res, next);
+    return;
+  }
+  requireAdmin(req, res, next);
+});
+router.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method === 'GET') {
+    next(); // GET zaten requireStaff'tan geçti — admin rol kontrolü atlanır
+    return;
+  }
+  requireAdminRole('admin', 'super_admin')(req, res, next);
+});
 
 // CSRF — tüm admin state-changing endpoint'leri korur (booking review,
 // user update/restore/purge, MFA, license review, backup, vb.).
@@ -121,7 +143,7 @@ router.get('/bookings', (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-router.get('/bookings/:id', (req: Request, res: Response, next: NextFunction) => {
+router.get('/bookings/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
@@ -130,7 +152,9 @@ router.get('/bookings/:id', (req: Request, res: Response, next: NextFunction) =>
     }
     const booking = getBookingByIdAdmin(id);
     if (!booking) throw new HttpError(404, 'Booking bulunamadı.', 'NOT_FOUND');
-    res.json({ booking });
+    // Yaşam döngüsü zaman çizelgesi — modal "Geçmiş" tab'ında gösterilir.
+    const { listStageEvents } = await import('../services/governance.service');
+    res.json({ booking, stageEvents: listStageEvents(id) });
   } catch (err) {
     next(err);
   }
@@ -618,76 +642,6 @@ router.post('/waitlist/:id/move', (req: Request, res: Response, next: NextFuncti
     next(err);
   }
 });
-
-/* ============ MESAJLAR (admin tarafı) ============ */
-
-router.get('/messages/unread', (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    res.json({ unread: getUnreadCountForAdmin() });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.get(
-  '/bookings/:id/messages',
-  (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const id = String(req.params.id ?? '');
-      if (id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
-      }
-      // Admin tüm booking'lere erişebilir
-      const b = getBookingByIdAdmin(id);
-      if (!b) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
-      res.json({
-        messages: listMessages(id),
-        meta: getThreadMeta(id, 'admin'),
-      });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-router.post(
-  '/bookings/:id/messages',
-  (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const id = String(req.params.id ?? '');
-      const body = String(req.body?.body ?? '');
-      const b = getBookingByIdAdmin(id);
-      if (!b) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
-      const adminRow = getDb()
-        .prepare('SELECT full_name FROM admins WHERE id = ?')
-        .get(req.auth!.subjectId) as { full_name: string } | undefined;
-      const message = postMessage({
-        bookingId: id,
-        authorId: req.auth!.subjectId,
-        authorType: 'admin',
-        authorName: adminRow?.full_name ?? 'Yönetici',
-        body,
-      });
-      res.status(201).json({ message });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-router.post(
-  '/bookings/:id/messages/read',
-  (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const id = String(req.params.id ?? '');
-      const b = getBookingByIdAdmin(id);
-      if (!b) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
-      res.json(markThreadRead(id, 'admin'));
-    } catch (err) {
-      next(err);
-    }
-  }
-);
 
 /* ============ AUDIT LOG VIEWER ============ */
 
@@ -1361,6 +1315,91 @@ router.post(
       );
       const changed = markAllNotificationsRead(req.auth!.subjectId, 'admin');
       res.json({ marked: changed });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/* ============================================================
+ * DONANIM TALEPLERİ — admin review
+ * ============================================================ */
+
+router.get(
+  '/hardware/requests',
+  requireAdmin,
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { status } = hardwareRequestsFilterSchema.parse(req.query);
+      res.json({ items: listAdminHardwareRequests(status) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/hardware/requests/:id/review',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
+      }
+      const input = reviewHardwareRequestSchema.parse(req.body);
+      const request = reviewHardwareRequest(req.auth!.subjectId, id, input);
+      recordAudit({
+        eventType: 'hardware_request.reviewed',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        success: true,
+        details: { requestId: request.id, action: input.action, status: request.status },
+      });
+      res.json({ request });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/* ============================================================
+ * DESTEK TALEPLERİ — admin
+ * ============================================================ */
+
+router.get(
+  '/support/requests',
+  requireAdmin,
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { status } = supportRequestsFilterSchema.parse(req.query);
+      res.json({ items: listAdminSupportRequests(status) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/support/requests/:id/resolve',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const id = typeof rawId === 'string' ? rawId : '';
+      if (!id || id.length < 8 || id.length > 40) {
+        throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
+      }
+      const request = resolveSupportRequest(req.auth!.subjectId, id);
+      recordAudit({
+        eventType: 'support_request.resolved',
+        subjectId: req.auth!.subjectId,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        success: true,
+        details: { requestId: request.id },
+      });
+      res.json({ request });
     } catch (err) {
       next(err);
     }

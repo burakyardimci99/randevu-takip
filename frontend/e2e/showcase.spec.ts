@@ -5,8 +5,7 @@ import { test, expect } from '@playwright/test';
 
 test('showcase sayfası auth olmadan açılır', async ({ page }) => {
   await page.goto('/showcase');
-  await expect(page.getByText(/Vibe Coding Galerisi/i)).toBeVisible();
-  await expect(page.getByText(/AI Lab'da yapılan projeler/i)).toBeVisible();
+  await expect(page.getByText(/Vibe Coding Envanteri/i)).toBeVisible();
 });
 
 test('showcase arama input çalışır', async ({ page }) => {

@@ -25,9 +25,9 @@ export function ProjectLifecycleBar({ stage, compact = false }: Props) {
             <div
               className={`flex-1 min-w-0 rounded-lg border px-2 py-1.5 text-center transition-colors ${
                 active
-                  ? 'bg-kt-green-600 border-kt-green-600 text-white shadow-kt-green'
+                  ? 'bg-kt-green-900 border-kt-green-900 text-white'
                   : done
-                    ? 'bg-kt-green-50 border-kt-green-300 text-kt-green-800'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
                     : 'bg-kt-gray-50 border-kt-gray-200 text-kt-gray-400'
               }`}
               title={meta.description}
@@ -44,7 +44,7 @@ export function ProjectLifecycleBar({ stage, compact = false }: Props) {
             {idx < STAGE_ORDER.length - 1 && (
               <div
                 className={`w-2 h-0.5 shrink-0 ${
-                  idx < currentIdx ? 'bg-kt-green-400' : 'bg-kt-gray-200'
+                  idx < currentIdx ? 'bg-emerald-300' : 'bg-kt-gray-200'
                 }`}
               />
             )}

@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { AppointmentModal } from '../components/AppointmentModal';
+import { BookingDetailModal } from '../components/BookingDetailModal';
 import { BookingModal } from '../components/BookingModal';
-import { BookingThread } from '../components/BookingThread';
 import { EmptyState } from '../components/EmptyState';
+import { HardwareRequestsTab } from '../components/HardwareRequestsTab';
+import { LicenseRequestsTab } from '../components/LicenseRequestsTab';
 import { ProjectLifecycleBar } from '../components/governance/ProjectLifecycleBar';
 import { StatusBadge } from '../components/StatusBadge';
 import { useToast } from '../components/Toast';
@@ -18,6 +20,7 @@ function fmtDate(iso: string): string {
 
 export default function UserBookings() {
   const toast = useToast();
+  const [tab, setTab] = useState<'rooms' | 'licenses' | 'hardware'>('rooms');
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,7 +28,9 @@ export default function UserBookings() {
   const [submitting, setSubmitting] = useState(false);
   const [withdrawing, setWithdrawing] = useState<string | null>(null);
   const [confirmWithdraw, setConfirmWithdraw] = useState<Booking | null>(null);
-  const [openThread, setOpenThread] = useState<string | null>(null);
+  // Detay modal — booking'in tüm context'i, lifecycle ve thread tek modal'da (read-only view).
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const selectedDetail = detailId ? bookings.find((b) => b.id === detailId) ?? null : null;
 
   // Randevu state'i: hangi booking için modal açık + booking → randevu listesi map'i
   const [scheduling, setScheduling] = useState<Booking | null>(null);
@@ -167,12 +172,36 @@ export default function UserBookings() {
 
   return (
     <AppShell kind="user">
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="text-3xl font-extrabold text-kt-green-900 mb-1">Taleplerim</h1>
-        <p className="text-kt-gray-500">Gönderdiğiniz randevu talepleri ve durumları.</p>
+        <p className="text-kt-gray-500">Oda, lisans ve donanım taleplerinizi buradan yönetin.</p>
       </div>
 
-      {loading ? (
+      <div className="flex gap-1 mb-6 border-b border-kt-gray-200">
+        {([
+          ['rooms', 'Oda Talepleri'],
+          ['licenses', 'Lisans Talepleri'],
+          ['hardware', 'Donanım Talepleri'],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+              tab === key
+                ? 'border-kt-gold-500 text-kt-green-900'
+                : 'border-transparent text-kt-gray-500 hover:text-kt-green-700'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'licenses' && <LicenseRequestsTab />}
+      {tab === 'hardware' && <HardwareRequestsTab />}
+
+      {tab === 'rooms' && (loading ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="card p-6 animate-pulse h-32" />
@@ -209,7 +238,16 @@ export default function UserBookings() {
                       {fmtDate(b.startDate)} — {fmtDate(b.endDate)} · {b.periodMonths} ay
                     </div>
                   </div>
-                  <StatusBadge status={b.status} />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <StatusBadge status={b.status} />
+                    <button
+                      type="button"
+                      onClick={() => setDetailId(b.id)}
+                      className="text-[11px] font-semibold px-2.5 py-1 rounded-md text-kt-green-700 border border-kt-gray-200 bg-white hover:border-kt-gold-400 hover:text-kt-gold-700 transition"
+                    >
+                      Detay →
+                    </button>
+                  </div>
                 </div>
 
                 <p className="text-sm text-kt-gray-700 mb-3 line-clamp-2">{b.projectDescription}</p>
@@ -263,18 +301,6 @@ export default function UserBookings() {
                   <div className="text-xs text-kt-gray-400 flex items-center gap-3 flex-wrap">
                     <span>Gönderildi: {fmtDate(b.createdAt)}</span>
                     {b.reviewedAt && <span>İncelendi: {fmtDate(b.reviewedAt)}</span>}
-                    <button
-                      type="button"
-                      onClick={() => setOpenThread(openThread === b.id ? null : b.id)}
-                      className={`inline-flex items-center gap-1.5 text-xs font-semibold transition-colors ${
-                        openThread === b.id ? 'text-kt-gold-700' : 'text-kt-green-700 hover:text-kt-gold-700'
-                      }`}
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                      </svg>
-                      {openThread === b.id ? 'Mesajları gizle' : 'Mesajlaşma'}
-                    </button>
                   </div>
                   {modifiable && (
                     <div className="flex items-center gap-2">
@@ -309,17 +335,11 @@ export default function UserBookings() {
                   )}
                 </div>
 
-                {/* Booking conversation thread (admin ↔ user) */}
-                {openThread === b.id && (
-                  <div className="mt-4 animate-fade-in">
-                    <BookingThread bookingId={b.id} viewerKind="user" compact />
-                  </div>
-                )}
               </article>
             );
           })}
         </div>
-      )}
+      ))}
 
       {/* Edit Modal */}
       <BookingModal
@@ -329,6 +349,15 @@ export default function UserBookings() {
         editingBooking={editing}
         onClose={() => !submitting && setEditing(null)}
         onSubmit={submitEdit}
+      />
+
+      {/* Detail Modal (read-only) — booking tüm context'i + thread + lifecycle */}
+      <BookingDetailModal
+        booking={selectedDetail}
+        open={!!detailId}
+        loading={false}
+        onClose={() => setDetailId(null)}
+        viewerRole="user"
       />
 
       {/* Appointment Modal */}

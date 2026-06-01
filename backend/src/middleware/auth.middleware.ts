@@ -75,6 +75,110 @@ export const requireDanisman = buildAuthMiddleware('danisman');
 /** Sadece YZ / Ar-Ge kind'lı token kabul eder. */
 export const requireArge = buildAuthMiddleware('arge');
 
+/**
+ * Herhangi bir kimliği kabul eden guard — user / admin / danisman / arge.
+ * Rol-bağımsız endpoint'ler için (örn. genel sohbet: her rol katılabilir).
+ * Token hangi audience'a aitse o kind çözülür ve req.auth ona göre kurulur.
+ */
+export function requireAnySubject(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void {
+  const token = extractBearer(req);
+  if (!token) {
+    next(new HttpError(401, 'Kimlik doğrulaması gerekli.', 'AUTH_REQUIRED'));
+    return;
+  }
+
+  const KINDS: SubjectKind[] = ['user', 'admin', 'danisman', 'arge'];
+  for (const kind of KINDS) {
+    try {
+      const decoded = verifyAccessToken(kind, token);
+      const subject = findSubjectById(kind, decoded.sub);
+      if (!subject) continue;
+      req.auth = {
+        subjectId: subject.id,
+        subjectType: kind,
+        email: subject.email,
+        role: subject.role,
+        ...(kind !== 'admin'
+          ? {
+              governanceRole:
+                (subject as { governance_role?: 'analitik_danisman' | 'yz_arge' | null })
+                  .governance_role ?? null,
+            }
+          : {}),
+      };
+      next();
+      return;
+    } catch {
+      /* sıradaki kind'ı dene */
+    }
+  }
+
+  recordAudit({
+    eventType: 'authz.denied',
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent') ?? null,
+    success: false,
+    details: { path: req.path, expected: 'any', reason: 'no kind matched' },
+  });
+  next(new HttpError(401, 'Kimlik doğrulaması başarısız.', 'AUTH_INVALID'));
+}
+
+/**
+ * Personel guard'ı — admin / danışman / arge kabul eder, sıradan kullanıcıyı
+ * REDDEDER. Admin panel sayfalarının read-only (GET) erişimini governance
+ * rollerine açmak için: GET → requireStaff, mutasyonlar → requireAdmin.
+ */
+export function requireStaff(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void {
+  const token = extractBearer(req);
+  if (!token) {
+    next(new HttpError(401, 'Kimlik doğrulaması gerekli.', 'AUTH_REQUIRED'));
+    return;
+  }
+
+  const STAFF_KINDS: SubjectKind[] = ['admin', 'danisman', 'arge'];
+  for (const kind of STAFF_KINDS) {
+    try {
+      const decoded = verifyAccessToken(kind, token);
+      const subject = findSubjectById(kind, decoded.sub);
+      if (!subject) continue;
+      req.auth = {
+        subjectId: subject.id,
+        subjectType: kind,
+        email: subject.email,
+        role: subject.role,
+        ...(kind !== 'admin'
+          ? {
+              governanceRole:
+                (subject as { governance_role?: 'analitik_danisman' | 'yz_arge' | null })
+                  .governance_role ?? null,
+            }
+          : {}),
+      };
+      next();
+      return;
+    } catch {
+      /* sıradaki staff kind'ı dene */
+    }
+  }
+
+  recordAudit({
+    eventType: 'authz.denied',
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent') ?? null,
+    success: false,
+    details: { path: req.path, expected: 'staff', reason: 'not a staff token' },
+  });
+  next(new HttpError(403, 'Bu kaynağa erişim yetkiniz yok.', 'FORBIDDEN'));
+}
+
 export function requireAdminRole(...allowedRoles: Array<'admin' | 'super_admin'>) {
   return function roleGuard(req: Request, _res: Response, next: NextFunction): void {
     if (!req.auth || req.auth.subjectType !== 'admin') {

@@ -4,7 +4,14 @@ import { useAuth } from '../contexts/AuthContext';
 import type { SubjectKind } from '../types';
 
 interface ProtectedRouteProps {
-  kind: SubjectKind;
+  /**
+   * Erişebilecek oturum(lar):
+   *  - tek bir SubjectKind
+   *  - 'any' — herhangi bir aktif oturum (rol-bağımsız sayfalar)
+   *  - SubjectKind[] — birden çok rol (örn. admin panel sayfaları artık
+   *    danışman/arge tarafından read-only görülebiliyor)
+   */
+  kind: SubjectKind | 'any' | SubjectKind[];
   children: ReactNode;
 }
 
@@ -17,14 +24,20 @@ export function ProtectedRoute({ kind, children }: ProtectedRouteProps) {
       </div>
     );
   }
-  const me =
-    kind === 'admin'
+  const slot = (k: SubjectKind) =>
+    k === 'admin'
       ? auth.admin
-      : kind === 'danisman'
+      : k === 'danisman'
         ? auth.danisman
-        : kind === 'arge'
+        : k === 'arge'
           ? auth.arge
           : auth.user;
+  const me =
+    kind === 'any'
+      ? auth.admin ?? auth.danisman ?? auth.arge ?? auth.user
+      : Array.isArray(kind)
+        ? (kind.map(slot).find(Boolean) ?? null)
+        : slot(kind);
   if (!me) {
     return <Navigate to="/login" replace />;
   }

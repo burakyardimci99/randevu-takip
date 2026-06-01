@@ -15,10 +15,10 @@ interface StatCardConfig {
   label: string;
   filter: StatusFilter;
   icon: JSX.Element;
-  /** İkon çipi renkleri — tema ile uyumlu, durum bazlı yumuşak vurgu. */
+  /** İkon çipi renkleri — sade tinted background. */
   iconChip: string;
-  /** Sayı rengi. */
-  valueText: string;
+  /** Sol kenar accent şeridi — tek renk semantik ipucu. */
+  accentBar: string;
   /** Aktif filtre halkası. */
   ring: string;
   hint: string;
@@ -29,9 +29,9 @@ const STAT_CARDS: StatCardConfig[] = [
     key: 'pending',
     label: 'Bekleyen',
     filter: 'pending',
-    iconChip: 'bg-kt-gold-100 text-kt-gold-700',
-    valueText: 'text-kt-gold-700',
-    ring: 'ring-kt-gold-400',
+    iconChip: 'bg-amber-50 text-amber-700',
+    accentBar: 'bg-amber-500',
+    ring: 'ring-amber-300',
     hint: 'incelenmeyi bekliyor',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -43,9 +43,9 @@ const STAT_CARDS: StatCardConfig[] = [
     key: 'approved',
     label: 'Onaylanan',
     filter: 'approved',
-    iconChip: 'bg-kt-green-100 text-kt-green-700',
-    valueText: 'text-kt-green-700',
-    ring: 'ring-kt-green-400',
+    iconChip: 'bg-emerald-50 text-emerald-700',
+    accentBar: 'bg-emerald-500',
+    ring: 'ring-emerald-300',
     hint: 'aktif randevu',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -57,9 +57,9 @@ const STAT_CARDS: StatCardConfig[] = [
     key: 'feedback_requested',
     label: 'Düzeltme İstenen',
     filter: 'feedback_requested',
-    iconChip: 'bg-blue-100 text-blue-700',
-    valueText: 'text-blue-700',
-    ring: 'ring-blue-400',
+    iconChip: 'bg-cyan-50 text-cyan-700',
+    accentBar: 'bg-cyan-500',
+    ring: 'ring-cyan-300',
     hint: 'kullanıcı yanıtı bekleniyor',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -71,9 +71,9 @@ const STAT_CARDS: StatCardConfig[] = [
     key: 'rejected',
     label: 'Reddedilen',
     filter: 'rejected',
-    iconChip: 'bg-red-100 text-red-700',
-    valueText: 'text-red-700',
-    ring: 'ring-red-400',
+    iconChip: 'bg-rose-50 text-rose-700',
+    accentBar: 'bg-rose-500',
+    ring: 'ring-rose-300',
     hint: 'arşivlendi',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -262,12 +262,12 @@ export default function AdminDashboard() {
     <AppShell kind="admin">
       {/* ============ KARŞILAMA BANDI ============ */}
       <section className="mb-6">
-        <div className="card overflow-hidden">
+        <div className="rounded-2xl bg-white border border-kt-gray-100 overflow-hidden">
           <div className="grid md:grid-cols-[1fr_auto] gap-0">
             {/* Sol — kullanıcı bilgisi + selam */}
             <div className="p-5 md:p-6 flex items-center gap-4 min-w-0">
               <div className="relative shrink-0">
-                <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br from-kt-green-700 to-kt-green-900 text-white flex items-center justify-center font-extrabold text-lg shadow-kt-soft">
+                <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-kt-green-900 text-white flex items-center justify-center font-extrabold text-lg">
                   {admin?.fullName
                     ?.split(' ')
                     .map((p) => p[0])
@@ -275,7 +275,7 @@ export default function AdminDashboard() {
                     .join('') ?? 'AD'}
                 </div>
                 <span
-                  className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-white"
+                  className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"
                   title="Çevrimiçi"
                 />
               </div>
@@ -284,7 +284,8 @@ export default function AdminDashboard() {
                   <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-kt-gray-500">
                     Yönetim Paneli
                   </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-cyan-100 text-cyan-800 border border-cyan-300">
+                  <span className="role-badge-cyan !mb-0 !py-0.5 !px-2 !text-[10px]">
+                    <span className="role-badge-dot bg-cyan-500" />
                     Lab Mühendisi
                   </span>
                 </div>
@@ -294,7 +295,7 @@ export default function AdminDashboard() {
                 <p className="text-kt-gray-500 text-sm mt-1">
                   {pendingCount > 0 ? (
                     <>
-                      <strong className="text-amber-700">{pendingCount}</strong>{' '}
+                      <strong className="text-kt-green-900">{pendingCount}</strong>{' '}
                       talep incelemenizi bekliyor.
                     </>
                   ) : (
@@ -304,27 +305,27 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Sağ — kompakt stat şeridi */}
-            <div className="flex md:flex-col md:items-stretch border-t md:border-t-0 md:border-l border-kt-gray-100 bg-kt-gray-50/40">
+            {/* Sağ — kompakt stat şeridi (sade, monokrom) */}
+            <div className="flex md:flex-col md:items-stretch border-t md:border-t-0 md:border-l border-kt-gray-100">
               <div className="flex-1 px-5 py-3 md:py-4 flex md:flex-col items-center md:items-start gap-2 md:gap-0 border-r md:border-r-0 md:border-b border-kt-gray-100">
-                <div className="text-[10px] font-bold uppercase tracking-widest text-amber-700 md:order-1">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-kt-gray-500 md:order-1">
                   Bekleyen
                 </div>
-                <div className="text-2xl md:text-3xl font-extrabold text-amber-700 leading-none md:mt-1">
+                <div className="text-2xl md:text-3xl font-extrabold text-kt-green-900 leading-none md:mt-1 tabular-nums">
                   {pendingCount}
                 </div>
               </div>
               <div className="flex-1 px-5 py-3 md:py-4 flex md:flex-col items-center md:items-start gap-2 md:gap-0 border-r md:border-r-0 md:border-b border-kt-gray-100">
-                <div className="text-[10px] font-bold uppercase tracking-widest text-cyan-700 md:order-1">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-kt-gray-500 md:order-1">
                   Toplam
                 </div>
-                <div className="text-2xl md:text-3xl font-extrabold text-cyan-700 leading-none md:mt-1">
+                <div className="text-2xl md:text-3xl font-extrabold text-kt-green-900 leading-none md:mt-1 tabular-nums">
                   {totalCount}
                 </div>
               </div>
               <button
                 onClick={load}
-                className="px-4 py-3 md:py-4 hover:bg-kt-green-50 text-kt-green-700 font-semibold text-xs transition flex items-center justify-center gap-2"
+                className="px-4 py-3 md:py-4 hover:bg-kt-gray-50 text-kt-gray-600 hover:text-kt-green-900 font-semibold text-xs transition-colors flex items-center justify-center gap-2"
                 title="Verileri yenile"
               >
                 <svg
@@ -356,27 +357,34 @@ export default function AdminDashboard() {
             <button
               key={s.key}
               onClick={() => setFilter(s.filter)}
-              className={`card p-5 text-left transition-all hover:-translate-y-0.5 hover:shadow-kt-card ${
-                isActive ? `ring-2 ${s.ring} bg-kt-gray-50/60` : ''
+              className={`relative overflow-hidden rounded-2xl bg-white border text-left p-5 transition-shadow duration-200 ${
+                isActive
+                  ? `border-kt-gray-200 ring-1 ${s.ring} shadow-sm`
+                  : 'border-kt-gray-100 hover:shadow-sm'
               }`}
             >
+              {/* Sol kenar accent şeridi — tek renk semantik ipucu */}
+              <span
+                aria-hidden="true"
+                className={`absolute left-0 top-4 bottom-4 w-[3px] rounded-r-full ${s.accentBar}`}
+              />
               <div className="flex items-center justify-between mb-3">
                 <div
                   className={`w-10 h-10 rounded-xl flex items-center justify-center ${s.iconChip}`}
                 >
                   {s.icon}
                 </div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-kt-gray-500">
+                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-kt-gray-500">
                   {s.label}
                 </span>
               </div>
               <div className="flex items-baseline gap-1.5">
-                <span className={`text-4xl font-extrabold tabular-nums ${s.valueText}`}>
+                <span className="text-[2.25rem] leading-none font-extrabold tabular-nums text-kt-green-900">
                   {value}
                 </span>
                 <span className="text-xs text-kt-gray-400">/ {totalCount}</span>
               </div>
-              <div className="text-xs text-kt-gray-500 mt-0.5">{s.hint}</div>
+              <div className="text-xs text-kt-gray-500 mt-1">{s.hint}</div>
             </button>
           );
         })}
@@ -410,15 +418,15 @@ export default function AdminDashboard() {
                   <button
                     key={tab.key}
                     onClick={() => setFilter(tab.key)}
-                    className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${
+                    className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${
                       isActive
-                        ? 'bg-white text-kt-green-900 shadow-kt-soft'
+                        ? 'bg-white text-kt-green-900 shadow-sm'
                         : 'text-kt-gray-500 hover:text-kt-green-800'
                     }`}
                   >
                     {tab.label}
-                    <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
-                      isActive ? `${tab.accent} text-white` : 'bg-kt-gray-200 text-kt-gray-600'
+                    <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold tabular-nums ${
+                      isActive ? 'bg-kt-green-900 text-white' : 'bg-kt-gray-200 text-kt-gray-600'
                     }`}>
                       {count}
                     </span>
@@ -451,20 +459,20 @@ export default function AdminDashboard() {
                 <button
                   key={b.id}
                   onClick={() => setSelected(b)}
-                  className="w-full text-left rounded-xl border border-kt-gray-100 hover:border-kt-gold-300 p-4 transition-all hover:shadow-kt-soft hover:-translate-y-0.5 group focus:outline-none focus:ring-2 focus:ring-kt-gold-400 focus:ring-offset-2"
+                  className="w-full text-left rounded-xl border border-kt-gray-100 hover:border-kt-gray-200 p-4 transition-shadow duration-200 hover:shadow-sm group focus:outline-none focus:ring-2 focus:ring-kt-gold-400 focus:ring-offset-2"
                 >
                   <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                    <div className="w-10 h-10 rounded-full bg-kt-green-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
                       {b.userFullName ? initials(b.userFullName) : '??'}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="text-[11px] font-bold text-kt-gold-700 tracking-wider">{b.roomCode}</span>
+                        <span className="text-[11px] font-bold text-kt-gray-500 tracking-wider tabular-nums">{b.roomCode}</span>
                         <span className="text-kt-gray-300 text-xs">·</span>
                         <span className="text-xs text-kt-gray-500 truncate">{b.roomName}</span>
                         <StatusBadge status={b.status} />
                       </div>
-                      <div className="font-bold text-kt-green-900 truncate group-hover:text-kt-gold-700 transition-colors">
+                      <div className="font-bold text-kt-green-900 truncate group-hover:text-kt-green-700 transition-colors">
                         {b.projectName}
                       </div>
                       <div className="text-xs text-kt-gray-600 flex items-center gap-3 flex-wrap mt-1">
@@ -481,7 +489,7 @@ export default function AdminDashboard() {
                     </div>
                     <div className="shrink-0 text-right">
                       <div className="text-[11px] text-kt-gray-400">{fmtRelative(b.createdAt)}</div>
-                      <div className="text-kt-gold-600 font-semibold text-xs mt-1 flex items-center justify-end gap-1 group-hover:gap-2 transition-all">
+                      <div className="text-kt-gray-500 group-hover:text-kt-green-900 font-semibold text-xs mt-1 flex items-center justify-end gap-1 group-hover:gap-2 transition-all">
                         İncele
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
                       </div>
@@ -496,10 +504,15 @@ export default function AdminDashboard() {
         {/* SAĞ: SIDEBAR — son aktivite */}
         <aside className="space-y-6">
           {/* Hızlı eylem */}
-          <div className="card p-5 bg-gradient-to-br from-kt-gold-50 to-white border-kt-gold-100">
+          <div className="relative overflow-hidden rounded-2xl bg-white border border-kt-gray-100 p-5">
+            {/* Sol kenar amber accent */}
+            <span
+              aria-hidden="true"
+              className="absolute left-0 top-5 bottom-5 w-[3px] rounded-r-full bg-amber-500"
+            />
             <div className="flex items-start gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-kt-gold-400 to-kt-gold-600 text-kt-green-900 flex items-center justify-center shrink-0 shadow-kt-gold">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.25" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
                 </svg>
               </div>
@@ -510,10 +523,10 @@ export default function AdminDashboard() {
             </div>
             <button
               onClick={() => setFilter('pending')}
-              className="w-full text-left p-3 rounded-xl bg-white hover:bg-kt-gold-50 transition-colors border border-kt-gold-100 flex items-center justify-between"
+              className="w-full text-left p-3 rounded-xl bg-kt-gray-50 hover:bg-kt-gray-100 transition-colors border border-kt-gray-100 hover:border-kt-gray-200 flex items-center justify-between"
             >
-              <span className="text-sm font-semibold text-kt-green-800">{pendingCount} talep incele</span>
-              <svg className="w-4 h-4 text-kt-gold-600" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <span className="text-sm font-semibold text-kt-green-900">{pendingCount} talep incele</span>
+              <svg className="w-4 h-4 text-kt-gray-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
               </svg>
             </button>

@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
+import { useViewerKind } from '../hooks/useViewerKind';
 import { AdminLicenseRequestsTab } from '../components/AdminLicenseRequestsTab';
 import { GovernanceDashboardView } from '../components/governance/GovernanceDashboardView';
 import { useToast } from '../components/Toast';
@@ -50,6 +51,8 @@ type TabKey = 'requests' | 'governance' | 'budget' | 'software' | 'user';
 
 export default function AdminLicenses() {
   const toast = useToast();
+  const viewerKind = useViewerKind();
+  const canEdit = viewerKind === 'admin';
   const [report, setReport] = useState<LicenseReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabKey>('requests');
@@ -129,7 +132,16 @@ export default function AdminLicenses() {
   }, [report, search]);
 
   return (
-    <AppShell kind="admin">
+    <AppShell kind={viewerKind}>
+      {!canEdit && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+          </svg>
+          Görüntüleme modu — bu sayfada değişiklik yapamazsınız.
+        </div>
+      )}
       <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-3xl font-extrabold text-kt-green-900 mb-1">Lisans & Harcama Analizi</h1>
@@ -202,7 +214,7 @@ export default function AdminLicenses() {
       </div>
 
       {tab === 'requests' ? (
-        <AdminLicenseRequestsTab />
+        <AdminLicenseRequestsTab readOnly={!canEdit} />
       ) : tab === 'governance' ? (
         <GovernanceDashboardView />
       ) : tab === 'budget' ? (

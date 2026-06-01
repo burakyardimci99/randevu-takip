@@ -1,12 +1,14 @@
-import { Link, NavLink, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Logo } from './Logo';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from './Toast';
 import { NotificationCenter } from './NotificationCenter';
+import { useNotificationsData } from '../hooks/useNotificationsData';
 import { CommandPalette } from './CommandPalette';
 import { OnboardingTour } from './OnboardingTour';
+import { SupportRequestButton } from './SupportRequestButton';
 import type { SubjectKind } from '../types';
 
 interface AppShellProps {
@@ -166,7 +168,7 @@ const ADMIN_NAV: NavItem[] = [
     label: 'Projeler',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
       </svg>
     ),
   },
@@ -176,6 +178,33 @@ const ADMIN_NAV: NavItem[] = [
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/hardware',
+    label: 'Donanım',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/support',
+    label: 'Destek',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/showcase',
+    label: 'Envanter',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
       </svg>
     ),
   },
@@ -199,6 +228,94 @@ const ADMIN_NAV: NavItem[] = [
   },
 ];
 
+/**
+ * Danışman + Ar-Ge'nin read-only görüntüleyebildiği admin panel sayfaları.
+ * Governance dashboard'ları kendi NAV_ITEMS'ına bu listeyi ekler.
+ */
+export const STAFF_VIEW_NAV: NavItem[] = [
+  {
+    to: '/admin/rooms',
+    label: 'Odalar',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/calendar',
+    label: 'Takvim',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/projects',
+    label: 'Projeler',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/users',
+    label: 'Kullanıcılar',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+      </svg>
+    ),
+  },
+  {
+    to: '/admin/licenses',
+    label: 'Lisanslar',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+      </svg>
+    ),
+  },
+];
+
+/** Analitik Danışman nav — kendi inbox'ı + read-only admin görünümleri. */
+export const DANISMAN_NAV: NavItem[] = [
+  {
+    to: '/danisman',
+    label: 'Gelen Talepler',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+    ),
+  },
+  ...STAFF_VIEW_NAV,
+];
+
+/** YZ / Ar-Ge nav — proje yaşam döngüsü + read-only admin görünümleri. */
+export const ARGE_NAV: NavItem[] = [
+  {
+    to: '/arge',
+    label: 'Yaşam Döngüsü',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+      </svg>
+    ),
+  },
+  ...STAFF_VIEW_NAV,
+];
+
+/** Bir kind için varsayılan nav listesini döndürür. */
+function navForKind(kind: SubjectKind): NavItem[] {
+  if (kind === 'admin') return ADMIN_NAV;
+  if (kind === 'danisman') return DANISMAN_NAV;
+  if (kind === 'arge') return ARGE_NAV;
+  return USER_NAV;
+}
+
 export function AppShell({
   kind,
   children,
@@ -219,8 +336,42 @@ export function AppShell({
         : kind === 'arge'
           ? auth.arge
           : auth.user;
-  const items =
-    navItems ?? (kind === 'admin' ? ADMIN_NAV : USER_NAV);
+
+  // Bildirim verisi — zil + menü rozetleri için tek kaynak.
+  const location = useLocation();
+  const notif = useNotificationsData(kind);
+  const { markItemRead } = notif;
+
+  // Açık olan bölümün okunmamış bildirimleri okundu işaretlenir → menü rozeti
+  // temizlenir. notif.items bağımlılıkta: bildirimler navigasyondan SONRA
+  // yüklenirse (yarış durumu) etki yeniden çalışıp rozeti yine temizler.
+  useEffect(() => {
+    for (const n of notif.items) {
+      if (!n.read && n.link === location.pathname) {
+        void markItemRead(n);
+      }
+    }
+  }, [location.pathname, notif.items, markItemRead]);
+
+  /** Bir nav öğesi için okunmamış bildirim sayısı (menü rozeti). */
+  function badgeCount(to: string): number {
+    if (to === '/sohbet') return notif.messageUnread;
+    return notif.items.filter((n) => !n.read && n.link === to).length;
+  }
+
+  // Sohbet tüm rollerde görünür — rolün kendi nav'ının sonuna eklenir.
+  const items: NavItem[] = [
+    ...(navItems ?? navForKind(kind)),
+    {
+      to: '/sohbet',
+      label: 'Sohbet',
+      icon: (
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+        </svg>
+      ),
+    },
+  ];
   const effectiveProfileLink =
     profileLink ??
     (kind === 'admin'
@@ -262,27 +413,6 @@ export function AppShell({
             <Logo size="sm" />
           </Link>
 
-          {/* Primary nav (sabit) — 9 admin sekmesi 1280+'ta sığar; altında mobile nav. */}
-          <nav className="hidden xl:flex items-center gap-1 flex-1 justify-center">
-            {items.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/admin' || item.to === '/rooms'}
-                className={({ isActive }) =>
-                  `px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-all ${
-                    isActive
-                      ? 'bg-kt-gold-400/15 text-kt-gold-300 ring-1 ring-kt-gold-400/40 shadow-glow-cyan'
-                      : 'text-white/70 hover:text-kt-gold-300 hover:bg-white/5'
-                  }`
-                }
-              >
-                {item.icon}
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-
           <div className="flex items-center gap-2 md:gap-3 shrink-0">
             {nav}
             <button
@@ -299,7 +429,13 @@ export function AppShell({
               <span>Ara</span>
               <kbd className="text-[10px] bg-white/10 px-1 py-0.5 rounded">⌘K</kbd>
             </button>
-            <NotificationCenter kind={kind} />
+            <NotificationCenter
+              items={notif.items}
+              unread={notif.unread}
+              messageUnread={notif.messageUnread}
+              onMarkAllRead={notif.markAllRead}
+              onItemRead={notif.markItemRead}
+            />
             <Link
               to={effectiveProfileLink}
               className="hidden 2xl:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-kt-gold-400/30 transition-all"
@@ -324,25 +460,36 @@ export function AppShell({
           </div>
         </div>
 
-        {/* Mobile + dar masaüstü nav (xl altında) */}
-        <nav className="xl:hidden border-t border-kt-gold-400/15 px-6 py-2 flex items-center gap-1 overflow-x-auto scrollbar-thin relative">
-          {items.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/admin' || item.to === '/rooms'}
-              className={({ isActive }) =>
-                `px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-colors ${
-                  isActive
-                    ? 'bg-kt-gold-400/15 text-kt-gold-300 ring-1 ring-kt-gold-400/40'
-                    : 'text-white/60 hover:text-kt-gold-300'
-                }`
-              }
-            >
-              {item.icon}
-              {item.label}
-            </NavLink>
-          ))}
+        {/* Ana navigasyon — ikinci satır. Sığdığında ortalı, taşınca yatay kaydırılır.
+            Logo + sağ kontroller üst satırda kaldığından "Çıkış" her zaman görünür. */}
+        <nav className="border-t border-kt-gold-400/15 px-6 py-2 overflow-x-auto scrollbar-thin relative">
+          <div className="flex items-center gap-1 mx-auto w-max">
+            {items.map((item) => {
+              const badge = badgeCount(item.to);
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === '/admin' || item.to === '/rooms'}
+                  className={({ isActive }) =>
+                    `px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-colors ${
+                      isActive
+                        ? 'bg-kt-gold-400/15 text-kt-gold-300 ring-1 ring-kt-gold-400/40'
+                        : 'text-white/60 hover:text-kt-gold-300'
+                    }`
+                  }
+                >
+                  {item.icon}
+                  {item.label}
+                  {badge > 0 && (
+                    <span className="min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">
+                      {badge > 9 ? '9+' : badge}
+                    </span>
+                  )}
+                </NavLink>
+              );
+            })}
+          </div>
         </nav>
       </header>
 
@@ -361,6 +508,7 @@ export function AppShell({
       {/* Global overlays */}
       <CommandPalette kind={kind} />
       <OnboardingTour kind={kind} />
+      {kind === 'user' && <SupportRequestButton />}
     </div>
   );
 }

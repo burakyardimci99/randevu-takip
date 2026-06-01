@@ -9,6 +9,8 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
+import { useViewerKind } from '../hooks/useViewerKind';
+import { EmptyState } from '../components/EmptyState';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
@@ -50,6 +52,8 @@ interface DeleteTarget {
 
 export default function AdminRooms() {
   const toast = useToast();
+  const viewerKind = useViewerKind();
+  const canEdit = viewerKind === 'admin';
   const [rooms, setRooms] = useState<RoomWithOccupancy[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -218,7 +222,16 @@ export default function AdminRooms() {
   }
 
   return (
-    <AppShell kind="admin">
+    <AppShell kind={viewerKind}>
+      {!canEdit && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+          </svg>
+          Görüntüleme modu — bu sayfada değişiklik yapamazsınız.
+        </div>
+      )}
       <div className="mb-6">
         <h1 className="text-3xl font-extrabold text-kt-green-900 mb-1">Odalar</h1>
         <p className="text-kt-gray-500 text-sm">
@@ -269,7 +282,12 @@ export default function AdminRooms() {
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="card p-8 text-center text-kt-gray-500">Eşleşen oda yok.</div>
+        <EmptyState
+          icon="rooms"
+          tone="cyan"
+          title="Eşleşen oda yok"
+          description="Filtreyi sıfırlayıp tüm odaları görün."
+        />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {filtered.map((room) => (
@@ -350,32 +368,34 @@ export default function AdminRooms() {
                             {badge.label}
                           </span>
                         </div>
-                        <div className="flex items-center gap-1 sm:gap-2 shrink-0 self-end sm:self-auto">
-                          <button
-                            type="button"
-                            onClick={() => openReassign(b, room)}
-                            className="text-[11px] font-semibold px-2 py-1 rounded-md text-kt-green-700 hover:bg-kt-green-50 hover:text-kt-green-800 transition"
-                            title="Bu booking'i başka odaya taşı"
-                          >
-                            Oda Değiştir
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openReassignUser(b, room)}
-                            className="text-[11px] font-semibold px-2 py-1 rounded-md text-kt-violet-700 hover:bg-kt-violet-100 transition"
-                            title="Bu odadaki kullanıcıyı başka bir kullanıcı ile değiştir"
-                          >
-                            Kullanıcı Değiştir
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openDelete(b, room)}
-                            className="text-[11px] font-semibold px-2 py-1 rounded-md text-rose-700 hover:bg-rose-50 transition"
-                            title="Bu booking'i sil (kullanıcıyı odadan çıkar)"
-                          >
-                            Sil
-                          </button>
-                        </div>
+                        {canEdit && (
+                          <div className="flex items-center gap-1 sm:gap-2 shrink-0 self-end sm:self-auto">
+                            <button
+                              type="button"
+                              onClick={() => openReassign(b, room)}
+                              className="text-[11px] font-semibold px-2 py-1 rounded-md text-kt-green-700 hover:bg-kt-green-50 hover:text-kt-green-800 transition"
+                              title="Bu booking'i başka odaya taşı"
+                            >
+                              Oda Değiştir
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openReassignUser(b, room)}
+                              className="text-[11px] font-semibold px-2 py-1 rounded-md text-kt-violet-700 hover:bg-kt-violet-100 transition"
+                              title="Bu odadaki kullanıcıyı başka bir kullanıcı ile değiştir"
+                            >
+                              Kullanıcı Değiştir
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openDelete(b, room)}
+                              className="text-[11px] font-semibold px-2 py-1 rounded-md text-rose-700 hover:bg-rose-50 transition"
+                              title="Bu booking'i sil (kullanıcıyı odadan çıkar)"
+                            >
+                              Sil
+                            </button>
+                          </div>
+                        )}
                       </li>
                     );
                   })}

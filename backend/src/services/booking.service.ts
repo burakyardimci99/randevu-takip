@@ -17,6 +17,7 @@ import {
 } from './embedding.service';
 import { broadcastBooking, broadcastToAdmins } from './sse.service';
 import { recordAudit } from './audit.service';
+import { recordStageEvent } from './governance.service';
 import {
   bookingCreatedAdminEmail,
   bookingReviewedEmail,
@@ -464,7 +465,9 @@ export interface ReviewBookingResult {
 export function reviewBooking(
   adminId: string,
   bookingId: string,
-  input: ReviewBookingInput
+  input: ReviewBookingInput,
+  /** Review eden rol — admin ya da Analitik Danışman. Audit/timeline doğruluğu için. */
+  actorType: 'admin' | 'danisman' = 'admin'
 ): ReviewBookingResult {
   const statusMap: Record<ReviewBookingInput['action'], BookingDto['status']> = {
     approve: 'approved',
@@ -598,6 +601,19 @@ export function reviewBooking(
   txn();
   const reviewed = getBookingByIdAdmin(bookingId) as BookingDto;
 
+  // Audit timeline: ilk onayda application → development geçişini kaydet.
+  // (advance/regress kendi fonksiyonlarında ayrı stage event'i atar.)
+  if (newStatus === 'approved' && reviewed.lifecycleStage === 'development') {
+    recordStageEvent({
+      requestId: bookingId,
+      fromStage: 'application',
+      toStage: 'development',
+      actorId: adminId,
+      actorType,
+      note: input.feedback || 'İlk onay — geliştirme aşamasına geçti.',
+    });
+  }
+
   // SSE: ilgili user'a + admin'lere yayın
   broadcastBooking(
     {
@@ -663,7 +679,7 @@ export function reviewBooking(
     recordAudit({
       eventType: 'waitlist.joined',
       subjectId: adminId,
-      subjectType: 'admin',
+      subjectType: actorType,
       success: true,
       details: {
         bookingId,
@@ -914,17 +930,21 @@ export function reassignBookingUser(
 }
 
 /**
- * Admin: bir booking'i yaşam döngüsünde bir sonraki aşamaya ilerletir.
+ * Admin / Ar-Ge: bir booking'i yaşam döngüsünde bir sonraki aşamaya ilerletir.
  *
  *   application → development → stage → production → live
  *
  * 'application' aşamasından çıkış zaten reviewBooking(approve) ile yapılır,
  * bu fonksiyon onun ötesindeki manuel ilerletmeler için kullanılır. Booking
  * onaylanmış olmalıdır (status='approved').
+ *
+ * `actorType` audit + zaman çizelgesi doğruluğu için: admin route 'admin',
+ * governance/arge route 'arge' geçer (kim ilerletti net kalır).
  */
 export function advanceBookingLifecycle(
-  adminId: string,
-  bookingId: string
+  actorId: string,
+  bookingId: string,
+  actorType: 'admin' | 'arge' = 'admin'
 ): BookingDto {
   const db = getDb();
 
@@ -975,10 +995,19 @@ export function advanceBookingLifecycle(
 
   recordAudit({
     eventType: 'booking.updated',
-    subjectId: adminId,
-    subjectType: 'admin',
+    subjectId: actorId,
+    subjectType: actorType,
     success: true,
     details: { bookingId, kind: 'lifecycle_advanced', fromStage: from, toStage: to },
+  });
+
+  recordStageEvent({
+    requestId: bookingId,
+    fromStage: from,
+    toStage: to,
+    actorId,
+    actorType,
+    note: 'Aşama ilerletildi.',
   });
 
   broadcastBooking(
@@ -997,16 +1026,19 @@ export function advanceBookingLifecycle(
 }
 
 /**
- * Admin: bir booking'i yaşam döngüsünde bir önceki aşamaya geri al.
+ * Admin / Ar-Ge: bir booking'i yaşam döngüsünde bir önceki aşamaya geri al.
  *
  *   live → production → stage → development
  *
  * 'development'dan geri 'application'a düşmek senaryosu manuel iptal anlamına
  * gelir ve burada engellenir; bunun yerine reviewBooking(reject) kullanılmalı.
+ *
+ * `actorType` audit + zaman çizelgesi doğruluğu için (advanceBookingLifecycle ile aynı).
  */
 export function regressBookingLifecycle(
-  adminId: string,
-  bookingId: string
+  actorId: string,
+  bookingId: string,
+  actorType: 'admin' | 'arge' = 'admin'
 ): BookingDto {
   const db = getDb();
 
@@ -1057,10 +1089,19 @@ export function regressBookingLifecycle(
 
   recordAudit({
     eventType: 'booking.updated',
-    subjectId: adminId,
-    subjectType: 'admin',
+    subjectId: actorId,
+    subjectType: actorType,
     success: true,
     details: { bookingId, kind: 'lifecycle_regressed', fromStage: from, toStage: to },
+  });
+
+  recordStageEvent({
+    requestId: bookingId,
+    fromStage: from,
+    toStage: to,
+    actorId,
+    actorType,
+    note: 'Aşama geri alındı.',
   });
 
   broadcastBooking(

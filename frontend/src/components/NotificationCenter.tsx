@@ -1,23 +1,20 @@
 /**
  * Bildirim Merkezi — header zil + popover.
  *
- * Veri kaynağı:
- *  - Kalıcı bildirimler: backend `notifications` tablosu
- *    (booking/lisans review, yeni lisans başvurusu vb.).
- *  - Anlık güncelleme: SSE event'i geldiğinde liste yeniden çekilir.
- *  - Mesaj sayacı: cevap bekleyen booking mesajları ayrı bir uyarı bandında.
- *
- * Kalıcılık: kullanıcı çevrimdışıyken oluşan bildirimler de sonradan görünür
- * (eski SSE-only + sessionStorage yaklaşımının aksine).
+ * Veri kaynağı: AppShell'deki useNotificationsData hook'u (tek kaynak — menü
+ * rozetleriyle paylaşılır). Bu component sadece sunum + popover etkileşimi
+ * yapar; fetch/SSE/state hook'ta yaşar.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
-import { api } from '../services/api';
-import type { AppNotification, NotificationCategory, SubjectKind } from '../types';
+import type { AppNotification, NotificationCategory } from '../types';
 
 interface Props {
-  kind: SubjectKind;
+  items: AppNotification[];
+  unread: number;
+  messageUnread: number;
+  onMarkAllRead: () => void;
+  onItemRead: (item: AppNotification) => void;
 }
 
 function fmtRelative(iso: string): string {
@@ -29,40 +26,16 @@ function fmtRelative(iso: string): string {
   return new Date(ms).toLocaleDateString('tr-TR');
 }
 
-export function NotificationCenter({ kind }: Props) {
+export function NotificationCenter({
+  items,
+  unread,
+  messageUnread,
+  onMarkAllRead,
+  onItemRead,
+}: Props) {
   const navigate = useNavigate();
-  const [items, setItems] = useState<AppNotification[]>([]);
-  const [unread, setUnread] = useState(0);
-  const [messageUnread, setMessageUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const [notif, msg] = await Promise.all([
-        api.listNotifications(kind),
-        (kind === 'admin' ? api.adminUnreadCount() : api.userUnreadCount()).catch(() => ({
-          unread: 0,
-        })),
-      ]);
-      setItems(notif.items);
-      setUnread(notif.unread);
-      setMessageUnread(msg.unread);
-    } catch {
-      // sessiz — bildirim merkezi kritik yol değil
-    }
-  }, [kind]);
-
-  useEffect(() => {
-    void load();
-    const t = window.setInterval(() => void load(), 60_000);
-    return () => window.clearInterval(t);
-  }, [load]);
-
-  // Real-time: ilgili bir event gelince listeyi tazele.
-  useRealtimeEvents(kind, () => {
-    void load();
-  });
 
   // Click outside → kapat
   useEffect(() => {
@@ -89,26 +62,8 @@ export function NotificationCenter({ kind }: Props) {
   const totalUnread = unread + messageUnread;
   const hasAny = items.length > 0 || totalUnread > 0;
 
-  async function markAllRead() {
-    try {
-      await api.markAllNotificationsRead(kind);
-      setItems((curr) => curr.map((i) => ({ ...i, read: true })));
-      setUnread(0);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  async function clickItem(item: AppNotification) {
-    if (!item.read) {
-      setItems((curr) => curr.map((i) => (i.id === item.id ? { ...i, read: true } : i)));
-      setUnread((u) => Math.max(0, u - 1));
-      try {
-        await api.markNotificationRead(kind, item.id);
-      } catch {
-        /* ignore */
-      }
-    }
+  function clickItem(item: AppNotification) {
+    onItemRead(item);
     if (item.link) navigate(item.link);
     setOpen(false);
   }
@@ -143,7 +98,7 @@ export function NotificationCenter({ kind }: Props) {
             </div>
             {unread > 0 && (
               <button
-                onClick={markAllRead}
+                onClick={onMarkAllRead}
                 className="text-[11px] text-kt-green-700 hover:text-kt-gold-700 font-semibold"
               >
                 Hepsini okundu yap
@@ -168,10 +123,10 @@ export function NotificationCenter({ kind }: Props) {
             <div className="overflow-y-auto scrollbar-thin flex-1">
               {messageUnread > 0 && (
                 <div className="px-4 py-2 bg-kt-gold-50 border-b border-kt-gold-100 text-xs text-kt-gold-800">
-                  <strong>{messageUnread}</strong> okunmamış mesaj var.
+                  <strong>{messageUnread}</strong> okunmamış sohbet mesajı var.
                   <button
                     onClick={() => {
-                      navigate(kind === 'admin' ? '/admin' : '/bookings');
+                      navigate('/sohbet');
                       setOpen(false);
                     }}
                     className="ml-2 font-bold underline"

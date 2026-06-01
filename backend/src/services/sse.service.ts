@@ -35,6 +35,10 @@ export type SseEventType =
   | 'booking.withdrawn'
   | 'waitlist.changed'
   | 'appointment.changed'
+  | 'chat.message'
+  | 'hardware_request.created'
+  | 'hardware_request.reviewed'
+  | 'support_request.created'
   | 'ping';
 
 export interface SsePayload {
@@ -80,6 +84,15 @@ export function broadcastBooking(payload: SsePayload, userId: string): void {
   );
 }
 
+/**
+ * Belirli bir kişiye broadcast et — subjectId bazlı (kind'tan bağımsız).
+ * Bir kişi tek seferde tek kind ile bağlı olur (user/admin/danisman/arge);
+ * chat mesajları kişiye gider, hangi rolle bağlı olduğuna bakılmaz.
+ */
+export function broadcastToSubject(subjectId: string, payload: SsePayload): void {
+  broadcast(payload, (c) => c.subjectId === subjectId);
+}
+
 function extractToken(req: Request): { kind: SubjectKind; token: string } | null {
   const header = req.get('authorization');
   if (header) {
@@ -95,19 +108,22 @@ function extractToken(req: Request): { kind: SubjectKind; token: string } | null
   return null;
 }
 
+/**
+ * Token'ı bilinen tüm kind audience'larına karşı dener. user/admin'in yanı sıra
+ * danisman/arge (governance rolleri) da ayrı audience'lı token taşır — hepsi
+ * denenmezse governance dashboard'ları realtime stream alamaz (401).
+ */
 function verifyAny(token: string): { kind: SubjectKind; sub: string } | null {
-  try {
-    const decoded = verifyAccessToken('user', token);
-    return { kind: 'user', sub: decoded.sub };
-  } catch {
-    /* try admin */
+  const KINDS: SubjectKind[] = ['user', 'admin', 'danisman', 'arge'];
+  for (const kind of KINDS) {
+    try {
+      const decoded = verifyAccessToken(kind, token);
+      return { kind, sub: decoded.sub };
+    } catch {
+      /* sıradaki kind'ı dene */
+    }
   }
-  try {
-    const decoded = verifyAccessToken('admin', token);
-    return { kind: 'admin', sub: decoded.sub };
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 export function initSseRoutes(app: Express): void {

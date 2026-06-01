@@ -411,22 +411,33 @@ export interface SimilarBooking {
 }
 
 /* ============================================================
- * MESAJLAŞMA
+ * GENEL SOHBET (rol-bağımsız chat)
  * ============================================================ */
 
-export interface BookingMessage {
+/** Chat aktör tipi — danışman/arge users tablosunda yaşar → 'user'. */
+export type ChatKind = 'user' | 'admin';
+
+export interface ChatMessage {
   id: string;
-  bookingId: string;
-  authorId: string;
-  authorType: 'user' | 'admin';
-  authorName: string;
+  senderId: string;
+  senderKind: ChatKind;
+  recipientId: string;
+  recipientKind: ChatKind;
   body: string;
-  readByRecipient: boolean;
+  read: boolean;
   createdAt: string;
+  /** Görüntüleyene göre — mesajı ben mi attım? */
+  mine: boolean;
 }
 
-export interface ThreadMeta {
-  total: number;
+export interface ChatContact {
+  id: string;
+  kind: ChatKind;
+  fullName: string;
+  /** "Yönetici" | "Analitik Danışman" | "YZ / Ar-Ge" | "Kullanıcı" */
+  roleLabel: string;
+  lastMessage: string | null;
+  lastMessageAt: string | null;
   unread: number;
 }
 
@@ -695,4 +706,78 @@ export interface LicenseBudgetReport {
     monthlyUsd: number;
   }>;
   unpricedItemCount: number;
+}
+
+/* ============================================================
+ * DONANIM TALEPLERİ
+ * ============================================================ */
+
+export type HardwareRequestStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'feedback_requested';
+
+export type EquipmentType =
+  | 'mouse'
+  | 'keyboard'
+  | 'camera'
+  | 'monitor'
+  | 'headset'
+  | 'other';
+
+export type HardwareUrgency = 'low' | 'normal' | 'high';
+
+export interface HardwareRequest {
+  id: string;
+  userId: string;
+  equipmentType: EquipmentType;
+  equipmentDetail: string | null;
+  quantity: number;
+  reason: string;
+  urgency: HardwareUrgency;
+  status: HardwareRequestStatus;
+  adminFeedback: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HardwareRequestWithUser extends HardwareRequest {
+  userFullName: string;
+  userEmail: string;
+  userDepartment: string | null;
+  reviewerName: string | null;
+}
+
+export interface CreateHardwareRequestPayload {
+  equipmentType: EquipmentType;
+  equipmentDetail?: string | null;
+  quantity: number;
+  reason: string;
+  urgency: HardwareUrgency;
+}
+
+/* ============================================================
+ * DESTEK TALEPLERİ
+ * ============================================================ */
+
+export type SupportRequestStatus = 'open' | 'resolved';
+
+export interface SupportRequest {
+  id: string;
+  userId: string;
+  description: string;
+  status: SupportRequestStatus;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupportRequestWithUser extends SupportRequest {
+  userFullName: string;
+  userEmail: string;
+  userDepartment: string | null;
 }

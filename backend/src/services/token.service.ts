@@ -194,6 +194,20 @@ export function revokeAllForSubject(kind: SubjectKind, subjectId: string): void 
     .run(subjectId, kind);
 }
 
+/**
+ * subject_id'ye ait TÜM refresh token'ları (her kind: user/admin/danisman/arge)
+ * revoke eder. Login sırasında çağrılır → tek aktif oturum politikası (multi-role
+ * session accumulation güvenlik açığı C1'in backend savunması).
+ *
+ * Erişim token'ları (15 dk TTL) hâlâ geçerli kalır ama yenileme yapılamayacağı
+ * için kısa süre içinde otomatik silinir.
+ */
+export function revokeAllForSubjectAllKinds(subjectId: string): void {
+  getDb()
+    .prepare('UPDATE refresh_tokens SET revoked = 1 WHERE subject_id = ?')
+    .run(subjectId);
+}
+
 export function verifyAccessToken(kind: SubjectKind, token: string): JwtPayload {
   const bundle = getKeyBundle(kind);
   const options: VerifyOptions = {

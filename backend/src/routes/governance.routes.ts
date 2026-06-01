@@ -79,7 +79,7 @@ router.post(
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
       const input = reviewBookingSchema.parse(req.body);
-      const result = reviewBooking(req.auth!.subjectId, id, input);
+      const result = reviewBooking(req.auth!.subjectId, id, input, 'danisman');
       res.json({
         booking: result.booking,
         autoWaitlisted: result.autoWaitlisted ?? false,
@@ -103,7 +103,7 @@ router.post(
         throw new HttpError(400, 'Geçersiz license id.', 'INVALID_ID');
       }
       const input = reviewLicenseRequestSchema.parse(req.body);
-      const updated = reviewLicenseRequest(req.auth!.subjectId, id, input);
+      const updated = reviewLicenseRequest(req.auth!.subjectId, id, input, 'danisman');
       res.json({ request: updated });
     } catch (err) {
       next(err);
@@ -146,7 +146,7 @@ router.post(
       if (!id || id.length < 8 || id.length > 40) {
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
-      const booking = advanceBookingLifecycle(req.auth!.subjectId, id);
+      const booking = advanceBookingLifecycle(req.auth!.subjectId, id, 'arge');
       res.json({ booking });
     } catch (err) {
       next(err);
@@ -165,7 +165,7 @@ router.post(
       if (!id || id.length < 8 || id.length > 40) {
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
-      const booking = regressBookingLifecycle(req.auth!.subjectId, id);
+      const booking = regressBookingLifecycle(req.auth!.subjectId, id, 'arge');
       res.json({ booking });
     } catch (err) {
       next(err);
@@ -207,5 +207,74 @@ router.get('/arge/bookings/:id', argeGuard, (req, res, next) => {
     next(err);
   }
 });
+
+/* ============================================================
+ * BİLDİRİM MERKEZİ — Danışman & Ar-Ge
+ * Danışman/Ar-Ge subject'i users tablosunda yaşar → recipient_type 'user'.
+ * NotificationCenter `/{kind}/notifications` çağırır; user/admin için doğrudan
+ * route var, danisman/arge için bu governance-prefixed eşdeğerleri kullanılır.
+ * ============================================================ */
+const GOVERNANCE_ROLES: ReadonlyArray<{ prefix: 'danisman' | 'arge'; guard: typeof danismanGuard }> = [
+  { prefix: 'danisman', guard: danismanGuard },
+  { prefix: 'arge', guard: argeGuard },
+];
+
+for (const { prefix, guard } of GOVERNANCE_ROLES) {
+  router.get(
+    `/${prefix}/notifications`,
+    guard,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { listNotifications, countUnreadNotifications } = await import(
+          '../services/notification-center.service'
+        );
+        const uid = req.auth!.subjectId;
+        res.json({
+          items: listNotifications(uid, 'user'),
+          unread: countUnreadNotifications(uid, 'user'),
+        });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  router.post(
+    `/${prefix}/notifications/:id/read`,
+    guard,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const rawId = req.params.id;
+        const id = typeof rawId === 'string' ? rawId : '';
+        if (!id || id.length < 8 || id.length > 40) {
+          throw new HttpError(400, 'Geçersiz bildirim id.', 'INVALID_ID');
+        }
+        const { markNotificationRead } = await import(
+          '../services/notification-center.service'
+        );
+        markNotificationRead(req.auth!.subjectId, 'user', id);
+        res.status(204).end();
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  router.post(
+    `/${prefix}/notifications/read-all`,
+    guard,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { markAllNotificationsRead } = await import(
+          '../services/notification-center.service'
+        );
+        const marked = markAllNotificationsRead(req.auth!.subjectId, 'user');
+        res.json({ marked });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+}
 
 export default router;

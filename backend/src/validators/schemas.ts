@@ -120,13 +120,12 @@ export const registerSchema = z.object({
       /^[A-Za-zÇĞİıÖŞÜçğıöşü' -]+$/,
       'Ad-soyad yalnızca harf, boşluk ve tire içerebilir.'
     ),
-  /**
-   * Demo amaçlı: registration sırasında yönetişim rolü seçilebilir.
-   * Prod'da kapatılmalı — sadece admin atamalı.
-   */
-  governanceRole: z
-    .union([z.literal('analitik_danisman'), z.literal('yz_arge')])
-    .optional(),
+  // SECURITY (C2): governanceRole REGISTER üzerinden ATANAMAZ. Aksi halde
+  // herhangi biri kendisini Ar-Ge mühendisi olarak kaydedip /governance/arge
+  // endpoint'lerine erişebilir (privilege escalation). Atama yalnız admin
+  // tarafından PATCH /admin/users/:id/governance-role ile yapılır.
+  // Zod .strict() kullanmadığımız için extra field'lar otomatik ignore edilir
+  // — bu schema'da yer almaması zaten yeterli savunma.
 }).refine((d) => d.password === d.passwordConfirm, {
   message: 'Parolalar eşleşmiyor.',
   path: ['passwordConfirm'],
@@ -462,3 +461,61 @@ export const adminLicenseRequestsFilterSchema = z.object({
 });
 
 export type AdminLicenseRequestsFilter = z.infer<typeof adminLicenseRequestsFilterSchema>;
+
+/* ============================================================
+ * Donanım talebi
+ * ============================================================ */
+
+export const createHardwareRequestSchema = z.object({
+  equipmentType: z.union([
+    z.literal('mouse'),
+    z.literal('keyboard'),
+    z.literal('camera'),
+    z.literal('monitor'),
+    z.literal('headset'),
+    z.literal('other'),
+  ]),
+  // 'other' türü için açıklama veya diğer türler için ek detay (model vb.).
+  equipmentDetail: z.string().trim().max(200).nullable().optional(),
+  quantity: z.number().int().min(1, 'En az 1 adet.').max(20, 'En fazla 20 adet.'),
+  reason: safeText(10, 1000, 'Gerekçe'),
+  urgency: z.union([z.literal('low'), z.literal('normal'), z.literal('high')]),
+});
+
+export type CreateHardwareRequestInput = z.infer<typeof createHardwareRequestSchema>;
+
+export const reviewHardwareRequestSchema = z.object({
+  action: z.union([
+    z.literal('approve'),
+    z.literal('reject'),
+    z.literal('request_feedback'),
+  ]),
+  adminFeedback: z.string().trim().max(1000).nullable().optional(),
+});
+
+export type ReviewHardwareRequestInput = z.infer<typeof reviewHardwareRequestSchema>;
+
+export const hardwareRequestsFilterSchema = z.object({
+  status: z
+    .union([
+      z.literal('pending'),
+      z.literal('approved'),
+      z.literal('rejected'),
+      z.literal('feedback_requested'),
+    ])
+    .optional(),
+});
+
+/* ============================================================
+ * Destek talebi
+ * ============================================================ */
+
+export const createSupportRequestSchema = z.object({
+  description: safeText(10, 1000, 'Destek açıklaması'),
+});
+
+export type CreateSupportRequestInput = z.infer<typeof createSupportRequestSchema>;
+
+export const supportRequestsFilterSchema = z.object({
+  status: z.union([z.literal('open'), z.literal('resolved')]).optional(),
+});

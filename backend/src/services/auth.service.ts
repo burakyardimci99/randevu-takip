@@ -12,7 +12,12 @@ import { config } from '../config/env';
 import { getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import type { AdminRecord, SubjectKind, UserRecord } from '../types/auth.types';
-import { issueRefreshToken, signAccessToken, type IssuedTokens } from './token.service';
+import {
+  issueRefreshToken,
+  revokeAllForSubjectAllKinds,
+  signAccessToken,
+  type IssuedTokens,
+} from './token.service';
 import type { RegisterInput } from '../validators/schemas';
 
 const ARGON2_OPTIONS: argon2.Options = {
@@ -220,18 +225,18 @@ export async function registerUser(input: RegisterInput): Promise<{ id: string; 
   // 2) Parola hash
   const passwordHash = await argon2.hash(input.password, ARGON2_OPTIONS);
 
-  // 3) Insert
+  // 3) Insert — governance_role HER ZAMAN NULL. Atama yalnız admin yapabilir
+  // (SECURITY C2). Self-service registration ile governance role alınamaz.
   const id = nanoid();
   try {
     db.prepare(
       `INSERT INTO users (id, email, password_hash, full_name, role, status, governance_role)
-       VALUES (?, ?, ?, ?, 'user', 1, ?)`
+       VALUES (?, ?, ?, ?, 'user', 1, NULL)`
     ).run(
       id,
       normalizedEmail,
       passwordHash,
-      input.fullName.trim(),
-      input.governanceRole ?? null
+      input.fullName.trim()
     );
   } catch (err) {
     // UNIQUE constraint çakışması (yarış durumu) — yine generic mesaj
@@ -292,6 +297,9 @@ export async function unifiedLogin(email: string, password: string): Promise<Log
     const ok = await argon2.verify(adminRecord.password_hash, password).catch(() => false);
     if (ok) {
       resetFailedLogin('admin', adminRecord.id);
+      // Tek-aktif-oturum politikası (C1 savunması): yeni login → eski refresh
+      // token'ları (her kind'da) revoke.
+      revokeAllForSubjectAllKinds(adminRecord.id);
       const accessPayload = { sub: adminRecord.id, role: adminRecord.role, email: adminRecord.email };
       const { token: accessToken, ttl } = signAccessToken('admin', accessPayload);
       const { token: refreshToken } = issueRefreshToken('admin', adminRecord.id);
@@ -330,6 +338,10 @@ export async function unifiedLogin(email: string, password: string): Promise<Log
   }
 
   resetFailedLogin('user', userRecord.id);
+  // Tek-aktif-oturum politikası (C1 savunması): yeni login → tüm eski refresh
+  // token'lar (her kind) revoke. Demo+intranet senaryosunda multi-device beklenmediği
+  // için ek güvenlik olarak tek aktif oturum tutulur.
+  revokeAllForSubjectAllKinds(userRecord.id);
   const governanceRole = (userRecord as UserRecord).governance_role ?? null;
   // Yönetişim rolüne göre token kind'ı belirlenir — danisman/arge için ayrı
   // audience'lı token üretilir, bu token user/admin endpoint'lerinde geçmez.

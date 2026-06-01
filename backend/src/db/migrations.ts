@@ -13,6 +13,13 @@ export interface Migration {
   id: string;
   name: string;
   up: (db: Database.Database) => void;
+  /**
+   * true ise migration runner kendi transaction'ına SARMAZ. Tablo yeniden
+   * oluşturma + `PRAGMA foreign_keys` toggle gerektiren şema cerrahisi için —
+   * SQLite'ta foreign_keys pragma'sı transaction içinde no-op'tur. Bu durumda
+   * `up` fonksiyonu kendi BEGIN/COMMIT'ini yönetmelidir.
+   */
+  noTransaction?: boolean;
 }
 
 /**
@@ -733,6 +740,336 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: '0023',
+    name: 'project_stage_events_drop_license_fk',
+    up: (db) => {
+      // BUG FIX: project_stage_events.request_id, license_requests(id)'ye FK
+      // taşıyordu. Ancak tablo yaşam döngüsü geçişlerini HEM license_request
+      // HEM de booking için saklıyor (advanceBookingLifecycle → recordStageEvent
+      // booking id geçiriyor). Booking id license_requests'te bulunmadığı için
+      // "FOREIGN KEY constraint failed" → admin/arge stage ilerletme 500 veriyordu.
+      //
+      // Çözüm: FK kaldırılır; request_id artık jenerik bir entity id (booking ya
+      // da license_request). Referans bütünlüğü uygulama katmanında korunur.
+      // SQLite FK drop edemez → tabloyu yeniden oluştur (data korunur).
+      db.exec(`
+        CREATE TABLE project_stage_events_new (
+          id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL,
+          from_stage TEXT,
+          to_stage TEXT NOT NULL,
+          actor_id TEXT,
+          actor_type TEXT CHECK(actor_type IS NULL OR actor_type IN ('user','admin','system')),
+          note TEXT,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO project_stage_events_new
+          SELECT id, request_id, from_stage, to_stage, actor_id, actor_type, note, created_at
+          FROM project_stage_events;
+        DROP TABLE project_stage_events;
+        ALTER TABLE project_stage_events_new RENAME TO project_stage_events;
+        CREATE INDEX IF NOT EXISTS idx_stage_events_request
+          ON project_stage_events(request_id, created_at);
+      `);
+    },
+  },
+  {
+    id: '0024',
+    name: 'project_stage_events_actor_type_governance',
+    up: (db) => {
+      // project_stage_events.actor_type CHECK'i 'danisman' ve 'arge' rollerini de
+      // kabul edecek şekilde genişletildi. Önceden sadece user/admin/system vardı;
+      // governance rolleri stage ilerletince actor_type yanlışlıkla 'admin' yazılıyordu
+      // (audit doğruluğu — banka uyumluluğu için kim ne yaptı net olmalı).
+      // SQLite CHECK drop edemez → tabloyu yeniden oluştur (data korunur).
+      db.exec(`
+        CREATE TABLE project_stage_events_v2 (
+          id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL,
+          from_stage TEXT,
+          to_stage TEXT NOT NULL,
+          actor_id TEXT,
+          actor_type TEXT CHECK(actor_type IS NULL OR
+            actor_type IN ('user','admin','danisman','arge','system')),
+          note TEXT,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO project_stage_events_v2
+          SELECT id, request_id, from_stage, to_stage, actor_id, actor_type, note, created_at
+          FROM project_stage_events;
+        DROP TABLE project_stage_events;
+        ALTER TABLE project_stage_events_v2 RENAME TO project_stage_events;
+        CREATE INDEX IF NOT EXISTS idx_stage_events_request
+          ON project_stage_events(request_id, created_at);
+      `);
+    },
+  },
+  {
+    id: '0025',
+    name: 'bookings_drop_reviewed_by_admin_fk',
+    // Şema cerrahisi: bookings'i başka tablolar FK ile referans alıyor; DROP TABLE
+    // foreign_keys ON iken çocuk satırları CASCADE siler. SQLite'ın standart tablo
+    // yeniden oluşturma yöntemi → foreign_keys OFF gerekir (transaction dışında).
+    noTransaction: true,
+    up: (db) => {
+      // BUG FIX: bookings.reviewed_by → admins(id)'ye FK taşıyordu. Ancak artık
+      // Analitik Danışman da (users tablosundaki bir subject) booking review
+      // edebiliyor; danışmanın user id'si admins'te bulunmadığı için review
+      // sırasında "FOREIGN KEY constraint failed" → 500 (kayıt rollback olur ama
+      // kullanıcıya "İşlem başarısız" toast'u düşer).
+      //
+      // Çözüm: reviewed_by FK'sı kaldırılır (artık admin VEYA danışman id'si
+      // tutabilir — jenerik reviewer id). user_id ve room_id FK'ları korunur.
+      // Reviewer kimliği ayrıca audit_logs'ta tam olarak saklanıyor.
+      db.pragma('foreign_keys = OFF');
+      try {
+        db.exec(`
+          BEGIN;
+          CREATE TABLE bookings_new (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            room_id TEXT NOT NULL,
+            period_months INTEGER NOT NULL CHECK(period_months IN (1, 2, 3)),
+            start_date DATE NOT NULL,
+            end_date DATE NOT NULL,
+            project_name TEXT NOT NULL,
+            project_description TEXT NOT NULL,
+            help_needed TEXT NOT NULL,
+            technologies TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+              CHECK(status IN ('pending', 'approved', 'rejected', 'feedback_requested')),
+            admin_feedback TEXT,
+            reviewed_by TEXT,
+            reviewed_at DATETIME,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            showcase_visible INTEGER NOT NULL DEFAULT 1,
+            showcase_highlight INTEGER NOT NULL DEFAULT 0,
+            lifecycle_stage TEXT NOT NULL DEFAULT 'application'
+              CHECK(lifecycle_stage IN ('application','development','stage','production','live')),
+            stage_entered_at DATETIME NOT NULL DEFAULT '',
+            review_track TEXT NOT NULL DEFAULT 'standard'
+              CHECK(review_track IN ('standard','swat')),
+            stage_advance_requested_at DATETIME,
+            stage_advance_note TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE RESTRICT
+          );
+          INSERT INTO bookings_new
+            SELECT id, user_id, room_id, period_months, start_date, end_date,
+                   project_name, project_description, help_needed, technologies,
+                   status, admin_feedback, reviewed_by, reviewed_at, created_at,
+                   updated_at, showcase_visible, showcase_highlight, lifecycle_stage,
+                   stage_entered_at, review_track, stage_advance_requested_at,
+                   stage_advance_note
+            FROM bookings;
+          DROP TABLE bookings;
+          ALTER TABLE bookings_new RENAME TO bookings;
+          CREATE INDEX idx_bookings_user ON bookings(user_id);
+          CREATE INDEX idx_bookings_room ON bookings(room_id);
+          CREATE INDEX idx_bookings_status ON bookings(status);
+          CREATE INDEX idx_bookings_dates ON bookings(room_id, start_date, end_date);
+          CREATE INDEX idx_bookings_showcase ON bookings(status, showcase_visible)
+            WHERE status = 'approved';
+          CREATE INDEX idx_bookings_lifecycle ON bookings(lifecycle_stage);
+          CREATE INDEX idx_bookings_review_track ON bookings(review_track)
+            WHERE review_track = 'swat';
+          CREATE INDEX idx_bookings_advance_pending ON bookings(stage_advance_requested_at)
+            WHERE stage_advance_requested_at IS NOT NULL;
+          COMMIT;
+        `);
+      } catch (err) {
+        try { db.exec('ROLLBACK;'); } catch { /* zaten kapalı */ }
+        db.pragma('foreign_keys = ON');
+        throw err;
+      }
+      // Referans bütünlüğü doğrulaması — kırık FK varsa migration'ı patlat.
+      const violations = db.pragma('foreign_key_check') as unknown[];
+      db.pragma('foreign_keys = ON');
+      if (violations.length > 0) {
+        throw new Error(
+          `bookings rebuild sonrası FK ihlali: ${JSON.stringify(violations)}`
+        );
+      }
+    },
+  },
+  {
+    id: '0026',
+    name: 'license_requests_drop_reviewed_by_admin_fk',
+    noTransaction: true,
+    up: (db) => {
+      // BUG FIX: license_requests.reviewed_by → admins(id) FK, bookings'teki ile
+      // aynı sorun: Analitik Danışman lisans talebi review edince danışmanın user
+      // id'si admins'te bulunmadığı için "FOREIGN KEY constraint failed" → 500.
+      //
+      // Çözüm: reviewed_by FK'sı kaldırılır (admin VEYA danışman id'si tutabilir).
+      // user_id FK'sı ve assigned_engineer_id → admins FK'sı KORUNUR
+      // (mühendis ataması yalnızca admin tablosundan yapılıyor — LEFT JOIN admins).
+      db.pragma('foreign_keys = OFF');
+      try {
+        db.exec(`
+          BEGIN;
+          CREATE TABLE license_requests_new (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            license_key TEXT NOT NULL,
+            license_name TEXT NOT NULL,
+            vendor TEXT,
+            category TEXT,
+            reason TEXT NOT NULL,
+            duration_months INTEGER NOT NULL CHECK(duration_months IN (1, 3, 6, 12)),
+            status TEXT NOT NULL DEFAULT 'pending'
+              CHECK(status IN ('pending', 'approved', 'rejected', 'feedback_requested')),
+            admin_feedback TEXT,
+            reviewed_by TEXT,
+            reviewed_at DATETIME,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            request_title TEXT,
+            expected_benefit TEXT,
+            success_criteria TEXT,
+            project_type TEXT
+              CHECK(project_type IS NULL OR project_type IN ('poc', 'integration')),
+            estimated_duration_days INTEGER
+              CHECK(estimated_duration_days IS NULL OR (estimated_duration_days BETWEEN 1 AND 365)),
+            data_to_use TEXT,
+            technical_stack TEXT,
+            lifecycle_stage TEXT NOT NULL DEFAULT 'application'
+              CHECK(lifecycle_stage IN ('application','development','stage','production','live')),
+            review_track TEXT NOT NULL DEFAULT 'standard'
+              CHECK(review_track IN ('standard','swat')),
+            governance_level TEXT NOT NULL DEFAULT 'basic'
+              CHECK(governance_level IN ('basic','full')),
+            uses_external_api INTEGER,
+            involves_real_data INTEGER,
+            stage_entered_at DATETIME,
+            assigned_engineer_id TEXT REFERENCES admins(id) ON DELETE SET NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+          );
+          INSERT INTO license_requests_new
+            SELECT id, user_id, license_key, license_name, vendor, category, reason,
+                   duration_months, status, admin_feedback, reviewed_by, reviewed_at,
+                   created_at, updated_at, request_title, expected_benefit,
+                   success_criteria, project_type, estimated_duration_days, data_to_use,
+                   technical_stack, lifecycle_stage, review_track, governance_level,
+                   uses_external_api, involves_real_data, stage_entered_at,
+                   assigned_engineer_id
+            FROM license_requests;
+          DROP TABLE license_requests;
+          ALTER TABLE license_requests_new RENAME TO license_requests;
+          CREATE INDEX idx_license_requests_user ON license_requests(user_id);
+          CREATE INDEX idx_license_requests_status ON license_requests(status);
+          CREATE INDEX idx_license_requests_lifecycle ON license_requests(lifecycle_stage);
+          CREATE INDEX idx_license_requests_track ON license_requests(review_track);
+          COMMIT;
+        `);
+      } catch (err) {
+        try { db.exec('ROLLBACK;'); } catch { /* zaten kapalı */ }
+        db.pragma('foreign_keys = ON');
+        throw err;
+      }
+      const violations = db.pragma('foreign_key_check') as unknown[];
+      db.pragma('foreign_keys = ON');
+      if (violations.length > 0) {
+        throw new Error(
+          `license_requests rebuild sonrası FK ihlali: ${JSON.stringify(violations)}`
+        );
+      }
+    },
+  },
+  {
+    id: '0027',
+    name: 'chat_messages_and_drop_booking_messages',
+    up: (db) => {
+      // Genel rol-bağımsız 1:1 sohbet. Katılımcılar users + admins tablolarından;
+      // tek bir tabloya FK verilemez → request_id/reviewed_by pattern'i gibi FK yok,
+      // bütünlük uygulama katmanında. sender/recipient_kind sadece 'user'|'admin'
+      // (danışman/arge users tablosunda yaşar → 'user').
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS chat_messages (
+          id TEXT PRIMARY KEY,
+          sender_id TEXT NOT NULL,
+          sender_kind TEXT NOT NULL CHECK(sender_kind IN ('user','admin')),
+          recipient_id TEXT NOT NULL,
+          recipient_kind TEXT NOT NULL CHECK(recipient_kind IN ('user','admin')),
+          body TEXT NOT NULL,
+          read INTEGER NOT NULL DEFAULT 0,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_pair
+          ON chat_messages(sender_id, recipient_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_chat_recipient_unread
+          ON chat_messages(recipient_id, read);
+      `);
+      // Eski booking-bazlı mesaj thread'i kaldırıldı (genel chat ile değiştirildi).
+      // booking_messages'i referans alan tablo yok → güvenle DROP.
+      db.exec(`DROP TABLE IF EXISTS booking_messages;`);
+    },
+  },
+  {
+    id: '0028',
+    name: 'hardware_requests',
+    up: (db) => {
+      // Donanım talepleri — kullanıcı mouse/klavye/kamera vb. ekipman talep
+      // eder, admin onaylar/reddeder/revize ister (license_requests iş akışının
+      // sade hâli: tek kalem, yönetişim/SLA yok).
+      //
+      // reviewed_by: FK YOK — bookings/license_requests (0025/0026) paterni;
+      // jenerik reviewer id tutar (şimdilik admin, ileride danışman olabilir).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS hardware_requests (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          equipment_type TEXT NOT NULL
+            CHECK(equipment_type IN ('mouse','keyboard','camera','monitor','headset','other')),
+          equipment_detail TEXT,
+          quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity BETWEEN 1 AND 20),
+          reason TEXT NOT NULL,
+          urgency TEXT NOT NULL DEFAULT 'normal'
+            CHECK(urgency IN ('low','normal','high')),
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending','approved','rejected','feedback_requested')),
+          admin_feedback TEXT,
+          reviewed_by TEXT,
+          reviewed_at DATETIME,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+        CREATE INDEX IF NOT EXISTS idx_hardware_requests_user
+          ON hardware_requests(user_id, status);
+        CREATE INDEX IF NOT EXISTS idx_hardware_requests_status
+          ON hardware_requests(status);
+      `);
+    },
+  },
+  {
+    id: '0029',
+    name: 'support_requests',
+    up: (db) => {
+      // Destek talepleri — kullanıcı serbest metin açıklamayla destek ister;
+      // tüm admin'lere bildirim düşer, admin "çözüldü" işaretler.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS support_requests (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          description TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'open'
+            CHECK(status IN ('open','resolved')),
+          resolved_by TEXT,
+          resolved_at DATETIME,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+        CREATE INDEX IF NOT EXISTS idx_support_requests_status
+          ON support_requests(status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_support_requests_user
+          ON support_requests(user_id);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): { applied: string[] } {
@@ -751,16 +1088,25 @@ export function runMigrations(db: Database.Database): { applied: string[] } {
   for (const migration of MIGRATIONS) {
     if (appliedIds.has(migration.id)) continue;
 
-    const txn = db.transaction(() => {
-      migration.up(db);
-      db.prepare('INSERT INTO schema_migrations (id, name) VALUES (?, ?)').run(
-        migration.id,
-        migration.name
-      );
-    });
-
     try {
-      txn();
+      if (migration.noTransaction) {
+        // Şema cerrahisi: up() kendi BEGIN/COMMIT'ini yönetir (foreign_keys
+        // pragma'sı transaction dışında değiştirilebilsin diye). Kayıt sonra.
+        migration.up(db);
+        db.prepare('INSERT INTO schema_migrations (id, name) VALUES (?, ?)').run(
+          migration.id,
+          migration.name
+        );
+      } else {
+        const txn = db.transaction(() => {
+          migration.up(db);
+          db.prepare('INSERT INTO schema_migrations (id, name) VALUES (?, ?)').run(
+            migration.id,
+            migration.name
+          );
+        });
+        txn();
+      }
       applied.push(`${migration.id}_${migration.name}`);
     } catch (err) {
       throw new Error(

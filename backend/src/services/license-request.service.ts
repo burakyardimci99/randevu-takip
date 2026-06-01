@@ -759,7 +759,9 @@ export interface ReviewLicenseRequestInput {
 export function reviewLicenseRequest(
   reviewerId: string,
   requestId: string,
-  input: ReviewLicenseRequestInput
+  input: ReviewLicenseRequestInput,
+  /** Review eden rol — admin ya da Analitik Danışman. Audit/timeline doğruluğu için. */
+  actorType: 'admin' | 'danisman' = 'admin'
 ): LicenseRequestWithUser {
   const db = getDb();
 
@@ -793,7 +795,7 @@ export function reviewLicenseRequest(
       fromStage: 'application',
       toStage: 'application',
       actorId: reviewerId,
-      actorType: 'admin',
+      actorType,
       note: 'SWAT multidisipliner incelemeye yönlendirildi (SLA ≤ 5 iş günü).',
     });
 
@@ -829,7 +831,7 @@ export function reviewLicenseRequest(
 
   // Onaylandıysa projeyi geliştirme aşamasına taşı (kalite kapıları oluşur).
   if (nextStatus === 'approved') {
-    onApplicationApproved(requestId, reviewerId);
+    onApplicationApproved(requestId, reviewerId, actorType);
   }
 
   const result = getAdminLicenseRequestById(requestId)!;

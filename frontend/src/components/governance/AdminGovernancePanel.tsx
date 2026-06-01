@@ -31,9 +31,17 @@ interface Props {
   currentAdminId: string | undefined;
   /** Liste rozetlerinin tazelenmesi için. */
   onChanged: () => void;
+  /** Read-only görüntüleyen (danışman / Ar-Ge) için tüm yönetişim aksiyonlarını gizler. */
+  readOnly?: boolean;
 }
 
-export function AdminGovernancePanel({ requestId, admins, currentAdminId, onChanged }: Props) {
+export function AdminGovernancePanel({
+  requestId,
+  admins,
+  currentAdminId,
+  onChanged,
+  readOnly = false,
+}: Props) {
   const toast = useToast();
   const [bundle, setBundle] = useState<GovernanceBundle | null>(null);
   const [loading, setLoading] = useState(true);
@@ -140,7 +148,7 @@ export function AdminGovernancePanel({ requestId, admins, currentAdminId, onChan
 
       {/* Aşama aksiyonları */}
       <div className="flex flex-wrap items-center gap-2">
-        {canAdvance && (
+        {!readOnly && canAdvance && (
           <button
             type="button"
             disabled={busy}
@@ -150,7 +158,7 @@ export function AdminGovernancePanel({ requestId, admins, currentAdminId, onChan
             {nextLabel} aşamasına ilerlet →
           </button>
         )}
-        {req.projectType === 'poc' && (
+        {!readOnly && req.projectType === 'poc' && (
           <button
             type="button"
             disabled={busy}
@@ -178,41 +186,47 @@ export function AdminGovernancePanel({ requestId, admins, currentAdminId, onChan
         ) : (
           <div className="text-sm text-kt-gray-500 mb-2">Henüz atanmadı.</div>
         )}
-        <div className="flex flex-col sm:flex-row gap-2">
-          <select
-            className="input flex-1 text-sm"
-            value={engineerPick}
-            onChange={(e) => setEngineerPick(e.target.value)}
-            disabled={busy}
-            aria-label="Lab Mühendisi seç"
-          >
-            <option value="">— Mühendis seç —</option>
-            {admins.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.fullName}
-                {a.governanceRole === 'lab_muhendisi' ? ' (Lab Mühendisi)' : ''}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            disabled={busy || !engineerPick}
-            onClick={handleAssign}
-            className="btn-secondary text-sm whitespace-nowrap"
-          >
-            Ata
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="flex flex-col sm:flex-row gap-2">
+            <select
+              className="input flex-1 text-sm"
+              value={engineerPick}
+              onChange={(e) => setEngineerPick(e.target.value)}
+              disabled={busy}
+              aria-label="Lab Mühendisi seç"
+            >
+              <option value="">— Mühendis seç —</option>
+              {admins.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.fullName}
+                  {a.governanceRole === 'lab_muhendisi' ? ' (Lab Mühendisi)' : ''}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={busy || !engineerPick}
+              onClick={handleAssign}
+              className="btn-secondary text-sm whitespace-nowrap"
+            >
+              Ata
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Kalite kapıları — düzenlenebilir */}
-      <QualityGatesPanel gates={bundle.gates} onSetResult={handleGate} busy={busy} />
+      {/* Kalite kapıları — düzenlenebilir (read-only modunda sadece görüntülenir) */}
+      <QualityGatesPanel
+        gates={bundle.gates}
+        onSetResult={readOnly ? undefined : handleGate}
+        busy={busy}
+      />
 
       {/* İnsan onayları */}
       {bundle.approvals.length > 0 && (
         <ApprovalsPanel
           approvals={bundle.approvals}
-          onDecide={canDecideApprovals ? handleApproval : undefined}
+          onDecide={readOnly || !canDecideApprovals ? undefined : handleApproval}
           busy={busy}
         />
       )}

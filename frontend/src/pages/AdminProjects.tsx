@@ -13,8 +13,10 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
+import { useViewerKind } from '../hooks/useViewerKind';
 import { BookingDetailModal } from '../components/BookingDetailModal';
 import { ProjectLifecycleBar } from '../components/governance/ProjectLifecycleBar';
+import { EmptyState } from '../components/EmptyState';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
@@ -46,13 +48,16 @@ function fmtDate(iso: string): string {
   });
 }
 
-function daysSince(iso: string): number {
+function daysSince(iso: string | null | undefined): number {
+  if (!iso) return 0;
   const then = new Date(iso).getTime();
   return Math.max(0, Math.floor((Date.now() - then) / 86400000));
 }
 
 export default function AdminProjects() {
   const toast = useToast();
+  const viewerKind = useViewerKind();
+  const canEdit = viewerKind === 'admin';
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [stageFilter, setStageFilter] = useState<StageFilter>('all');
@@ -222,7 +227,9 @@ export default function AdminProjects() {
       await api.adminSetBookingReviewTrack(b.id, target);
       toast.push(
         'success',
-        target === 'swat' ? `${b.projectName} SWAT'a alındı.` : `${b.projectName} standart akışa alındı.`
+        target === 'swat'
+          ? `${b.projectName} Analitik Danışman'a iletildi.`
+          : `${b.projectName} standart akışa alındı.`
       );
       await load();
     } catch (err) {
@@ -241,7 +248,16 @@ export default function AdminProjects() {
   }
 
   return (
-    <AppShell kind="admin">
+    <AppShell kind={viewerKind}>
+      {!canEdit && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+          </svg>
+          Görüntüleme modu — bu sayfada değişiklik yapamazsınız.
+        </div>
+      )}
       <div className="mb-6">
         <h1 className="text-3xl font-extrabold text-kt-green-900 mb-1">Projeler</h1>
         <p className="text-kt-gray-500 text-sm">
@@ -340,20 +356,28 @@ export default function AdminProjects() {
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="card p-10 text-center text-kt-gray-500">
-          {bookings.length === 0
-            ? 'Henüz onaylı bir proje yok.'
-            : 'Bu filtreyle eşleşen proje yok.'}
-        </div>
+        <EmptyState
+          icon={bookings.length === 0 ? 'showcase' : 'data'}
+          tone="cyan"
+          title={bookings.length === 0 ? 'Henüz onaylı bir proje yok' : 'Bu filtreyle eşleşen proje yok'}
+          description={
+            bookings.length === 0
+              ? 'Danışman onayından geçen randevular burada yaşam döngüsü ile birlikte listelenecek.'
+              : 'Filtreleri sıfırlayıp tüm projelere bakın veya farklı bir arama deneyin.'
+          }
+        />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {filtered.map((b) => {
-            const idx = STAGE_ORDER.indexOf(b.lifecycleStage);
+            // Defensive: bazı onaylı booking kayıtlarında lifecycleStage henüz
+            // backend DTO'ya eklenmemiş olabilir — 'development' default'u kullan.
+            const stage = b.lifecycleStage ?? 'development';
+            const idx = STAGE_ORDER.indexOf(stage);
             const isTerminal = idx >= STAGE_ORDER.length - 1;
             const isAtStart = idx <= 1; // development
             const nextStage = !isTerminal ? STAGE_ORDER[idx + 1] : null;
             const prevStage = !isAtStart ? STAGE_ORDER[idx - 1] : null;
-            const meta = STAGE_META[b.lifecycleStage];
+            const meta = STAGE_META[stage] ?? STAGE_META.development;
             const isSwat = b.reviewTrack === 'swat';
             const hasAdvanceRequest = !!b.stageAdvanceRequestedAt;
             return (
@@ -395,7 +419,7 @@ export default function AdminProjects() {
                 </div>
 
                 <div className="my-3">
-                  <ProjectLifecycleBar stage={b.lifecycleStage} />
+                  <ProjectLifecycleBar stage={stage} />
                 </div>
 
                 {/* Bekleyen kullanıcı talebi */}
@@ -432,57 +456,61 @@ export default function AdminProjects() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex justify-end gap-1.5">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void rejectAdvanceRequest(b);
-                        }}
-                        className="text-[11px] font-semibold px-2 py-1 rounded bg-white text-rose-700 border border-rose-300 hover:bg-rose-50"
-                      >
-                        Reddet
-                      </button>
-                      {nextStage && (
+                    {canEdit && (
+                      <div className="flex justify-end gap-1.5">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            void quickAdvance(b);
+                            void rejectAdvanceRequest(b);
                           }}
-                          className="text-[11px] font-semibold px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                          className="text-[11px] font-semibold px-2 py-1 rounded bg-white text-rose-700 border border-rose-300 hover:bg-rose-50"
                         >
-                          ✓ Onayla → {STAGE_META[nextStage].label}
+                          Reddet
                         </button>
-                      )}
-                    </div>
+                        {nextStage && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void quickAdvance(b);
+                            }}
+                            className="text-[11px] font-semibold px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                          >
+                            ✓ Onayla → {STAGE_META[nextStage].label}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
                 <div className="flex items-center justify-between gap-2 text-xs text-kt-gray-500">
                   <span>
-                    {STAGE_META[b.lifecycleStage].label} aşamasında{' '}
+                    {meta.label} aşamasında{' '}
                     <strong className="text-kt-green-800">
                       {daysSince(b.stageEnteredAt)} gün
                     </strong>
                   </span>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void toggleSwat(b);
-                      }}
-                      className={`text-[10px] font-bold px-2 py-1 rounded transition ${
-                        isSwat
-                          ? 'bg-kt-gray-200 text-kt-gray-700 hover:bg-kt-gray-300'
-                          : 'bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300'
-                      }`}
-                      title={isSwat ? "Standart akışa al" : "SWAT'a gönder"}
-                    >
-                      {isSwat ? 'SWAT\'tan çıkar' : '⚡ SWAT\'a gönder'}
-                    </button>
-                    {prevStage && (
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void toggleSwat(b);
+                        }}
+                        className={`text-[10px] font-bold px-2 py-1 rounded transition ${
+                          isSwat
+                            ? 'bg-kt-gray-200 text-kt-gray-700 hover:bg-kt-gray-300'
+                            : 'bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300'
+                        }`}
+                        title={isSwat ? 'İletimi geri al — standart akışa dön' : 'Analitik Danışmana ilet'}
+                      >
+                        {isSwat ? 'İletimi Geri Al' : '→ Analitik Danışmana İlet'}
+                      </button>
+                    )}
+                    {canEdit && prevStage && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -495,7 +523,7 @@ export default function AdminProjects() {
                         ← {STAGE_META[prevStage].label}
                       </button>
                     )}
-                    {nextStage ? (
+                    {canEdit && nextStage && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -506,7 +534,8 @@ export default function AdminProjects() {
                       >
                         → {STAGE_META[nextStage].label}
                       </button>
-                    ) : (
+                    )}
+                    {!nextStage && (
                       <span className="text-[11px] font-semibold text-emerald-700">
                         ● Canlıda
                       </span>
@@ -523,10 +552,11 @@ export default function AdminProjects() {
         booking={selected}
         open={!!selected}
         loading={reviewing}
+        viewerRole={canEdit ? 'admin' : 'arge'}
         onClose={() => !reviewing && setSelected(null)}
-        onReview={review}
-        onAdvanceStage={advanceStage}
-        onRegressStage={regressStage}
+        onReview={canEdit ? review : undefined}
+        onAdvanceStage={canEdit ? advanceStage : undefined}
+        onRegressStage={canEdit ? regressStage : undefined}
       />
     </AppShell>
   );

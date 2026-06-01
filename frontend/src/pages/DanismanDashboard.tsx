@@ -9,29 +9,38 @@
  * `requireUserGovernanceRole('analitik_danisman')` ile backend'de korunur.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppShell, type NavItem } from '../components/AppShell';
+import { AppShell } from '../components/AppShell';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
 import { BookingDetailModal } from '../components/BookingDetailModal';
+import { EmptyState } from '../components/EmptyState';
+import { KpiCard } from '../components/KpiCard';
+import { Inbox, KeyRound } from 'lucide-react';
+import { SlaBadge } from '../components/governance/SlaBadge';
+import type { SlaInfo } from '../types';
+
+/** Booking için client-side SLA hesabı — backend yoksa fallback. Standard=24sa, SWAT=120sa. */
+function computeBookingSla(b: Booking): SlaInfo | null {
+  if (b.status !== 'pending' && b.status !== 'feedback_requested') return null;
+  const slaHours = b.reviewTrack === 'swat' ? 120 : 24;
+  const created = new Date(b.createdAt).getTime();
+  const deadlineMs = created + slaHours * 3600 * 1000;
+  const remainingHours = (deadlineMs - Date.now()) / 3600 / 1000;
+  return {
+    checkpoint: b.reviewTrack === 'swat' ? 'SWAT İnceleme' : 'Başvuru Değerlendirme',
+    deadline: new Date(deadlineMs).toISOString(),
+    slaHours,
+    remainingHours: Math.round(remainingHours * 10) / 10,
+    overdue: remainingHours < 0,
+  };
+}
 import type {
   Booking,
   LicenseRequestStatus,
   LicenseRequestWithUser,
   ReviewBookingPayload,
 } from '../types';
-
-const NAV_ITEMS: NavItem[] = [
-  {
-    to: '/danisman',
-    label: 'Gelen Talepler',
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-      </svg>
-    ),
-  },
-];
 
 type Tab = 'bookings' | 'licenses';
 
@@ -197,14 +206,13 @@ export default function DanismanDashboard() {
   return (
     <AppShell
       kind="danisman"
-      navItems={NAV_ITEMS}
       profileLink="/danisman"
       roleLabel="Analitik Danışman"
     >
       <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/15 text-cyan-200 text-[11px] font-bold uppercase tracking-[0.18em] border border-cyan-400/30 mb-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-300" />
+          <div className="role-badge-cyan">
+            <span className="role-badge-dot bg-cyan-400" />
             Analitik Danışman
           </div>
           <h1 className="text-3xl font-extrabold text-kt-green-900">Gelen Talepler</h1>
@@ -212,23 +220,23 @@ export default function DanismanDashboard() {
             Kullanıcı başvurularını değerlendirin — onayla, revize iste, reddet ya da SWAT'a yönlendirin.
           </p>
         </div>
-        <div className="flex gap-2 items-center flex-wrap">
-          <div className="px-4 py-2 rounded-xl bg-amber-50 border border-amber-200">
-            <div className="text-xs font-bold uppercase tracking-wider text-amber-700">
-              Booking
-            </div>
-            <div className="text-2xl font-extrabold text-amber-800 leading-tight">
-              {counts.bookingsPending}
-            </div>
-          </div>
-          <div className="px-4 py-2 rounded-xl bg-violet-50 border border-violet-200">
-            <div className="text-xs font-bold uppercase tracking-wider text-violet-700">
-              Lisans
-            </div>
-            <div className="text-2xl font-extrabold text-violet-800 leading-tight">
-              {counts.licenseRequestsPending}
-            </div>
-          </div>
+        <div className="grid grid-cols-2 gap-3 min-w-[280px] sm:min-w-[360px]">
+          <KpiCard
+            icon={Inbox}
+            label="Bekleyen Booking"
+            value={counts.bookingsPending}
+            unit="talep"
+            tone="cyan"
+            compact
+          />
+          <KpiCard
+            icon={KeyRound}
+            label="Bekleyen Lisans"
+            value={counts.licenseRequestsPending}
+            unit="talep"
+            tone="violet"
+            compact
+          />
         </div>
       </div>
 
@@ -273,9 +281,12 @@ export default function DanismanDashboard() {
         <div className="card p-10 text-center text-kt-gray-500">Yükleniyor…</div>
       ) : tab === 'bookings' ? (
         filteredBookings.length === 0 ? (
-          <div className="card p-10 text-center text-kt-gray-500">
-            Bekleyen oda talebi yok.
-          </div>
+          <EmptyState
+            icon="bookings"
+            tone="cyan"
+            title={search ? 'Eşleşen talep yok' : 'Bekleyen oda talebi yok'}
+            description={search ? 'Arama terimini değiştirip tekrar deneyin.' : 'Yeni başvurular geldiğinde burada listelenecek. SSE bağlantısı açık.'}
+          />
         ) : (
           <div className="space-y-3">
             {filteredBookings.map((b) => (
@@ -302,11 +313,14 @@ export default function DanismanDashboard() {
                       {fmtDate(b.startDate)} – {fmtDate(b.endDate)} · {b.periodMonths} ay
                     </div>
                   </div>
-                  <span
-                    className={`text-[11px] font-bold px-2 py-1 rounded-md border shrink-0 ${STATUS_BADGE[b.status]}`}
-                  >
-                    {STATUS_LABEL[b.status]}
-                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <SlaBadge sla={computeBookingSla(b)} />
+                    <span
+                      className={`text-[11px] font-bold px-2 py-1 rounded-md border ${STATUS_BADGE[b.status]}`}
+                    >
+                      {STATUS_LABEL[b.status]}
+                    </span>
+                  </div>
                 </div>
                 <p className="text-sm text-kt-gray-700 line-clamp-2 mb-3">
                   {b.projectDescription}
@@ -334,23 +348,26 @@ export default function DanismanDashboard() {
                     <button
                       type="button"
                       onClick={() => openAction('booking', b.id, b.projectName, 'request_feedback')}
-                      className="btn-secondary text-sm"
+                      className="btn-pill-warning btn-pill-xs"
                     >
-                      Revize İste
+                      <span className="btn-pill-shimmer" />
+                      <span className="relative z-10">Revize İste</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => openAction('booking', b.id, b.projectName, 'reject')}
-                      className="btn-danger text-sm"
+                      className="btn-pill-danger btn-pill-xs"
                     >
-                      Reddet
+                      <span className="btn-pill-shimmer" />
+                      <span className="relative z-10">Reddet</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => openAction('booking', b.id, b.projectName, 'approve')}
-                      className="btn-success text-sm"
+                      className="btn-pill-success btn-pill-xs"
                     >
-                      Onayla
+                      <span className="btn-pill-shimmer" />
+                      <span className="relative z-10">Onayla</span>
                     </button>
                   </div>
                 </div>
@@ -359,9 +376,12 @@ export default function DanismanDashboard() {
           </div>
         )
       ) : filteredLicenses.length === 0 ? (
-        <div className="card p-10 text-center text-kt-gray-500">
-          Bekleyen lisans talebi yok.
-        </div>
+        <EmptyState
+          icon="licenses"
+          tone="violet"
+          title={search ? 'Eşleşen lisans talebi yok' : 'Bekleyen lisans talebi yok'}
+          description={search ? 'Arama terimini değiştirip tekrar deneyin.' : 'Yeni lisans talepleri burada listelenecek (standard veya SWAT track).'}
+        />
       ) : (
         <div className="space-y-3">
           {filteredLicenses.map((r) => {
@@ -400,31 +420,35 @@ export default function DanismanDashboard() {
                       <button
                         type="button"
                         onClick={() => openAction('license', r.id, title, 'swat')}
-                        className="btn-ghost text-sm"
+                        className="btn-pill-info btn-pill-xs"
                       >
-                        ⚡ SWAT'a Gönder
+                        <span className="btn-pill-shimmer" />
+                        <span className="relative z-10">⚡ SWAT'a Gönder</span>
                       </button>
                     )}
                     <button
                       type="button"
                       onClick={() => openAction('license', r.id, title, 'request_feedback')}
-                      className="btn-secondary text-sm"
+                      className="btn-pill-warning btn-pill-xs"
                     >
-                      Revize İste
+                      <span className="btn-pill-shimmer" />
+                      <span className="relative z-10">Revize İste</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => openAction('license', r.id, title, 'reject')}
-                      className="btn-danger text-sm"
+                      className="btn-pill-danger btn-pill-xs"
                     >
-                      Reddet
+                      <span className="btn-pill-shimmer" />
+                      <span className="relative z-10">Reddet</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => openAction('license', r.id, title, 'approve')}
-                      className="btn-success text-sm"
+                      className="btn-pill-success btn-pill-xs"
                     >
-                      Onayla
+                      <span className="btn-pill-shimmer" />
+                      <span className="relative z-10">Onayla</span>
                     </button>
                   </div>
                 )}
@@ -476,7 +500,7 @@ export default function DanismanDashboard() {
                 type="button"
                 onClick={() => setActionModal(null)}
                 disabled={submitting}
-                className="btn-ghost"
+                className="btn-pill-neutral btn-pill-sm"
               >
                 Vazgeç
               </button>
@@ -484,15 +508,18 @@ export default function DanismanDashboard() {
                 type="button"
                 onClick={submitAction}
                 disabled={submitting}
-                className={
+                className={`btn-pill-sm ${
                   actionModal.action === 'reject'
-                    ? 'btn-danger'
+                    ? 'btn-pill-danger'
                     : actionModal.action === 'approve'
-                      ? 'btn-success'
-                      : 'btn-primary'
-                }
+                      ? 'btn-pill-success'
+                      : actionModal.action === 'request_feedback'
+                        ? 'btn-pill-warning'
+                        : 'btn-pill-info'
+                }`}
               >
-                {submitting ? 'Gönderiliyor…' : 'Onayla'}
+                <span className="btn-pill-shimmer" />
+                <span className="relative z-10">{submitting ? 'Gönderiliyor…' : 'Onayla'}</span>
               </button>
             </div>
           </div>

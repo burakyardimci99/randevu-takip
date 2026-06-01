@@ -17,6 +17,7 @@ import {
   corsMiddleware,
   globalRateLimit,
   helmetMiddleware,
+  permissionsPolicyMiddleware,
   requestLogger,
 } from './middleware/security.middleware';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
@@ -34,6 +35,7 @@ import adminAuthRoutes from './routes/admin-auth.routes';
 import userRoutes from './routes/user.routes';
 import adminRoutes from './routes/admin.routes';
 import governanceRoutes from './routes/governance.routes';
+import chatRoutes from './routes/chat.routes';
 import publicRoutes from './routes/public.routes';
 import { openApiDocument } from './openapi';
 
@@ -44,6 +46,7 @@ function buildApp(): express.Express {
   app.set('trust proxy', 1);
 
   app.use(helmetMiddleware);
+  app.use(permissionsPolicyMiddleware);
   app.use(corsMiddleware);
   app.use(express.json({ limit: '512kb' })); // profil fotoğrafı (200KB JPEG + base64 overhead) için
   app.use(cookieParser());
@@ -74,6 +77,7 @@ function buildApp(): express.Express {
   app.use('/api/user', userRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/governance', governanceRoutes);
+  app.use('/api/chat', chatRoutes);                 // Rol-bağımsız genel sohbet
 
   app.use(notFoundHandler);
   app.use(errorHandler);
