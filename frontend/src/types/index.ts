@@ -1,3 +1,41 @@
+// ============================================================
+// PAYLAŞILAN DTO TİPLERİ (#6) — backend ile TEK kaynak (@klab/shared).
+// Buradan re-export edilir ki mevcut `from '../types'` importları değişmesin.
+// ============================================================
+import type {
+  VisualStatus,
+  VisualVariant,
+  ShowcaseItem,
+  ShowcaseTechnology,
+  SimilarBooking,
+  DuplicateMatch,
+  Leaderboard,
+  LeaderboardUser,
+  LeaderboardProject,
+  HeatmapCell,
+  HeatmapRoom,
+  RoomHeatmap,
+  KioskRoom,
+  KioskData,
+} from '@klab/shared';
+
+export type {
+  VisualStatus,
+  VisualVariant,
+  ShowcaseItem,
+  ShowcaseTechnology,
+  SimilarBooking,
+  DuplicateMatch,
+  Leaderboard,
+  LeaderboardUser,
+  LeaderboardProject,
+  HeatmapCell,
+  HeatmapRoom,
+  RoomHeatmap,
+  KioskRoom,
+  KioskData,
+};
+
 export type SubjectKind = 'user' | 'admin' | 'danisman' | 'arge';
 
 /** Kullanıcı için seçimli yönetişim rolü. NULL = sıradan kullanıcı. */
@@ -319,26 +357,7 @@ export interface MfaEnrollResult {
  * SHOWCASE
  * ============================================================ */
 
-export interface ShowcaseItem {
-  id: string;
-  projectName: string;
-  projectDescription: string;
-  technologies: string[];
-  roomCode: string;
-  roomName: string;
-  district: string;
-  neighborhood: string;
-  theme: string;
-  authorId: string;
-  authorFullName: string;
-  periodMonths: number;
-  startDate: string;
-  endDate: string;
-  isHighlight: boolean;
-  approvedAt: string | null;
-  /** Sahibinin atadığı arkaplan görseli (kendi ürettiği visual'den) — null olabilir. */
-  showcaseImageUrl: string | null;
-}
+// ShowcaseItem → @klab/shared (üstte re-export edildi).
 
 /* ============================================================
  * SEMANTIC SEARCH
@@ -405,32 +424,7 @@ export interface LicenseReport {
   };
 }
 
-export interface SimilarBooking {
-  bookingId: string;
-  similarity: number;
-  projectName: string;
-  projectDescription: string;
-  technologies: string[];
-  status: string;
-  roomCode: string;
-  roomName: string;
-  userFullName: string;
-  /** İfşa edilen sonuçlarda sahip user id'si — "Bağlan" (/u/:id) için. Anonimde yok. */
-  authorId?: string;
-  isOwn?: boolean;
-  anonymized?: boolean;
-  createdAt: string;
-}
-
-/** Yeni booking'de otomatik duplicate-tespiti sonucu (#4). */
-export interface DuplicateMatch {
-  bookingId: string;
-  projectName: string;
-  similarity: number;
-  isOwn: boolean;
-  authorFullName: string;
-  roomCode: string;
-}
+// SimilarBooking + DuplicateMatch → @klab/shared (üstte re-export edildi).
 
 /* ============================================================
  * GENEL SOHBET (rol-bağımsız chat)
@@ -804,100 +798,10 @@ export interface SupportRequestWithUser extends SupportRequest {
   userDepartment: string | null;
 }
 
-/* ============================================================
- * LEADERBOARD / SIRALAMA (#5a)
- * ============================================================ */
-
-export interface LeaderboardUser {
-  userId: string;
-  fullName: string;
-  department: string | null;
-  approvedBookings: number;
-  utilizationDays: number;
-  likes: number;
-  comments: number;
-  score: number;
-}
-
-export interface LeaderboardProject {
-  bookingId: string;
-  projectName: string;
-  authorId: string;
-  authorFullName: string;
-  roomCode: string;
-  roomName: string;
-  isHighlight: boolean;
-  likes: number;
-  comments: number;
-  score: number;
-}
-
-export interface Leaderboard {
-  users: LeaderboardUser[];
-  projects: LeaderboardProject[];
-  generatedAt: string;
-  scoring: { bookings: number; utilizationDay: number; like: number; comment: number };
-}
-
-/* ============================================================
- * ODA × GÜN ISI-HARİTASI (#5c)
- * ============================================================ */
-
-export interface HeatmapCell {
-  weekday: number; // 1=Pzt..7=Paz
-  count: number;
-}
-
-export interface HeatmapRoom {
-  roomId: string;
-  code: string;
-  name: string;
-  theme: string;
-  roomType: 'pod' | 'experience' | 'tribune';
-  days: HeatmapCell[];
-  total: number;
-}
-
-export interface RoomHeatmap {
-  rooms: HeatmapRoom[];
-  from: string;
-  to: string;
-  maxCount: number;
-  weekdays: number[];
-}
-
-/* ============================================================
- * KIOSK — oda ekranı (#5b)
- * ============================================================ */
-
-export interface KioskRoom {
-  id: string;
-  code: string;
-  name: string;
-  theme: string;
-  equipment: string;
-  roomType: 'pod' | 'experience' | 'tribune';
-}
-
-export interface KioskData {
-  room: KioskRoom;
-  latestVisual: { imageUrl: string; createdAt: string } | null;
-}
+// Leaderboard / Heatmap / Kiosk / VisualStatus / VisualVariant
+// → @klab/shared (üstte re-export edildi).
 
 /* ---- Görsel üretimi (gorsel_uretim entegrasyonu) ---- */
-
-export type VisualStatus = 'pending' | 'enhancing' | 'generating' | 'ready' | 'error';
-
-export interface VisualVariant {
-  seed: number;
-  /** Saklandıysa iç (prompt'suz) URL, değilse dış sağlayıcı URL'i (fallback). */
-  url: string;
-  /** Baytlar sunucuda saklandı mı. */
-  stored?: boolean;
-  /** Saklanan dosya uzantısı (jpg/png/webp…). */
-  ext?: string;
-  created_at: number;
-}
 
 export interface Visual {
   id: string;

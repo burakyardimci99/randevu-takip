@@ -11,38 +11,10 @@
  * Endpoint user-auth (lab içi gamification) — tam public DEĞİL.
  */
 import { getDb } from '../db/schema';
+// Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
+import type { Leaderboard, LeaderboardUser, LeaderboardProject } from '@klab/shared';
 
-export interface LeaderboardUser {
-  userId: string;
-  fullName: string;
-  department: string | null;
-  approvedBookings: number;
-  utilizationDays: number;
-  likes: number;
-  comments: number;
-  score: number;
-}
-
-export interface LeaderboardProject {
-  bookingId: string;
-  projectName: string;
-  authorId: string;
-  authorFullName: string;
-  roomCode: string;
-  roomName: string;
-  isHighlight: boolean;
-  likes: number;
-  comments: number;
-  score: number;
-}
-
-export interface Leaderboard {
-  users: LeaderboardUser[];
-  projects: LeaderboardProject[];
-  generatedAt: string;
-  /** Skor formülü (UI'da şeffaflık için). */
-  scoring: { bookings: number; utilizationDay: number; like: number; comment: number };
-}
+export type { Leaderboard, LeaderboardUser, LeaderboardProject };
 
 const WEIGHTS = { bookings: 10, utilizationDay: 0.25, like: 3, comment: 2 };
 

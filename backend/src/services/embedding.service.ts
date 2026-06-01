@@ -18,6 +18,10 @@
  */
 import { getDb } from '../db/schema';
 import { logger } from '../utils/logger';
+// Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
+import type { SimilarBooking, DuplicateMatch } from '@klab/shared';
+
+export type { SimilarBooking, DuplicateMatch };
 
 interface EmbeddingResult {
   vector: number[];
@@ -212,29 +216,6 @@ export function deleteBookingEmbedding(bookingId: string): void {
   getDb().prepare(`DELETE FROM project_embeddings WHERE booking_id = ?`).run(bookingId);
 }
 
-export interface SimilarBooking {
-  bookingId: string;
-  similarity: number;
-  projectName: string;
-  projectDescription: string;
-  technologies: string[];
-  status: string;
-  roomCode: string;
-  roomName: string;
-  userFullName: string;
-  /**
-   * Proje sahibinin user id'si — yalnız ifşa edilen (anonim OLMAYAN) sonuçlarda
-   * dolu. İş birliği önerisinde "Bağlan" (public profil /u/:id) bağlantısı için.
-   * Anonim (privacy) sonuçlarda undefined.
-   */
-  authorId?: string;
-  /** Sonuç çağıran kullanıcının kendi projesi mi (UI'da "Sizin projeniz" rozeti için). */
-  isOwn?: boolean;
-  /** True ise userFullName maskeli (privacy fix). */
-  anonymized?: boolean;
-  createdAt: string;
-}
-
 /**
  * Verilen query text'e en benzer N booking'i döner.
  *
@@ -380,17 +361,6 @@ export async function findSimilarBookings(args: {
 
   scored.sort((a, b) => b.similarity - a.similarity);
   return scored.slice(0, limit);
-}
-
-export interface DuplicateMatch {
-  bookingId: string;
-  projectName: string;
-  similarity: number;
-  /** Çağıranın KENDİ projesi mi (en yaygın gerçek vaka: yanlışlıkla 2. kez gönderim). */
-  isOwn: boolean;
-  /** Sahip adı — kendi/own ya da public showcase için gerçek; aksi halde maskeli. */
-  authorFullName: string;
-  roomCode: string;
 }
 
 /**

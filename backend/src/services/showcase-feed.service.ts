@@ -14,31 +14,10 @@
  */
 import { getDb } from '../db/schema';
 import { getShowcaseEngagement } from './showcase.service';
+// Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
+import type { ShowcaseItem, ShowcaseTechnology } from '@klab/shared';
 
-export interface ShowcaseItem {
-  id: string;
-  projectName: string;
-  projectDescription: string;
-  technologies: string[];
-  roomCode: string;
-  roomName: string;
-  district: string;
-  neighborhood: string;
-  theme: string;
-  authorId: string;
-  authorFullName: string;
-  periodMonths: number;
-  startDate: string;
-  endDate: string;
-  isHighlight: boolean;
-  approvedAt: string | null;
-  showcaseImageUrl: string | null;
-}
-
-export interface ShowcaseTechnology {
-  technology: string;
-  count: number;
-}
+export type { ShowcaseItem, ShowcaseTechnology };
 
 export interface ShowcaseFeed {
   items: ShowcaseItem[];

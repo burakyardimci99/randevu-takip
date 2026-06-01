@@ -19,8 +19,9 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": "./src",
     "paths": {
-      "@/*": ["*"]
+      "@/*": ["*"],
+      "@klab/shared": ["../../shared/index.d.ts"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "../shared/index.d.ts"]
 }

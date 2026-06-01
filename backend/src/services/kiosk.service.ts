@@ -9,20 +9,10 @@
  * EDİLMEZ (banka veri-yönetişimi).
  */
 import { getDb } from '../db/schema';
+// Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
+import type { KioskRoom, KioskData } from '@klab/shared';
 
-export interface KioskRoom {
-  id: string;
-  code: string;
-  name: string;
-  theme: string;
-  equipment: string;
-  roomType: 'pod' | 'experience' | 'tribune';
-}
-
-export interface KioskData {
-  room: KioskRoom;
-  latestVisual: { imageUrl: string; createdAt: string } | null;
-}
+export type { KioskRoom, KioskData };
 
 /** Kiosk seçici için aktif odaların minimal listesi (PII yok). */
 export function listKioskRooms(): KioskRoom[] {

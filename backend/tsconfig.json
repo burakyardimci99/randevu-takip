@@ -23,7 +23,8 @@
     "moduleResolution": "node",
     "baseUrl": "./src",
     "paths": {
-      "@/*": ["*"]
+      "@/*": ["*"],
+      "@klab/shared": ["../../shared/index.d.ts"]
     }
   },
   "include": ["src/**/*"],

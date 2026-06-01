@@ -10,19 +10,10 @@ import { getImageProvider, variantSeed } from './image-gen.service';
 import { downloadAndStore, internalImageUrl } from './visual-store.service';
 import { invalidateShowcaseFeed } from './showcase-feed.service';
 import { broadcastToUser } from './sse.service';
+// Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
+import type { VisualStatus, VisualVariant } from '@klab/shared';
 
-export type VisualStatus = 'pending' | 'enhancing' | 'generating' | 'ready' | 'error';
-
-export interface VisualVariant {
-  seed: number;
-  /** 'ready' görselin URL'i — diske saklandıysa iç (prompt'suz) URL, değilse dış (fallback). */
-  url: string;
-  /** Baytlar sunucuda saklandı mı (provider'dan bağımsız servis). */
-  stored?: boolean;
-  /** Saklanan dosya uzantısı (jpg/png/webp…) — content-type türetimi için. */
-  ext?: string;
-  created_at: number;
-}
+export type { VisualStatus, VisualVariant };
 
 export interface VisualDto {
   id: string;

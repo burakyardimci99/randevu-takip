@@ -2,6 +2,10 @@
  * Oda servisi: oda listesi ve uygunluk hesaplaması.
  */
 import { getDb } from '../db/schema';
+// Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
+import type { HeatmapCell, HeatmapRoom, RoomHeatmap } from '@klab/shared';
+
+export type { HeatmapCell, HeatmapRoom, RoomHeatmap };
 
 export interface RoomDto {
   id: string;
@@ -218,29 +222,6 @@ export function getRoomsWithOccupancy(): RoomWithOccupancy[] {
 /* ============================================================
  * ODA × HAFTANIN GÜNÜ MÜSAİTLİK ISI-HARİTASI (#5c)
  * ============================================================ */
-
-export interface HeatmapCell {
-  weekday: number; // 1=Pzt..7=Paz
-  count: number; // o gün bu odayı kapsayan aktif booking sayısı (yoğunluk)
-}
-
-export interface HeatmapRoom {
-  roomId: string;
-  code: string;
-  name: string;
-  theme: string;
-  roomType: 'pod' | 'experience' | 'tribune';
-  days: HeatmapCell[]; // 7 hücre, Pzt..Paz
-  total: number;
-}
-
-export interface RoomHeatmap {
-  rooms: HeatmapRoom[];
-  from: string;
-  to: string;
-  maxCount: number; // renk yoğunluğu ölçeği için
-  weekdays: number[]; // [1..7]
-}
 
 /**
  * Oda × haftanın günü doluluk ısı-haritası. Tarih aralığı [from,to] (varsayılan:

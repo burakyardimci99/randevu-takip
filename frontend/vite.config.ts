@@ -10,6 +10,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
+      // Paylaşılan DTO paketi (#6). Yalnız tip → `import type` ile runtime'da
+      // silinir; alias scanner edge-case'i için güvenlik ağı.
+      '@klab/shared': path.resolve(__dirname, '../shared/index.d.ts'),
     },
   },
   server: {
