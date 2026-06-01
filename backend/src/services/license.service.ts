@@ -21,7 +21,7 @@
  *  - Sadece admin endpoint'ten erişilir.
  *  - Çıktıda PII (e-posta) sadece admin'e döner — public değil.
  */
-import { getDb } from '../db/schema';
+import { dbAll, getDb } from '../db/schema';
 
 /**
  * Lisans kataloğu. Anahtar: küçük harfli + normalleştirilmiş teknoloji adı.
@@ -161,13 +161,10 @@ interface BookingRow {
  * "Aktif" tanımı: status IN ('approved','pending','feedback_requested')
  * AND end_date >= bugün (geçmiş booking'ler lisans tutmaz).
  */
-export function getLicenseReport(): LicenseReport {
-  const db = getDb();
+export async function getLicenseReport(): Promise<LicenseReport> {
   const today = new Date().toISOString().slice(0, 10);
 
-  const rows = db
-    .prepare(
-      `SELECT b.id AS booking_id, b.user_id, b.technologies, b.status,
+  const rows = await dbAll(`SELECT b.id AS booking_id, b.user_id, b.technologies, b.status,
               b.start_date, b.end_date,
               u.full_name AS user_full_name, u.email AS user_email, u.department
        FROM bookings b
@@ -175,9 +172,7 @@ export function getLicenseReport(): LicenseReport {
        WHERE b.status IN ('approved', 'pending', 'feedback_requested')
          AND b.end_date >= ?
          AND u.status != 3
-       ORDER BY u.full_name ASC`
-    )
-    .all(today) as BookingRow[];
+       ORDER BY u.full_name ASC`, [today]) as BookingRow[];
 
   // Per-user aggregation
   const userMap = new Map<string, UserLicenseUsage>();
@@ -316,7 +311,7 @@ export function getLicenseReport(): LicenseReport {
  * Bir kullanıcının kendi lisans kullanımını döner (self-service için).
  * IDOR: yalnız çağıran user için.
  */
-export function getUserLicenseUsage(userId: string): UserLicenseUsage | null {
-  const report = getLicenseReport();
+export async function getUserLicenseUsage(userId: string): Promise<UserLicenseUsage | null> {
+  const report = await getLicenseReport();
   return report.byUser.find((u) => u.userId === userId) ?? null;
 }

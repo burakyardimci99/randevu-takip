@@ -7,7 +7,7 @@
  * 'passed' olmadan proje 'stage' aşamasına geçemez.
  */
 import { nanoid } from 'nanoid';
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
 import {
   GATE_DEFINITIONS,
   applicableGates,
@@ -65,38 +65,30 @@ function rowToGate(row: GateRow): QualityGate {
  * Proje 'development' aşamasına girince uygulanabilir kapıları
  * 'pending' olarak oluşturur. Idempotent — var olan kapıya dokunmaz.
  */
-export function initGatesForRequest(requestId: string, level: GovernanceLevel): void {
-  const db = getDb();
-  const insert = db.prepare(
-    `INSERT OR IGNORE INTO quality_gates
-       (id, request_id, gate_key, status, threshold)
-     VALUES (?, ?, ?, 'pending', ?)`
-  );
-  const txn = db.transaction(() => {
+export async function initGatesForRequest(requestId: string, level: GovernanceLevel): Promise<void> {
+  await dbTx(async () => {
     for (const key of applicableGates(level)) {
-      insert.run(nanoid(), requestId, key, GATE_DEFINITIONS[key].threshold);
+      await dbRun(
+        `INSERT OR IGNORE INTO quality_gates
+           (id, request_id, gate_key, status, threshold)
+         VALUES (?, ?, ?, 'pending', ?)`,
+        [nanoid(), requestId, key, GATE_DEFINITIONS[key].threshold]
+      );
     }
   });
-  txn();
 }
 
-export function listGatesForRequest(requestId: string): QualityGate[] {
-  const db = getDb();
-  const rows = db
-    .prepare('SELECT * FROM quality_gates WHERE request_id = ?')
-    .all(requestId) as GateRow[];
+export async function listGatesForRequest(requestId: string): Promise<QualityGate[]> {
+  const rows = await dbAll('SELECT * FROM quality_gates WHERE request_id = ?', [requestId]) as GateRow[];
   return sortGates(rows.map(rowToGate));
 }
 
 /** Birden çok talep için kapıları tek sorguda yükler. */
-export function listGatesForRequests(requestIds: string[]): Map<string, QualityGate[]> {
+export async function listGatesForRequests(requestIds: string[]): Promise<Map<string, QualityGate[]>> {
   const map = new Map<string, QualityGate[]>();
   if (requestIds.length === 0) return map;
-  const db = getDb();
   const placeholders = requestIds.map(() => '?').join(',');
-  const rows = db
-    .prepare(`SELECT * FROM quality_gates WHERE request_id IN (${placeholders})`)
-    .all(...requestIds) as GateRow[];
+  const rows = await dbAll(`SELECT * FROM quality_gates WHERE request_id IN (${placeholders})`, [...requestIds]) as GateRow[];
   for (const r of rows) {
     const list = map.get(r.request_id) ?? [];
     list.push(rowToGate(r));
@@ -122,43 +114,32 @@ export interface GateResultInput {
  * Bir kapının sonucunu günceller (admin / CI pipeline).
  * Kapı satırı yoksa oluşturur.
  */
-export function setGateResult(
+export async function setGateResult(
   requestId: string,
   gateKey: GateKey,
   input: GateResultInput
-): QualityGate {
-  const db = getDb();
+): Promise<QualityGate> {
   const def = GATE_DEFINITIONS[gateKey];
-  const existing = db
-    .prepare('SELECT id FROM quality_gates WHERE request_id = ? AND gate_key = ?')
-    .get(requestId, gateKey) as { id: string } | undefined;
+  const existing = await dbOne('SELECT id FROM quality_gates WHERE request_id = ? AND gate_key = ?', [requestId, gateKey]) as { id: string } | undefined;
 
   if (existing) {
-    db.prepare(
-      `UPDATE quality_gates SET
+    await dbRun(`UPDATE quality_gates SET
          status = ?, score = ?, detail = ?,
          evaluated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(input.status, input.score ?? null, input.detail?.trim() || null, existing.id);
+       WHERE id = ?`, [input.status, input.score ?? null, input.detail?.trim() || null, existing.id]);
   } else {
-    db.prepare(
-      `INSERT INTO quality_gates
+    await dbRun(`INSERT INTO quality_gates
          (id, request_id, gate_key, status, score, threshold, detail, evaluated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
-    ).run(
-      nanoid(),
+       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [nanoid(),
       requestId,
       gateKey,
       input.status,
       input.score ?? null,
       def?.threshold ?? null,
-      input.detail?.trim() || null
-    );
+      input.detail?.trim() || null]);
   }
 
-  const row = db
-    .prepare('SELECT * FROM quality_gates WHERE request_id = ? AND gate_key = ?')
-    .get(requestId, gateKey) as GateRow;
+  const row = await dbOne('SELECT * FROM quality_gates WHERE request_id = ? AND gate_key = ?', [requestId, gateKey]) as GateRow;
   return rowToGate(row);
 }
 
@@ -166,9 +147,9 @@ export function setGateResult(
  * Verilen yönetişim seviyesindeki TÜM uygulanabilir kapılar 'passed' mı?
  * (development → stage geçiş koşulu.)
  */
-export function allGatesPassed(requestId: string, level: GovernanceLevel): boolean {
+export async function allGatesPassed(requestId: string, level: GovernanceLevel): Promise<boolean> {
   const required = applicableGates(level);
-  const gates = listGatesForRequest(requestId);
+  const gates = await listGatesForRequest(requestId);
   return required.every(
     (key) => gates.find((g) => g.gateKey === key)?.status === 'passed'
   );

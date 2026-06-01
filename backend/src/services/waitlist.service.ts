@@ -19,7 +19,7 @@
  *    süresi geçmiş entry'ları 'expired' işaretle.
  */
 import { nanoid } from 'nanoid';
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { logger } from '../utils/logger';
 import { recordAudit } from '../services/audit.service';
@@ -129,31 +129,24 @@ export interface JoinWaitlistInput {
   technologies: string[];
 }
 
-export function joinWaitlist(userId: string, input: JoinWaitlistInput): WaitlistEntryDto {
+export async function joinWaitlist(userId: string, input: JoinWaitlistInput): Promise<WaitlistEntryDto> {
   if (!isStartDateValid(input.desiredStartDate)) {
     throw new HttpError(400, 'Başlangıç tarihi bugünden önce olamaz.', 'INVALID_START_DATE');
   }
 
-  const db = getDb();
   const endDate = addMonths(input.desiredStartDate, input.periodMonths);
 
-  const txn = db.transaction(() => {
+  const id = await dbTx(async () => {
     // Oda var mı?
-    const room = db
-      .prepare(`SELECT id FROM rooms WHERE id = ? AND is_active = 1`)
-      .get(input.roomId) as { id: string } | undefined;
+    const room = await dbOne(`SELECT id FROM rooms WHERE id = ? AND is_active = 1`, [input.roomId]) as { id: string } | undefined;
     if (!room) throw new HttpError(404, 'Oda bulunamadı.', 'ROOM_NOT_FOUND');
 
     // Aslında oda boşsa waitlist'e değil booking'e gitmeli — kontrol
-    const conflict = db
-      .prepare(
-        `SELECT id FROM bookings
+    const conflict = await dbOne(`SELECT id FROM bookings
          WHERE room_id = ?
            AND status IN ('pending', 'approved', 'feedback_requested')
            AND NOT (end_date < ? OR start_date > ?)
-         LIMIT 1`
-      )
-      .get(input.roomId, input.desiredStartDate, endDate);
+         LIMIT 1`, [input.roomId, input.desiredStartDate, endDate]);
     if (!conflict) {
       throw new HttpError(
         409,
@@ -163,14 +156,10 @@ export function joinWaitlist(userId: string, input: JoinWaitlistInput): Waitlist
     }
 
     // Aynı user aynı oda + tarih için zaten waiting/promoted entry var mı?
-    const existing = db
-      .prepare(
-        `SELECT id FROM waitlist
+    const existing = await dbOne(`SELECT id FROM waitlist
          WHERE user_id = ? AND room_id = ? AND desired_start_date = ?
            AND status IN ('waiting', 'promoted')
-         LIMIT 1`
-      )
-      .get(userId, input.roomId, input.desiredStartDate);
+         LIMIT 1`, [userId, input.roomId, input.desiredStartDate]);
     if (existing) {
       throw new HttpError(
         409,
@@ -180,22 +169,15 @@ export function joinWaitlist(userId: string, input: JoinWaitlistInput): Waitlist
     }
 
     // Position = mevcut maks + 1 (sadece waiting olanlar arasında)
-    const maxRow = db
-      .prepare(
-        `SELECT COALESCE(MAX(position), 0) AS max_pos
-         FROM waitlist WHERE room_id = ? AND status = 'waiting'`
-      )
-      .get(input.roomId) as { max_pos: number };
+    const maxRow = await dbOne(`SELECT COALESCE(MAX(position), 0) AS max_pos
+         FROM waitlist WHERE room_id = ? AND status = 'waiting'`, [input.roomId]) as { max_pos: number };
     const position = maxRow.max_pos + 1;
 
     const id = nanoid();
-    db.prepare(
-      `INSERT INTO waitlist (
+    await dbRun(`INSERT INTO waitlist (
          id, user_id, room_id, period_months, desired_start_date,
          project_name, project_description, help_needed, technologies, position, status
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`
-    ).run(
-      id,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`, [id,
       userId,
       input.roomId,
       input.periodMonths,
@@ -204,14 +186,11 @@ export function joinWaitlist(userId: string, input: JoinWaitlistInput): Waitlist
       input.projectDescription,
       input.helpNeeded,
       JSON.stringify(input.technologies),
-      position
-    );
+      position]);
 
     return id;
   });
-
-  const id = txn();
-  const entry = getWaitlistEntry(id);
+  const entry = await getWaitlistEntry(id);
   if (!entry) throw new HttpError(500, 'Waitlist kaydı yazıldı ama okunamadı.', 'INTERNAL');
 
   recordAudit({
@@ -234,70 +213,52 @@ export function joinWaitlist(userId: string, input: JoinWaitlistInput): Waitlist
   return entry;
 }
 
-export function getWaitlistEntry(id: string): WaitlistEntryDto | undefined {
-  const row = getDb()
-    .prepare(
-      `SELECT w.*, r.code AS room_code, r.name AS room_name,
+export async function getWaitlistEntry(id: string): Promise<WaitlistEntryDto | undefined> {
+  const row = await dbOne(`SELECT w.*, r.code AS room_code, r.name AS room_name,
               u.full_name AS user_full_name, u.email AS user_email
        FROM waitlist w
        INNER JOIN rooms r ON r.id = w.room_id
        INNER JOIN users u ON u.id = w.user_id
-       WHERE w.id = ? LIMIT 1`
-    )
-    .get(id) as WaitlistRow | undefined;
+       WHERE w.id = ? LIMIT 1`, [id]) as WaitlistRow | undefined;
   return row ? rowToDto(row) : undefined;
 }
 
-export function listUserWaitlist(userId: string): WaitlistEntryDto[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT w.*, r.code AS room_code, r.name AS room_name,
+export async function listUserWaitlist(userId: string): Promise<WaitlistEntryDto[]> {
+  const rows = await dbAll(`SELECT w.*, r.code AS room_code, r.name AS room_name,
               u.full_name AS user_full_name, u.email AS user_email
        FROM waitlist w
        INNER JOIN rooms r ON r.id = w.room_id
        INNER JOIN users u ON u.id = w.user_id
        WHERE w.user_id = ?
-       ORDER BY w.created_at DESC`
-    )
-    .all(userId) as WaitlistRow[];
+       ORDER BY w.created_at DESC`, [userId]) as WaitlistRow[];
   return rows.map(rowToDto);
 }
 
-export function listRoomWaitlist(roomId: string): WaitlistEntryDto[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT w.*, r.code AS room_code, r.name AS room_name,
+export async function listRoomWaitlist(roomId: string): Promise<WaitlistEntryDto[]> {
+  const rows = await dbAll(`SELECT w.*, r.code AS room_code, r.name AS room_name,
               u.full_name AS user_full_name, u.email AS user_email
        FROM waitlist w
        INNER JOIN rooms r ON r.id = w.room_id
        INNER JOIN users u ON u.id = w.user_id
        WHERE w.room_id = ? AND w.status = 'waiting'
-       ORDER BY w.position ASC`
-    )
-    .all(roomId) as WaitlistRow[];
+       ORDER BY w.position ASC`, [roomId]) as WaitlistRow[];
   return rows.map(rowToDto);
 }
 
-export function listAllWaitlist(): WaitlistEntryDto[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT w.*, r.code AS room_code, r.name AS room_name,
+export async function listAllWaitlist(): Promise<WaitlistEntryDto[]> {
+  const rows = await dbAll(`SELECT w.*, r.code AS room_code, r.name AS room_name,
               u.full_name AS user_full_name, u.email AS user_email
        FROM waitlist w
        INNER JOIN rooms r ON r.id = w.room_id
        INNER JOIN users u ON u.id = w.user_id
-       ORDER BY w.created_at DESC`
-    )
-    .all() as WaitlistRow[];
+       ORDER BY w.created_at DESC`, []) as WaitlistRow[];
   return rows.map(rowToDto);
 }
 
-export function cancelWaitlist(userId: string, waitlistId: string): { cancelled: boolean } {
-  const db = getDb();
-  const txn = db.transaction(() => {
-    const existing = db
-      .prepare(`SELECT id, status, room_id FROM waitlist WHERE id = ? AND user_id = ?`)
-      .get(waitlistId, userId) as
+export async function cancelWaitlist(userId: string, waitlistId: string): Promise<{ cancelled: boolean }> {
+
+  const roomId = await dbTx(async () => {
+    const existing = await dbOne(`SELECT id, status, room_id FROM waitlist WHERE id = ? AND user_id = ?`, [waitlistId, userId]) as
       | { id: string; status: string; room_id: string }
       | undefined;
     if (!existing) {
@@ -310,13 +271,9 @@ export function cancelWaitlist(userId: string, waitlistId: string): { cancelled:
         'WAITLIST_ENTRY_NOT_FOUND'
       );
     }
-    db.prepare(
-      `UPDATE waitlist SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-    ).run(waitlistId);
+    await dbRun(`UPDATE waitlist SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [waitlistId]);
     return existing.room_id;
   });
-
-  const roomId = txn();
 
   // Geriye kalanların position'larını yeniden hesapla
   recomputePositions(roomId);
@@ -341,21 +298,15 @@ export function cancelWaitlist(userId: string, waitlistId: string): { cancelled:
   return { cancelled: true };
 }
 
-function recomputePositions(roomId: string): void {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT id FROM waitlist
+async function recomputePositions(roomId: string): Promise<void> {
+  const rows = await dbAll(`SELECT id FROM waitlist
        WHERE room_id = ? AND status = 'waiting'
-       ORDER BY created_at ASC`
-    )
-    .all(roomId) as Array<{ id: string }>;
-  const txn = db.transaction(() => {
-    rows.forEach((row, idx) => {
-      db.prepare(`UPDATE waitlist SET position = ? WHERE id = ?`).run(idx + 1, row.id);
+       ORDER BY created_at ASC`, [roomId]) as Array<{ id: string }>;
+  await dbTx(async () => {
+    rows.forEach(async (row, idx) => {
+      await dbRun(`UPDATE waitlist SET position = ? WHERE id = ?`, [idx + 1, row.id]);
     });
   });
-  txn();
 }
 
 export type WaitlistMove = 'up' | 'down' | 'top';
@@ -365,11 +316,8 @@ export type WaitlistMove = 'up' | 'down' | 'top';
  * Yalnızca aynı odadaki 'waiting' kayıtlar arasında çalışır; position'lar
  * yeni sıraya göre 1..N olarak yeniden numaralandırılır.
  */
-export function moveWaitlistEntry(waitlistId: string, move: WaitlistMove): void {
-  const db = getDb();
-  const entry = db
-    .prepare(`SELECT id, room_id, status FROM waitlist WHERE id = ?`)
-    .get(waitlistId) as { id: string; room_id: string; status: string } | undefined;
+export async function moveWaitlistEntry(waitlistId: string, move: WaitlistMove): Promise<void> {
+  const entry = await dbOne(`SELECT id, room_id, status FROM waitlist WHERE id = ?`, [waitlistId]) as { id: string; room_id: string; status: string } | undefined;
   if (!entry) {
     throw new HttpError(404, 'Waitlist kaydı bulunamadı.', 'WAITLIST_ENTRY_NOT_FOUND');
   }
@@ -382,13 +330,9 @@ export function moveWaitlistEntry(waitlistId: string, move: WaitlistMove): void 
   }
 
   const ids = (
-    db
-      .prepare(
-        `SELECT id FROM waitlist
+    await dbAll(`SELECT id FROM waitlist
          WHERE room_id = ? AND status = 'waiting'
-         ORDER BY position ASC`
-      )
-      .all(entry.room_id) as Array<{ id: string }>
+         ORDER BY position ASC`, [entry.room_id]) as Array<{ id: string }>
   ).map((r) => r.id);
 
   const idx = ids.indexOf(waitlistId);
@@ -405,15 +349,11 @@ export function moveWaitlistEntry(waitlistId: string, move: WaitlistMove): void 
   } else {
     return; // sınırda — değişiklik yok
   }
-
-  const txn = db.transaction(() => {
-    next.forEach((id, i) => {
-      db.prepare(
-        `UPDATE waitlist SET position = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-      ).run(i + 1, id);
+  await dbTx(async () => {
+    next.forEach(async (id, i) => {
+      await dbRun(`UPDATE waitlist SET position = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [i + 1, id]);
     });
   });
-  txn();
 
   recordAudit({
     eventType: 'waitlist.reordered',
@@ -438,14 +378,9 @@ export function moveWaitlistEntry(waitlistId: string, move: WaitlistMove): void 
  *  - Aynı oda için aynı anda birden fazla entry promote olabilir, çakışmıyorsa.
  */
 export async function tryPromoteForRoom(roomId: string): Promise<string[]> {
-  const db = getDb();
-  const entries = db
-    .prepare(
-      `SELECT * FROM waitlist
+  const entries = await dbAll(`SELECT * FROM waitlist
        WHERE room_id = ? AND status = 'waiting'
-       ORDER BY position ASC`
-    )
-    .all(roomId) as WaitlistRow[];
+       ORDER BY position ASC`, [roomId]) as WaitlistRow[];
 
   const promotedIds: string[] = [];
 
@@ -456,33 +391,25 @@ export async function tryPromoteForRoom(roomId: string): Promise<string[]> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     if (new Date(`${entry.desired_start_date}T00:00:00`).getTime() < today.getTime()) {
-      db.prepare(
-        `UPDATE waitlist SET status = 'expired', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-      ).run(entry.id);
+      await dbRun(`UPDATE waitlist SET status = 'expired', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [entry.id]);
       continue;
     }
 
     let newBookingId: string | null = null;
-    const txn = db.transaction(() => {
-      const conflict = db
-        .prepare(
-          `SELECT id FROM bookings
+
+    newBookingId = await dbTx(async () => {
+      const conflict = await dbOne(`SELECT id FROM bookings
            WHERE room_id = ?
              AND status IN ('pending', 'approved', 'feedback_requested')
              AND NOT (end_date < ? OR start_date > ?)
-           LIMIT 1`
-        )
-        .get(roomId, entry.desired_start_date, endDate);
+           LIMIT 1`, [roomId, entry.desired_start_date, endDate]);
       if (conflict) return null;
 
       const id = nanoid();
-      db.prepare(
-        `INSERT INTO bookings (
+      await dbRun(`INSERT INTO bookings (
            id, user_id, room_id, period_months, start_date, end_date,
            project_name, project_description, help_needed, technologies, status
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
-      ).run(
-        id,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`, [id,
         entry.user_id,
         entry.room_id,
         entry.period_months,
@@ -491,20 +418,15 @@ export async function tryPromoteForRoom(roomId: string): Promise<string[]> {
         entry.project_name,
         entry.project_description,
         entry.help_needed,
-        entry.technologies
-      );
+        entry.technologies]);
 
-      db.prepare(
-        `UPDATE waitlist
+      await dbRun(`UPDATE waitlist
          SET status = 'promoted', promoted_booking_id = ?, notified_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?`
-      ).run(id, entry.id);
+         WHERE id = ?`, [id, entry.id]);
 
       return id;
     });
-
-    newBookingId = txn();
 
     if (newBookingId) {
       promotedIds.push(entry.id);
@@ -533,13 +455,9 @@ export async function tryPromoteForRoom(roomId: string): Promise<string[]> {
       });
 
       // E-posta: "Sıranız geldi" bildirimi
-      const userRow = db
-        .prepare('SELECT email, full_name FROM users WHERE id = ? AND status = 1')
-        .get(entry.user_id) as { email: string; full_name: string } | undefined;
+      const userRow = await dbOne('SELECT email, full_name FROM users WHERE id = ? AND status = 1', [entry.user_id]) as { email: string; full_name: string } | undefined;
       if (userRow?.email) {
-        const roomRow = db
-          .prepare('SELECT code FROM rooms WHERE id = ?')
-          .get(roomId) as { code: string } | undefined;
+        const roomRow = await dbOne('SELECT code FROM rooms WHERE id = ?', [roomId]) as { code: string } | undefined;
         void enqueueEmail(
           waitlistPromotedEmail({
             to: userRow.email,
@@ -580,12 +498,7 @@ export function startWaitlistMaintenance(intervalMs = 30_000): void {
   if (maintenanceTimer) return;
   const tick = async () => {
     try {
-      const db = getDb();
-      const roomsWithWaitlist = db
-        .prepare(
-          `SELECT DISTINCT room_id FROM waitlist WHERE status = 'waiting'`
-        )
-        .all() as Array<{ room_id: string }>;
+      const roomsWithWaitlist = await dbAll(`SELECT DISTINCT room_id FROM waitlist WHERE status = 'waiting'`, []) as Array<{ room_id: string }>;
       for (const r of roomsWithWaitlist) {
         await tryPromoteForRoom(r.room_id);
       }

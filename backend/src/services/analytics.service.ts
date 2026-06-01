@@ -4,7 +4,12 @@
  * Tüm sorgular READ-ONLY ve parameterized.
  * Veri tek bir endpoint'te toplanır → frontend bir kez fetch yapar.
  */
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, isPg } from '../db/schema';
+
+/** Gün farkı (end-start+1) — lehçe-bağımsız: pg date çıkarma, sqlite julianday. */
+const DAY_DIFF = isPg()
+  ? '(b.end_date::date - b.start_date::date + 1)'
+  : '(julianday(b.end_date) - julianday(b.start_date) + 1)';
 
 export interface DailyBookingPoint {
   date: string; // YYYY-MM-DD
@@ -76,8 +81,7 @@ function lastNDates(n: number): string[] {
   return out;
 }
 
-export function getAnalytics(): AnalyticsResponse {
-  const db = getDb();
+export async function getAnalytics(): Promise<AnalyticsResponse> {
   const dates = lastNDates(30);
 
   // 1) Günlük booking sayıları (created bazlı + approved/rejected reviewed_at bazlı)
@@ -86,24 +90,16 @@ export function getAnalytics(): AnalyticsResponse {
     dailyMap.set(d, { date: d, created: 0, approved: 0, rejected: 0 });
   }
 
-  const createdRows = db
-    .prepare(
-      `SELECT DATE(created_at) AS d, COUNT(*) AS c FROM bookings
-       WHERE DATE(created_at) >= ? GROUP BY DATE(created_at)`
-    )
-    .all(dates[0]) as Array<{ d: string; c: number }>;
+  const createdRows = await dbAll(`SELECT substr(created_at, 1, 10) AS d, COUNT(*) AS c FROM bookings
+       WHERE substr(created_at, 1, 10) >= ? GROUP BY substr(created_at, 1, 10)`, [dates[0]]) as Array<{ d: string; c: number }>;
   for (const row of createdRows) {
     const p = dailyMap.get(row.d);
     if (p) p.created = row.c;
   }
 
-  const reviewedRows = db
-    .prepare(
-      `SELECT DATE(reviewed_at) AS d, status, COUNT(*) AS c FROM bookings
-       WHERE reviewed_at IS NOT NULL AND DATE(reviewed_at) >= ?
-       GROUP BY DATE(reviewed_at), status`
-    )
-    .all(dates[0]) as Array<{ d: string; status: string; c: number }>;
+  const reviewedRows = await dbAll(`SELECT substr(reviewed_at, 1, 10) AS d, status, COUNT(*) AS c FROM bookings
+       WHERE reviewed_at IS NOT NULL AND substr(reviewed_at, 1, 10) >= ?
+       GROUP BY substr(reviewed_at, 1, 10), status`, [dates[0]]) as Array<{ d: string; status: string; c: number }>;
   for (const row of reviewedRows) {
     const p = dailyMap.get(row.d);
     if (!p) continue;
@@ -112,23 +108,19 @@ export function getAnalytics(): AnalyticsResponse {
   }
 
   // 2) Oda kullanım istatistikleri
-  const roomRows = db
-    .prepare(
-      `SELECT r.id AS room_id, r.code AS room_code, r.name AS room_name,
+  const roomRows = await dbAll(`SELECT r.id AS room_id, r.code AS room_code, r.name AS room_name,
               COUNT(b.id) AS total,
               SUM(CASE WHEN b.status = 'approved' THEN 1 ELSE 0 END) AS approved,
               COALESCE(SUM(
                 CASE WHEN b.status = 'approved'
-                  THEN (julianday(b.end_date) - julianday(b.start_date) + 1)
+                  THEN ${DAY_DIFF}
                   ELSE 0
                 END
               ), 0) AS util_days
        FROM rooms r
        LEFT JOIN bookings b ON b.room_id = r.id
        GROUP BY r.id
-       ORDER BY util_days DESC`
-    )
-    .all() as Array<{
+       ORDER BY util_days DESC`, []) as Array<{
       room_id: string;
       room_code: string;
       room_name: string;
@@ -146,9 +138,7 @@ export function getAnalytics(): AnalyticsResponse {
   }));
 
   // 3) Top teknolojiler (JSON array parse)
-  const techRows = db
-    .prepare(`SELECT technologies FROM bookings WHERE status IN ('approved', 'pending', 'feedback_requested')`)
-    .all() as Array<{ technologies: string }>;
+  const techRows = await dbAll(`SELECT technologies FROM bookings WHERE status IN ('approved', 'pending', 'feedback_requested')`, []) as Array<{ technologies: string }>;
   const techCount = new Map<string, number>();
   for (const row of techRows) {
     try {
@@ -171,27 +161,21 @@ export function getAnalytics(): AnalyticsResponse {
     .slice(0, 12);
 
   // 4) Status dağılımı
-  const statusRows = db
-    .prepare(`SELECT status, COUNT(*) AS c FROM bookings GROUP BY status`)
-    .all() as Array<{ status: string; c: number }>;
+  const statusRows = await dbAll(`SELECT status, COUNT(*) AS c FROM bookings GROUP BY status`, []) as Array<{ status: string; c: number }>;
   const statusBreakdown: StatusBreakdown[] = statusRows.map((r) => ({
     status: r.status,
     count: r.c,
   }));
 
   // 5) Periyot dağılımı
-  const periodRows = db
-    .prepare(`SELECT period_months, COUNT(*) AS c FROM bookings GROUP BY period_months ORDER BY period_months ASC`)
-    .all() as Array<{ period_months: number; c: number }>;
+  const periodRows = await dbAll(`SELECT period_months, COUNT(*) AS c FROM bookings GROUP BY period_months ORDER BY period_months ASC`, []) as Array<{ period_months: number; c: number }>;
   const periodDistribution: PeriodDistribution[] = periodRows.map((r) => ({
     periodMonths: r.period_months,
     count: r.c,
   }));
 
   // 6) Top user'lar
-  const userRows = db
-    .prepare(
-      `SELECT u.id, u.full_name, u.email,
+  const userRows = await dbAll(`SELECT u.id, u.full_name, u.email,
               COUNT(b.id) AS total,
               SUM(CASE WHEN b.status = 'approved' THEN 1 ELSE 0 END) AS approved
        FROM users u
@@ -200,9 +184,7 @@ export function getAnalytics(): AnalyticsResponse {
        GROUP BY u.id
        HAVING total > 0
        ORDER BY total DESC, approved DESC
-       LIMIT 8`
-    )
-    .all() as Array<{
+       LIMIT 8`, []) as Array<{
       id: string;
       full_name: string;
       email: string;
@@ -227,9 +209,9 @@ export function getAnalytics(): AnalyticsResponse {
     feedbackRequested: 0,
     activeWaitlist: 0,
   };
-  const tCount = db.prepare('SELECT COUNT(*) AS c FROM bookings').get() as { c: number };
+  const tCount = await dbOne('SELECT COUNT(*) AS c FROM bookings', []) as { c: number };
   totals.bookings = tCount.c;
-  const uCount = db.prepare('SELECT COUNT(*) AS c FROM users WHERE status != 3').get() as { c: number };
+  const uCount = await dbOne('SELECT COUNT(*) AS c FROM users WHERE status != 3', []) as { c: number };
   totals.users = uCount.c;
   for (const s of statusBreakdown) {
     if (s.status === 'approved') totals.approved = s.count;
@@ -238,9 +220,7 @@ export function getAnalytics(): AnalyticsResponse {
     if (s.status === 'feedback_requested') totals.feedbackRequested = s.count;
   }
   try {
-    const wCount = db
-      .prepare(`SELECT COUNT(*) AS c FROM waitlist WHERE status = 'waiting'`)
-      .get() as { c: number };
+    const wCount = await dbOne(`SELECT COUNT(*) AS c FROM waitlist WHERE status = 'waiting'`, []) as { c: number };
     totals.activeWaitlist = wCount.c;
   } catch {
     // waitlist tablosu henüz yoksa (migration sırası)

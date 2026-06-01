@@ -12,7 +12,7 @@
  *    asıl işlem (review, create vb.) etkilenmez.
  */
 import { nanoid } from 'nanoid';
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, getDb } from '../db/schema';
 import { logger } from '../utils/logger';
 
 export type NotificationCategory =
@@ -68,22 +68,17 @@ export interface PushNotificationInput {
 /**
  * Tek bir alıcıya bildirim oluşturur. Best-effort — hata fırlatmaz.
  */
-export function pushNotification(input: PushNotificationInput): void {
+export async function pushNotification(input: PushNotificationInput): Promise<void> {
   try {
-    const db = getDb();
-    db.prepare(
-      `INSERT INTO notifications
+    await dbRun(`INSERT INTO notifications
          (id, recipient_id, recipient_type, category, title, body, link)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      nanoid(),
+       VALUES (?, ?, ?, ?, ?, ?, ?)`, [nanoid(),
       input.recipientId,
       input.recipientType,
       input.category,
       input.title.slice(0, 200),
       input.body.slice(0, 500),
-      input.link ?? null
-    );
+      input.link ?? null]);
   } catch (err) {
     logger.error('notification_push_failed', { err: (err as Error).message });
   }
@@ -102,67 +97,49 @@ export function pushNotificationBulk(
   }
 }
 
-export function listNotifications(
+export async function listNotifications(
   recipientId: string,
   recipientType: RecipientType,
   limit = 30
-): Notification[] {
-  const db = getDb();
+): Promise<Notification[]> {
   const safeLimit = Math.min(Math.max(1, limit), 100);
-  const rows = db
-    .prepare(
-      `SELECT id, category, title, body, link, read, created_at
+  const rows = await dbAll(`SELECT id, category, title, body, link, read, created_at
        FROM notifications
        WHERE recipient_id = ? AND recipient_type = ?
        ORDER BY created_at DESC
-       LIMIT ?`
-    )
-    .all(recipientId, recipientType, safeLimit) as DbRow[];
+       LIMIT ?`, [recipientId, recipientType, safeLimit]) as DbRow[];
   return rows.map(rowToNotification);
 }
 
-export function countUnreadNotifications(
+export async function countUnreadNotifications(
   recipientId: string,
   recipientType: RecipientType
-): number {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT COUNT(*) AS c FROM notifications
-       WHERE recipient_id = ? AND recipient_type = ? AND read = 0`
-    )
-    .get(recipientId, recipientType) as { c: number };
+): Promise<number> {
+  const row = await dbOne(`SELECT COUNT(*) AS c FROM notifications
+       WHERE recipient_id = ? AND recipient_type = ? AND read = 0`, [recipientId, recipientType]) as { c: number };
   return row.c;
 }
 
 /**
  * Tek bildirimi okundu işaretler. IDOR: sadece kendi bildirimini.
  */
-export function markNotificationRead(
+export async function markNotificationRead(
   recipientId: string,
   recipientType: RecipientType,
   notificationId: string
-): void {
-  const db = getDb();
-  db.prepare(
-    `UPDATE notifications SET read = 1
-     WHERE id = ? AND recipient_id = ? AND recipient_type = ?`
-  ).run(notificationId, recipientId, recipientType);
+): Promise<void> {
+  await dbRun(`UPDATE notifications SET read = 1
+     WHERE id = ? AND recipient_id = ? AND recipient_type = ?`, [notificationId, recipientId, recipientType]);
 }
 
 /**
  * Alıcının tüm bildirimlerini okundu işaretler.
  */
-export function markAllNotificationsRead(
+export async function markAllNotificationsRead(
   recipientId: string,
   recipientType: RecipientType
-): number {
-  const db = getDb();
-  const res = db
-    .prepare(
-      `UPDATE notifications SET read = 1
-       WHERE recipient_id = ? AND recipient_type = ? AND read = 0`
-    )
-    .run(recipientId, recipientType);
+): Promise<number> {
+  const res = await dbRun(`UPDATE notifications SET read = 1
+       WHERE recipient_id = ? AND recipient_type = ? AND read = 0`, [recipientId, recipientType]);
   return res.changes;
 }

@@ -32,7 +32,7 @@ const VISUAL_A_NOTREADY = nanoid(); // A'nın prompt'suz/hazır olmayan görseli
 const VISUAL_B = nanoid(); // B'nin görseli
 
 beforeAll(async () => {
-  initSchema();
+  await initSchema();
   const db = getDb();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
   for (const [id, email, name] of [
@@ -80,24 +80,24 @@ beforeAll(async () => {
   ).run(VISUAL_B, USER_B, '/api/public/visuals/' + VISUAL_B + '/image?v=999', JSON.stringify([{ seed: 999, url: 'x', stored: false, created_at: 1 }]));
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 describe('Görsel sahiplik / IDOR', () => {
-  it('sahibi kendi görselini görür', () => {
-    const v = getVisualForUser(USER_A, VISUAL_A);
+  it('sahibi kendi görselini görür', async () => {
+    const v = await getVisualForUser(USER_A, VISUAL_A);
     expect(v?.id).toBe(VISUAL_A);
     expect(v?.status).toBe('ready');
   });
 
-  it("başka kullanıcı A'nın görselini GÖREMEZ (undefined)", () => {
-    expect(getVisualForUser(USER_B, VISUAL_A)).toBeUndefined();
+  it("başka kullanıcı A'nın görselini GÖREMEZ (undefined)", async () => {
+    expect(await getVisualForUser(USER_B, VISUAL_A)).toBeUndefined();
   });
 
-  it('listMyVisuals yalnız kendi görsellerini döner', () => {
-    const aList = listMyVisuals(USER_A);
-    const bList = listMyVisuals(USER_B);
+  it('listMyVisuals yalnız kendi görsellerini döner', async () => {
+    const aList = await listMyVisuals(USER_A);
+    const bList = await listMyVisuals(USER_B);
     expect(aList.every((v) => v.userId === USER_A)).toBe(true);
     expect(aList.some((v) => v.id === VISUAL_A)).toBe(true);
     expect(bList.some((v) => v.id === VISUAL_A)).toBe(false);
@@ -118,8 +118,8 @@ describe('Görsel sahiplik / IDOR', () => {
 });
 
 describe('Showcase arkaplan görseli — sahiplik', () => {
-  it('sahibi kendi booking + kendi görselini arkaplan atayabilir', () => {
-    const res = setBookingShowcaseImage(USER_A, BOOKING_A, VISUAL_A);
+  it('sahibi kendi booking + kendi görselini arkaplan atayabilir', async () => {
+    const res = await setBookingShowcaseImage(USER_A, BOOKING_A, VISUAL_A);
     expect(res.showcaseImageUrl).toContain(VISUAL_A);
     // DB'ye yazıldı mı?
     const row = getDb()
@@ -128,26 +128,20 @@ describe('Showcase arkaplan görseli — sahiplik', () => {
     expect(row.showcase_image_url).toContain(VISUAL_A);
   });
 
-  it('visualId=null arkaplanı kaldırır', () => {
-    const res = setBookingShowcaseImage(USER_A, BOOKING_A, null);
+  it('visualId=null arkaplanı kaldırır', async () => {
+    const res = await setBookingShowcaseImage(USER_A, BOOKING_A, null);
     expect(res.showcaseImageUrl).toBeNull();
   });
 
-  it("A, B'nin booking'ine görsel atayamaz (IDOR)", () => {
-    expect(() => setBookingShowcaseImage(USER_A, BOOKING_B, VISUAL_A)).toThrow(
-      /bulunamadı|BOOKING_NOT_FOUND/i
-    );
+  it("A, B'nin booking'ine görsel atayamaz (IDOR)", async () => {
+    await expect(setBookingShowcaseImage(USER_A, BOOKING_B, VISUAL_A)).rejects.toThrow(/bulunamadı|BOOKING_NOT_FOUND/i);
   });
 
-  it("A, B'nin görselini KENDİ booking'ine atayamaz (IDOR)", () => {
-    expect(() => setBookingShowcaseImage(USER_A, BOOKING_A, VISUAL_B)).toThrow(
-      /bulunamadı|VISUAL_NOT_FOUND/i
-    );
+  it("A, B'nin görselini KENDİ booking'ine atayamaz (IDOR)", async () => {
+    await expect(setBookingShowcaseImage(USER_A, BOOKING_A, VISUAL_B)).rejects.toThrow(/bulunamadı|VISUAL_NOT_FOUND/i);
   });
 
-  it('hazır olmayan görsel arkaplan atanamaz', () => {
-    expect(() => setBookingShowcaseImage(USER_A, BOOKING_A, VISUAL_A_NOTREADY)).toThrow(
-      /hazır değil|VISUAL_NOT_READY/i
-    );
+  it('hazır olmayan görsel arkaplan atanamaz', async () => {
+    await expect(setBookingShowcaseImage(USER_A, BOOKING_A, VISUAL_A_NOTREADY)).rejects.toThrow(/hazır değil|VISUAL_NOT_READY/i);
   });
 });

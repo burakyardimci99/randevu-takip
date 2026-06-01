@@ -6,7 +6,7 @@
  * YZ/Ar-Ge Mühendisi kararı verir; karar olmadan bir sonraki aşamaya geçilemez.
  */
 import { nanoid } from 'nanoid';
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 
 export type ApprovalType = 'stage' | 'production';
@@ -63,43 +63,28 @@ const SELECT_WITH_APPROVER = `
  * Bekleyen bir onay oluşturur. Aynı tip için zaten bekleyen onay varsa
  * yenisini açmaz (idempotent).
  */
-export function createPendingApproval(requestId: string, type: ApprovalType): void {
-  const db = getDb();
-  const existing = db
-    .prepare(
-      `SELECT id FROM human_approvals
-       WHERE request_id = ? AND approval_type = ? AND decision = 'pending'`
-    )
-    .get(requestId, type);
+export async function createPendingApproval(requestId: string, type: ApprovalType): Promise<void> {
+  const existing = await dbOne(`SELECT id FROM human_approvals
+       WHERE request_id = ? AND approval_type = ? AND decision = 'pending'`, [requestId, type]);
   if (existing) return;
-  db.prepare(
-    `INSERT INTO human_approvals (id, request_id, approval_type, decision)
-     VALUES (?, ?, ?, 'pending')`
-  ).run(nanoid(), requestId, type);
+  await dbRun(`INSERT INTO human_approvals (id, request_id, approval_type, decision)
+     VALUES (?, ?, ?, 'pending')`, [nanoid(), requestId, type]);
 }
 
-export function listApprovalsForRequest(requestId: string): HumanApproval[] {
-  const db = getDb();
-  const rows = db
-    .prepare(`${SELECT_WITH_APPROVER} WHERE ha.request_id = ? ORDER BY ha.created_at ASC`)
-    .all(requestId) as ApprovalRow[];
+export async function listApprovalsForRequest(requestId: string): Promise<HumanApproval[]> {
+  const rows = await dbAll(`${SELECT_WITH_APPROVER} WHERE ha.request_id = ? ORDER BY ha.created_at ASC`, [requestId]) as ApprovalRow[];
   return rows.map(rowToApproval);
 }
 
 /** Birden çok talep için onayları tek sorguda yükler. */
-export function listApprovalsForRequests(
+export async function listApprovalsForRequests(
   requestIds: string[]
-): Map<string, HumanApproval[]> {
+): Promise<Map<string, HumanApproval[]>> {
   const map = new Map<string, HumanApproval[]>();
   if (requestIds.length === 0) return map;
-  const db = getDb();
   const placeholders = requestIds.map(() => '?').join(',');
-  const rows = db
-    .prepare(
-      `${SELECT_WITH_APPROVER} WHERE ha.request_id IN (${placeholders})
-       ORDER BY ha.created_at ASC`
-    )
-    .all(...requestIds) as ApprovalRow[];
+  const rows = await dbAll(`${SELECT_WITH_APPROVER} WHERE ha.request_id IN (${placeholders})
+       ORDER BY ha.created_at ASC`, [...requestIds]) as ApprovalRow[];
   for (const r of rows) {
     const list = map.get(r.request_id) ?? [];
     list.push(rowToApproval(r));
@@ -109,17 +94,12 @@ export function listApprovalsForRequests(
 }
 
 /** Belirli tipteki bekleyen onayı döner (yoksa undefined). */
-export function getPendingApproval(
+export async function getPendingApproval(
   requestId: string,
   type: ApprovalType
-): HumanApproval | undefined {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `${SELECT_WITH_APPROVER}
-       WHERE ha.request_id = ? AND ha.approval_type = ? AND ha.decision = 'pending'`
-    )
-    .get(requestId, type) as ApprovalRow | undefined;
+): Promise<HumanApproval | undefined> {
+  const row = await dbOne(`${SELECT_WITH_APPROVER}
+       WHERE ha.request_id = ? AND ha.approval_type = ? AND ha.decision = 'pending'`, [requestId, type]) as ApprovalRow | undefined;
   return row ? rowToApproval(row) : undefined;
 }
 
@@ -133,19 +113,14 @@ export interface DecideApprovalInput {
  * Bekleyen onaya karar verir. Bekleyen onay yoksa veya zaten karara
  * bağlanmışsa hata fırlatır.
  */
-export function decideApproval(
+export async function decideApproval(
   requestId: string,
   type: ApprovalType,
   approverId: string,
   input: DecideApprovalInput
-): HumanApproval {
-  const db = getDb();
-  const pending = db
-    .prepare(
-      `SELECT id FROM human_approvals
-       WHERE request_id = ? AND approval_type = ? AND decision = 'pending'`
-    )
-    .get(requestId, type) as { id: string } | undefined;
+): Promise<HumanApproval> {
+  const pending = await dbOne(`SELECT id FROM human_approvals
+       WHERE request_id = ? AND approval_type = ? AND decision = 'pending'`, [requestId, type]) as { id: string } | undefined;
 
   if (!pending) {
     throw new HttpError(
@@ -155,23 +130,17 @@ export function decideApproval(
     );
   }
 
-  db.prepare(
-    `UPDATE human_approvals SET
+  await dbRun(`UPDATE human_approvals SET
        decision = ?, approver_id = ?,
        release_note = ?, risk_assessment = ?,
        decided_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).run(
-    input.decision,
+     WHERE id = ?`, [input.decision,
     approverId,
     input.releaseNote?.trim() || null,
     input.riskAssessment?.trim() || null,
-    pending.id
-  );
+    pending.id]);
 
   const db2 = getDb();
-  const row = db2
-    .prepare(`${SELECT_WITH_APPROVER} WHERE ha.id = ?`)
-    .get(pending.id) as ApprovalRow;
+  const row = await dbOne(`${SELECT_WITH_APPROVER} WHERE ha.id = ?`, [pending.id]) as ApprovalRow;
   return rowToApproval(row);
 }

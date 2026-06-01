@@ -12,7 +12,7 @@
  *  - Galeriyi değiştiren mutasyonlar (showcase görseli, görünürlük toggle) cache'i
  *    açıkça invalidate eder; admin onay/red gibi seyrek değişimler 30 sn TTL ile yakalanır.
  */
-import { getDb } from '../db/schema';
+import { dbAll, getDb } from '../db/schema';
 import { getShowcaseEngagement } from './showcase.service';
 // Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
 import type { ShowcaseItem, ShowcaseTechnology } from '@klab/shared';
@@ -57,10 +57,8 @@ function parseTechs(raw: string): string[] {
   return [];
 }
 
-function queryItems(): ShowcaseItem[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT b.id, b.project_name, b.project_description, b.technologies,
+async function queryItems(): Promise<ShowcaseItem[]> {
+  const rows = await dbAll(`SELECT b.id, b.project_name, b.project_description, b.technologies,
               b.period_months, b.start_date, b.end_date, b.showcase_highlight,
               b.reviewed_at, b.user_id, b.showcase_image_url,
               r.code AS room_code, r.name AS room_name, r.district, r.neighborhood, r.theme,
@@ -70,9 +68,7 @@ function queryItems(): ShowcaseItem[] {
        INNER JOIN users u ON u.id = b.user_id
        WHERE b.status = 'approved' AND b.showcase_visible = 1
        ORDER BY b.showcase_highlight DESC, b.reviewed_at DESC
-       LIMIT 60`
-    )
-    .all() as ShowcaseRow[];
+       LIMIT 60`, []) as ShowcaseRow[];
 
   return rows.map((r) => ({
     id: r.id,
@@ -95,13 +91,9 @@ function queryItems(): ShowcaseItem[] {
   }));
 }
 
-function queryTechnologies(): ShowcaseTechnology[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT technologies FROM bookings
-       WHERE status = 'approved' AND showcase_visible = 1`
-    )
-    .all() as Array<{ technologies: string }>;
+async function queryTechnologies(): Promise<ShowcaseTechnology[]> {
+  const rows = await dbAll(`SELECT technologies FROM bookings
+       WHERE status = 'approved' AND showcase_visible = 1`, []) as Array<{ technologies: string }>;
 
   const counts = new Map<string, number>();
   for (const r of rows) {
@@ -121,12 +113,12 @@ let stableCache: { items: ShowcaseItem[]; technologies: ShowcaseTechnology[]; ex
   null;
 const TTL_MS = 30_000;
 
-function getStable(): { items: ShowcaseItem[]; technologies: ShowcaseTechnology[] } {
+async function getStable(): Promise<{ items: ShowcaseItem[]; technologies: ShowcaseTechnology[] }> {
   const now = Date.now();
   if (!stableCache || stableCache.expiresAt <= now) {
     stableCache = {
-      items: queryItems(),
-      technologies: queryTechnologies(),
+      items: await queryItems(),
+      technologies: await queryTechnologies(),
       expiresAt: now + TTL_MS,
     };
   }
@@ -139,24 +131,24 @@ export function invalidateShowcaseFeed(): void {
 }
 
 /** Tüm showcase bundle'ı — items(cache) + technologies(cache) + engagement(taze). */
-export function getShowcaseFeed(): ShowcaseFeed {
-  const { items, technologies } = getStable();
+export async function getShowcaseFeed(): Promise<ShowcaseFeed> {
+  const { items, technologies } = await getStable();
   return {
     items,
     total: items.length,
     technologies,
-    engagement: getShowcaseEngagement(), // her çağrıda taze — beğeni/yorum anında yansır
+    engagement: await getShowcaseEngagement(), // her çağrıda taze — beğeni/yorum anında yansır
     generatedAt: new Date().toISOString(),
   };
 }
 
 /** Eski /showcase route'u için (cache paylaşımlı). */
-export function getShowcaseItems(): { items: ShowcaseItem[]; total: number } {
-  const { items } = getStable();
+export async function getShowcaseItems(): Promise<{ items: ShowcaseItem[]; total: number }> {
+  const { items } = await getStable();
   return { items, total: items.length };
 }
 
 /** Eski /showcase/technologies route'u için (cache paylaşımlı). */
-export function getShowcaseTechnologies(): ShowcaseTechnology[] {
-  return getStable().technologies;
+export async function getShowcaseTechnologies(): Promise<ShowcaseTechnology[]> {
+  return (await getStable()).technologies;
 }

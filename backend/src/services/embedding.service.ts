@@ -16,7 +16,7 @@
  * - DB'de embedding JSON string olarak saklanır (model + dim + values).
  * - Cosine similarity: pure JS, prepared statement ile booking_id eşle.
  */
-import { getDb } from '../db/schema';
+import { dbAll, dbRun, getDb } from '../db/schema';
 import { logger } from '../utils/logger';
 // Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
 import type { SimilarBooking, DuplicateMatch } from '@klab/shared';
@@ -200,20 +200,17 @@ export function bookingTextForEmbedding(args: {
 
 export async function saveBookingEmbedding(bookingId: string, text: string): Promise<void> {
   const emb = await generateEmbedding(text);
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO project_embeddings (booking_id, embedding, model, dim)
+  await dbRun(`INSERT INTO project_embeddings (booking_id, embedding, model, dim)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(booking_id) DO UPDATE SET
        embedding = excluded.embedding,
        model = excluded.model,
        dim = excluded.dim,
-       created_at = CURRENT_TIMESTAMP`
-  ).run(bookingId, JSON.stringify(emb.vector), emb.model, emb.dim);
+       created_at = CURRENT_TIMESTAMP`, [bookingId, JSON.stringify(emb.vector), emb.model, emb.dim]);
 }
 
-export function deleteBookingEmbedding(bookingId: string): void {
-  getDb().prepare(`DELETE FROM project_embeddings WHERE booking_id = ?`).run(bookingId);
+export async function deleteBookingEmbedding(bookingId: string): Promise<void> {
+  await dbRun(`DELETE FROM project_embeddings WHERE booking_id = ?`, [bookingId]);
 }
 
 /**
@@ -248,7 +245,6 @@ export async function findSimilarBookings(args: {
 
   const queryEmb = await generateEmbedding(args.queryText);
 
-  const db = getDb();
   const conditions: string[] = ['pe.booking_id = b.id'];
   const params: unknown[] = [];
 
@@ -298,7 +294,7 @@ export async function findSimilarBookings(args: {
     LIMIT 1000
   `;
 
-  const rows = db.prepare(sql).all(...params) as Array<{
+  const rows = await dbAll(sql, [...params]) as Array<{
     booking_id: string;
     embedding: string;
     dim: number;
@@ -405,15 +401,10 @@ export async function detectDuplicate(args: {
  * (Migration sonrası ilk run — geçmiş data için).
  */
 export async function backfillEmbeddings(): Promise<{ processed: number; skipped: number }> {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT b.id, b.project_name, b.project_description, b.technologies
+  const rows = await dbAll(`SELECT b.id, b.project_name, b.project_description, b.technologies
        FROM bookings b
        LEFT JOIN project_embeddings pe ON pe.booking_id = b.id
-       WHERE pe.booking_id IS NULL`
-    )
-    .all() as Array<{
+       WHERE pe.booking_id IS NULL`, []) as Array<{
       id: string;
       project_name: string;
       project_description: string;

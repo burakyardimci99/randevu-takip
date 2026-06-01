@@ -27,7 +27,7 @@ const USER_B = nanoid();
 const ADMIN = nanoid();
 
 beforeAll(async () => {
-  initSchema();
+  await initSchema();
   const db = getDb();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
   db.prepare(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`).run(
@@ -41,8 +41,8 @@ beforeAll(async () => {
   );
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 /** Geçerli bir CreateLicenseRequestInput üretir. */
@@ -65,8 +65,8 @@ function validInput(overrides: Partial<CreateLicenseRequestInput> = {}): CreateL
 }
 
 describe('createLicenseRequest', () => {
-  it('pending talep oluşturur ve PNG alanlarını saklar', () => {
-    const r = createLicenseRequest(USER_A, validInput());
+  it('pending talep oluşturur ve PNG alanlarını saklar', async () => {
+    const r = await createLicenseRequest(USER_A, validInput());
     expect(r.status).toBe('pending');
     expect(r.requestTitle).toBe('Müşteri Şikayet Sınıflandırma Modeli');
     expect(r.expectedBenefit).toContain('azalma');
@@ -77,8 +77,8 @@ describe('createLicenseRequest', () => {
     expect(r.technicalStack).toBe('Python, FastAPI');
   });
 
-  it('çoklu araç gönderilince junction tablosuna sıralı yazar', () => {
-    const r = createLicenseRequest(
+  it('çoklu araç gönderilince junction tablosuna sıralı yazar', async () => {
+    const r = await createLicenseRequest(
       USER_A,
       validInput({
         items: [
@@ -94,10 +94,10 @@ describe('createLicenseRequest', () => {
     expect(r.licenseName).toBe('Araç 1');
   });
 
-  it('katalog key gönderilince vendor/category katalogdan doldurulur (defense-in-depth)', () => {
+  it('katalog key gönderilince vendor/category katalogdan doldurulur (defense-in-depth)', async () => {
     const catalogKey = Object.keys(LICENSE_CATALOG)[0]!;
     const info = LICENSE_CATALOG[catalogKey]!;
-    const r = createLicenseRequest(
+    const r = await createLicenseRequest(
       USER_A,
       validInput({
         items: [{ licenseKey: catalogKey, licenseName: 'YANLIŞ AD', vendor: 'YANLIŞ', category: 'YANLIŞ' }],
@@ -109,19 +109,19 @@ describe('createLicenseRequest', () => {
     expect(r.items[0]!.licenseName).toBe(info.name);
   });
 
-  it('listUserLicenseRequests sadece o kullanıcının taleplerini items ile döner', () => {
-    const before = listUserLicenseRequests(USER_B).length;
-    createLicenseRequest(USER_B, validInput({ requestTitle: 'B kullanıcısı talebi 12345' }));
-    const mine = listUserLicenseRequests(USER_B);
+  it('listUserLicenseRequests sadece o kullanıcının taleplerini items ile döner', async () => {
+    const before = (await listUserLicenseRequests(USER_B)).length;
+    await createLicenseRequest(USER_B, validInput({ requestTitle: 'B kullanıcısı talebi 12345' }));
+    const mine = await listUserLicenseRequests(USER_B);
     expect(mine.length).toBe(before + 1);
     expect(mine.every((r) => r.items.length >= 1)).toBe(true);
   });
 });
 
 describe('updateLicenseRequest', () => {
-  it('pending talebi günceller ve items listesini yeniler', () => {
-    const created = createLicenseRequest(USER_A, validInput());
-    const updated = updateLicenseRequest(
+  it('pending talebi günceller ve items listesini yeniler', async () => {
+    const created = await createLicenseRequest(USER_A, validInput());
+    const updated = await updateLicenseRequest(
       USER_A,
       created.id,
       validInput({
@@ -135,28 +135,28 @@ describe('updateLicenseRequest', () => {
     expect(updated.status).toBe('pending');
   });
 
-  it('feedback_requested talebi güncellenince statü pending olur', () => {
-    const created = createLicenseRequest(USER_A, validInput());
-    reviewLicenseRequest(ADMIN, created.id, { action: 'request_feedback', adminFeedback: 'Detay ver.' });
-    const updated = updateLicenseRequest(USER_A, created.id, validInput({ reason: 'Revize edilmiş gerekçe metni.' }));
+  it('feedback_requested talebi güncellenince statü pending olur', async () => {
+    const created = await createLicenseRequest(USER_A, validInput());
+    await reviewLicenseRequest(ADMIN, created.id, { action: 'request_feedback', adminFeedback: 'Detay ver.' });
+    const updated = await updateLicenseRequest(USER_A, created.id, validInput({ reason: 'Revize edilmiş gerekçe metni.' }));
     expect(updated.status).toBe('pending');
   });
 
-  it('IDOR: başka kullanıcının talebini güncelleyemez (404)', () => {
-    const created = createLicenseRequest(USER_A, validInput());
-    expect(() => updateLicenseRequest(USER_B, created.id, validInput())).toThrowError(HttpError);
+  it('IDOR: başka kullanıcının talebini güncelleyemez (404)', async () => {
+    const created = await createLicenseRequest(USER_A, validInput());
+    await expect(updateLicenseRequest(USER_B, created.id, validInput())).rejects.toThrow(HttpError);
     try {
-      updateLicenseRequest(USER_B, created.id, validInput());
+      await updateLicenseRequest(USER_B, created.id, validInput());
     } catch (e) {
       expect((e as HttpError).status).toBe(404);
     }
   });
 
-  it('sonuçlanmış (approved) talep güncellenemez (400)', () => {
-    const created = createLicenseRequest(USER_A, validInput());
-    reviewLicenseRequest(ADMIN, created.id, { action: 'approve' });
+  it('sonuçlanmış (approved) talep güncellenemez (400)', async () => {
+    const created = await createLicenseRequest(USER_A, validInput());
+    await reviewLicenseRequest(ADMIN, created.id, { action: 'approve' });
     try {
-      updateLicenseRequest(USER_A, created.id, validInput());
+      await updateLicenseRequest(USER_A, created.id, validInput());
       throw new Error('beklenmeyen: hata fırlatmadı');
     } catch (e) {
       expect(e).toBeInstanceOf(HttpError);
@@ -166,17 +166,17 @@ describe('updateLicenseRequest', () => {
 });
 
 describe('reviewLicenseRequest', () => {
-  it('approve → status approved + reviewer kaydı', () => {
-    const created = createLicenseRequest(USER_A, validInput());
-    const reviewed = reviewLicenseRequest(ADMIN, created.id, { action: 'approve' });
+  it('approve → status approved + reviewer kaydı', async () => {
+    const created = await createLicenseRequest(USER_A, validInput());
+    const reviewed = await reviewLicenseRequest(ADMIN, created.id, { action: 'approve' });
     expect(reviewed.status).toBe('approved');
     expect(reviewed.reviewedBy).toBe(ADMIN);
     expect(reviewed.reviewedAt).toBeTruthy();
   });
 
-  it('reject → status rejected + admin notu', () => {
-    const created = createLicenseRequest(USER_A, validInput());
-    const reviewed = reviewLicenseRequest(ADMIN, created.id, {
+  it('reject → status rejected + admin notu', async () => {
+    const created = await createLicenseRequest(USER_A, validInput());
+    const reviewed = await reviewLicenseRequest(ADMIN, created.id, {
       action: 'reject',
       adminFeedback: 'Bütçe dışı.',
     });
@@ -184,11 +184,11 @@ describe('reviewLicenseRequest', () => {
     expect(reviewed.adminFeedback).toBe('Bütçe dışı.');
   });
 
-  it('sonuçlanmış talep tekrar review edilemez (400)', () => {
-    const created = createLicenseRequest(USER_A, validInput());
-    reviewLicenseRequest(ADMIN, created.id, { action: 'approve' });
+  it('sonuçlanmış talep tekrar review edilemez (400)', async () => {
+    const created = await createLicenseRequest(USER_A, validInput());
+    await reviewLicenseRequest(ADMIN, created.id, { action: 'approve' });
     try {
-      reviewLicenseRequest(ADMIN, created.id, { action: 'reject' });
+      await reviewLicenseRequest(ADMIN, created.id, { action: 'reject' });
       throw new Error('beklenmeyen: hata fırlatmadı');
     } catch (e) {
       expect(e).toBeInstanceOf(HttpError);
@@ -196,9 +196,9 @@ describe('reviewLicenseRequest', () => {
     }
   });
 
-  it('var olmayan talep → 404', () => {
+  it('var olmayan talep → 404', async () => {
     try {
-      reviewLicenseRequest(ADMIN, 'olmayan-id-123', { action: 'approve' });
+      await reviewLicenseRequest(ADMIN, 'olmayan-id-123', { action: 'approve' });
       throw new Error('beklenmeyen: hata fırlatmadı');
     } catch (e) {
       expect(e).toBeInstanceOf(HttpError);

@@ -9,7 +9,7 @@
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
 import { config } from '../config/env';
-import { getDb } from '../db/schema';
+import { dbOne, dbRun, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import type { AdminRecord, SubjectKind, UserRecord } from '../types/auth.types';
 import {
@@ -43,10 +43,7 @@ export async function changeAdminPassword(
   currentPassword: string,
   newPassword: string
 ): Promise<void> {
-  const db = getDb();
-  const admin = db
-    .prepare('SELECT id, password_hash FROM admins WHERE id = ? AND status = 1')
-    .get(adminId) as { id: string; password_hash: string } | undefined;
+  const admin = await dbOne('SELECT id, password_hash FROM admins WHERE id = ? AND status = 1', [adminId]) as { id: string; password_hash: string } | undefined;
   if (!admin) {
     throw new HttpError(404, 'Yönetici bulunamadı.', 'ADMIN_NOT_FOUND');
   }
@@ -55,9 +52,7 @@ export async function changeAdminPassword(
     throw new HttpError(400, 'Mevcut parola yanlış.', 'INVALID_CURRENT_PASSWORD');
   }
   const passwordHash = await hashPassword(newPassword);
-  db.prepare(
-    'UPDATE admins SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-  ).run(passwordHash, adminId);
+  await dbRun('UPDATE admins SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [passwordHash, adminId]);
 }
 
 type SubjectRecord = UserRecord | AdminRecord;
@@ -73,10 +68,10 @@ function expectedGovernanceRoleFor(kind: SubjectKind): 'analitik_danisman' | 'yz
   return null;
 }
 
-function findSubjectByEmail(kind: SubjectKind, email: string): SubjectRecord | undefined {
+async function findSubjectByEmail(kind: SubjectKind, email: string): Promise<SubjectRecord | undefined> {
   const table = tableFor(kind);
   const sql = `SELECT * FROM ${table} WHERE email = ? AND status = 1 LIMIT 1`;
-  return getDb().prepare(sql).get(email) as SubjectRecord | undefined;
+  return await dbOne(sql, [email]) as SubjectRecord | undefined;
 }
 
 function isLocked(record: SubjectRecord): boolean {
@@ -84,7 +79,7 @@ function isLocked(record: SubjectRecord): boolean {
   return new Date(record.locked_until).getTime() > Date.now();
 }
 
-function incrementFailedLogin(kind: SubjectKind, id: string, currentFails: number): void {
+async function incrementFailedLogin(kind: SubjectKind, id: string, currentFails: number): Promise<void> {
   const table = tableFor(kind);
   const newCount = currentFails + 1;
   const shouldLock = newCount >= config.maxLoginAttempts;
@@ -92,24 +87,16 @@ function incrementFailedLogin(kind: SubjectKind, id: string, currentFails: numbe
     ? new Date(Date.now() + config.loginLockoutMinutes * 60_000).toISOString()
     : null;
 
-  getDb()
-    .prepare(
-      `UPDATE ${table}
+  await dbRun(`UPDATE ${table}
        SET failed_login_count = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    )
-    .run(newCount, lockUntil, id);
+       WHERE id = ?`, [newCount, lockUntil, id]);
 }
 
-function resetFailedLogin(kind: SubjectKind, id: string): void {
+async function resetFailedLogin(kind: SubjectKind, id: string): Promise<void> {
   const table = tableFor(kind);
-  getDb()
-    .prepare(
-      `UPDATE ${table}
+  await dbRun(`UPDATE ${table}
        SET failed_login_count = 0, locked_until = NULL, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    )
-    .run(id);
+       WHERE id = ?`, [id]);
 }
 
 export interface LoginResult {
@@ -131,7 +118,7 @@ export async function login(
   email: string,
   password: string
 ): Promise<LoginResult> {
-  const record = findSubjectByEmail(kind, email);
+  const record = await findSubjectByEmail(kind, email);
 
   if (!record) {
     // Side channel timing leak'i azaltmak için yine de argon2 hesaplaması yap.
@@ -172,7 +159,7 @@ export async function login(
   };
 
   const { token: accessToken, ttl } = signAccessToken(kind, accessPayload);
-  const { token: refreshToken } = issueRefreshToken(kind, record.id);
+  const { token: refreshToken } = await issueRefreshToken(kind, record.id);
 
   return {
     tokens: { accessToken, refreshToken, expiresIn: ttl },
@@ -204,15 +191,12 @@ const GENERIC_REGISTER_ERROR =
   'Kayıt tamamlanamadı. Mevcut hesabınız varsa lütfen giriş yapın.';
 
 export async function registerUser(input: RegisterInput): Promise<{ id: string; email: string; fullName: string }> {
-  const db = getDb();
   const normalizedEmail = input.email.trim().toLowerCase();
 
   // 1) Çakışma kontrolü — hem admins hem users tablosunda
-  const existingAdmin = db
-    .prepare('SELECT id FROM admins WHERE email = ? LIMIT 1')
-    .get(normalizedEmail);
+  const existingAdmin = await dbOne('SELECT id FROM admins WHERE email = ? LIMIT 1', [normalizedEmail]);
   const existingUser = !existingAdmin
-    ? db.prepare('SELECT id FROM users WHERE email = ? LIMIT 1').get(normalizedEmail)
+    ? await dbOne('SELECT id FROM users WHERE email = ? LIMIT 1', [normalizedEmail])
     : null;
 
   if (existingAdmin || existingUser) {
@@ -229,15 +213,11 @@ export async function registerUser(input: RegisterInput): Promise<{ id: string; 
   // (SECURITY C2). Self-service registration ile governance role alınamaz.
   const id = nanoid();
   try {
-    db.prepare(
-      `INSERT INTO users (id, email, password_hash, full_name, role, status, governance_role)
-       VALUES (?, ?, ?, ?, 'user', 1, NULL)`
-    ).run(
-      id,
+    await dbRun(`INSERT INTO users (id, email, password_hash, full_name, role, status, governance_role)
+       VALUES (?, ?, ?, ?, 'user', 1, NULL)`, [id,
       normalizedEmail,
       passwordHash,
-      input.fullName.trim()
-    );
+      input.fullName.trim()]);
   } catch (err) {
     // UNIQUE constraint çakışması (yarış durumu) — yine generic mesaj
     if ((err as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -249,11 +229,9 @@ export async function registerUser(input: RegisterInput): Promise<{ id: string; 
   return { id, email: normalizedEmail, fullName: input.fullName.trim() };
 }
 
-export function findSubjectById(kind: SubjectKind, id: string): SubjectRecord | undefined {
+export async function findSubjectById(kind: SubjectKind, id: string): Promise<SubjectRecord | undefined> {
   const table = tableFor(kind);
-  const row = getDb()
-    .prepare(`SELECT * FROM ${table} WHERE id = ? AND status = 1 LIMIT 1`)
-    .get(id) as SubjectRecord | undefined;
+  const row = await dbOne(`SELECT * FROM ${table} WHERE id = ? AND status = 1 LIMIT 1`, [id]) as SubjectRecord | undefined;
   if (!row) return undefined;
 
   // Yönetişim kind'ları için governance_role eşleşmesi şart — DB'de role
@@ -285,7 +263,7 @@ export function findSubjectById(kind: SubjectKind, id: string): SubjectRecord | 
  */
 export async function unifiedLogin(email: string, password: string): Promise<LoginResult & { kind: SubjectKind }> {
   // 1) Admin tablosunda dene
-  const adminRecord = findSubjectByEmail('admin', email);
+  const adminRecord = await findSubjectByEmail('admin', email);
   if (adminRecord) {
     if (isLocked(adminRecord)) {
       throw new HttpError(
@@ -302,7 +280,7 @@ export async function unifiedLogin(email: string, password: string): Promise<Log
       revokeAllForSubjectAllKinds(adminRecord.id);
       const accessPayload = { sub: adminRecord.id, role: adminRecord.role, email: adminRecord.email };
       const { token: accessToken, ttl } = signAccessToken('admin', accessPayload);
-      const { token: refreshToken } = issueRefreshToken('admin', adminRecord.id);
+      const { token: refreshToken } = await issueRefreshToken('admin', adminRecord.id);
       return {
         kind: 'admin',
         tokens: { accessToken, refreshToken, expiresIn: ttl },
@@ -316,7 +294,7 @@ export async function unifiedLogin(email: string, password: string): Promise<Log
   }
 
   // 2) User tablosunda dene
-  const userRecord = findSubjectByEmail('user', email);
+  const userRecord = await findSubjectByEmail('user', email);
   if (!userRecord) {
     // Hiçbir tabloda yok — yine de decoy hash (timing protection)
     await argon2.hash('decoy_password_for_timing_protection', ARGON2_OPTIONS);
@@ -358,7 +336,7 @@ export async function unifiedLogin(email: string, password: string): Promise<Log
     governanceRole,
   };
   const { token: accessToken, ttl } = signAccessToken(effectiveKind, accessPayload);
-  const { token: refreshToken } = issueRefreshToken(effectiveKind, userRecord.id);
+  const { token: refreshToken } = await issueRefreshToken(effectiveKind, userRecord.id);
   return {
     kind: effectiveKind,
     tokens: { accessToken, refreshToken, expiresIn: ttl },

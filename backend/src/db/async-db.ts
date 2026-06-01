@@ -14,6 +14,7 @@
  *  - `INSERT OR IGNORE`→ `INSERT … ON CONFLICT DO NOTHING`
  * Tarih/zaman kolonları pg'de de TEXT (string karşılaştırma davranışı korunur).
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { config } from '../config/env';
@@ -129,7 +130,11 @@ let pgPool: any = null;
 function pgPoolHandle(): any {
   if (pgPool) return pgPool;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { Pool } = require('pg');
+  const pg = require('pg');
+  // COUNT(*) vb. bigint (OID 20) varsayılan string döner → SQLite gibi number yap.
+  // (id/sayım değerleri küçük; precision kaybı yok. int4 zaten number döner.)
+  pg.types.setTypeParser(20, (v: string) => parseInt(v, 10));
+  const { Pool } = pg;
   pgPool = new Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
   pgPool.on('error', (err: Error) => logger.error('pg_pool_error', { err: err.message }));
   return pgPool;
@@ -165,20 +170,31 @@ function activeExecutor(): DbExecutor {
   return dialect === 'pg' ? pgExecutor(pgPoolHandle()) : sqliteExecutor(sqliteHandle());
 }
 
+/**
+ * Aktif transaction context'i. dbTx içindeyken global dbAll/dbOne/dbRun/dbExec
+ * OTOMATİK transaction bağlantısına yönlenir (pg: tx client, sqlite: aynı handle).
+ * Böylece transaction gövdesinde ekstra `tx.` kullanımı GEREKMEZ — sadece sarmalama.
+ */
+const txContext = new AsyncLocalStorage<DbExecutor>();
+
+function currentExecutor(): DbExecutor {
+  return txContext.getStore() ?? activeExecutor();
+}
+
 export function dbAll<T = unknown>(sql: string, params: unknown[] = []): Promise<T[]> {
-  return activeExecutor().all<T>(sql, params);
+  return currentExecutor().all<T>(sql, params);
 }
 
 export function dbOne<T = unknown>(sql: string, params: unknown[] = []): Promise<T | undefined> {
-  return activeExecutor().one<T>(sql, params);
+  return currentExecutor().one<T>(sql, params);
 }
 
 export function dbRun(sql: string, params: unknown[] = []): Promise<RunResult> {
-  return activeExecutor().run(sql, params);
+  return currentExecutor().run(sql, params);
 }
 
 export function dbExec(sql: string): Promise<void> {
-  return activeExecutor().exec(sql);
+  return currentExecutor().exec(sql);
 }
 
 /**
@@ -190,9 +206,11 @@ export function dbExec(sql: string): Promise<void> {
 export async function dbTx<T>(fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
   if (dialect === 'pg') {
     const client = await pgPoolHandle().connect();
+    const tx = pgExecutor(client);
     try {
       await client.query('BEGIN');
-      const result = await fn(pgExecutor(client));
+      // ALS: gövdedeki global dbX çağrıları bu client'a (transaction'a) yönlenir.
+      const result = await txContext.run(tx, () => fn(tx));
       await client.query('COMMIT');
       return result;
     } catch (err) {
@@ -211,7 +229,7 @@ export async function dbTx<T>(fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
   const tx = sqliteExecutor(handle);
   handle.exec('BEGIN');
   try {
-    const result = await fn(tx);
+    const result = await txContext.run(tx, () => fn(tx));
     handle.exec('COMMIT');
     return result;
   } catch (err) {

@@ -11,7 +11,7 @@
  */
 import speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
-import { getDb } from '../db/schema';
+import { dbOne, dbRun, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { config } from '../config/env';
 
@@ -29,14 +29,10 @@ export interface MfaStatus {
 
 const ISSUER = 'KLAB-Randevu';
 
-function getAdminRow(
+async function getAdminRow(
   adminId: string
-): { id: string; email: string; totp_secret: string | null; totp_enabled: number; totp_backup_codes: string | null } {
-  const row = getDb()
-    .prepare(
-      'SELECT id, email, totp_secret, totp_enabled, totp_backup_codes FROM admins WHERE id = ? AND status = 1'
-    )
-    .get(adminId) as
+): Promise<{ id: string; email: string; totp_secret: string | null; totp_enabled: number; totp_backup_codes: string | null }> {
+  const row = await dbOne('SELECT id, email, totp_secret, totp_enabled, totp_backup_codes FROM admins WHERE id = ? AND status = 1', [adminId]) as
     | {
         id: string;
         email: string;
@@ -50,7 +46,7 @@ function getAdminRow(
 }
 
 export async function enrollMfa(adminId: string): Promise<MfaEnrollResult> {
-  const row = getAdminRow(adminId);
+  const row = await getAdminRow(adminId);
   if (row.totp_enabled === 1) {
     throw new HttpError(409, 'MFA zaten etkin.', 'MFA_ALREADY_ENABLED');
   }
@@ -73,11 +69,7 @@ export async function enrollMfa(adminId: string): Promise<MfaEnrollResult> {
 
   // Secret + backup codes DB'ye yazılır — ancak totp_enabled hâlâ 0
   // (kullanıcı 6-digit ile verify edene kadar aktif değil)
-  getDb()
-    .prepare(
-      'UPDATE admins SET totp_secret = ?, totp_backup_codes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-    )
-    .run(secret.base32, JSON.stringify(backupCodes), adminId);
+  await dbRun('UPDATE admins SET totp_secret = ?, totp_backup_codes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [secret.base32, JSON.stringify(backupCodes), adminId]);
 
   const qrCodeDataUrl = await qrcode.toDataURL(secret.otpauth_url ?? '');
 
@@ -94,11 +86,11 @@ export async function enrollMfa(adminId: string): Promise<MfaEnrollResult> {
  * - İlk verify enroll'u tamamlar (totp_enabled = 1)
  * - Sonraki verify'lar normal MFA challenge.
  */
-export function verifyMfaCode(
+export async function verifyMfaCode(
   adminId: string,
   code: string
-): { valid: boolean; usedBackupCode: boolean } {
-  const row = getAdminRow(adminId);
+): Promise<{ valid: boolean; usedBackupCode: boolean }> {
+  const row = await getAdminRow(adminId);
   if (!row.totp_secret) {
     throw new HttpError(409, 'MFA henüz başlatılmadı.', 'MFA_NOT_ENABLED');
   }
@@ -114,11 +106,7 @@ export function verifyMfaCode(
   if (ok) {
     // İlk verify: enrollment'ı tamamla
     if (row.totp_enabled === 0) {
-      getDb()
-        .prepare(
-          'UPDATE admins SET totp_enabled = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-        )
-        .run(adminId);
+      await dbRun('UPDATE admins SET totp_enabled = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [adminId]);
     }
     return { valid: true, usedBackupCode: false };
   }
@@ -134,11 +122,7 @@ export function verifyMfaCode(
     const idx = codes.findIndex((c) => c === code.toUpperCase().trim());
     if (idx >= 0) {
       codes.splice(idx, 1);
-      getDb()
-        .prepare(
-          'UPDATE admins SET totp_backup_codes = ?, totp_enabled = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-        )
-        .run(JSON.stringify(codes), adminId);
+      await dbRun('UPDATE admins SET totp_backup_codes = ?, totp_enabled = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [JSON.stringify(codes), adminId]);
       return { valid: true, usedBackupCode: true };
     }
   }
@@ -146,20 +130,16 @@ export function verifyMfaCode(
   return { valid: false, usedBackupCode: false };
 }
 
-export function disableMfa(adminId: string): void {
-  const row = getAdminRow(adminId);
+export async function disableMfa(adminId: string): Promise<void> {
+  const row = await getAdminRow(adminId);
   if (row.totp_enabled === 0) {
     throw new HttpError(409, 'MFA zaten devre dışı.', 'MFA_NOT_ENABLED');
   }
-  getDb()
-    .prepare(
-      'UPDATE admins SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-    )
-    .run(adminId);
+  await dbRun('UPDATE admins SET totp_enabled = 0, totp_secret = NULL, totp_backup_codes = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [adminId]);
 }
 
-export function getMfaStatus(adminId: string): MfaStatus {
-  const row = getAdminRow(adminId);
+export async function getMfaStatus(adminId: string): Promise<MfaStatus> {
+  const row = await getAdminRow(adminId);
   let remaining = 0;
   if (row.totp_backup_codes) {
     try {
@@ -175,11 +155,8 @@ export function getMfaStatus(adminId: string): MfaStatus {
   };
 }
 
-export function isMfaRequired(adminId: string): boolean {
-  const db = getDb();
-  const row = db
-    .prepare('SELECT totp_enabled FROM admins WHERE id = ? AND status = 1')
-    .get(adminId) as { totp_enabled: number } | undefined;
+export async function isMfaRequired(adminId: string): Promise<boolean> {
+  const row = await dbOne('SELECT totp_enabled FROM admins WHERE id = ? AND status = 1', [adminId]) as { totp_enabled: number } | undefined;
   return !!row && row.totp_enabled === 1;
 }
 

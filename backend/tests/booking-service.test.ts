@@ -23,7 +23,7 @@ const USER_B = nanoid();
 const ROOM = nanoid();
 
 beforeAll(async () => {
-  initSchema();
+  await initSchema();
   const db = getDb();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
   db.prepare(
@@ -38,8 +38,8 @@ beforeAll(async () => {
   ).run(ROOM, 'TX-01', 'Test · Oda', 'Test', 'Mahalle', 4);
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 const futureDate = (daysFromNow: number) => {
@@ -49,8 +49,8 @@ const futureDate = (daysFromNow: number) => {
 };
 
 describe('createBooking', () => {
-  it('user A için pending booking oluşturur', () => {
-    const result = createBooking(USER_A, {
+  it('user A için pending booking oluşturur', async () => {
+    const result = await createBooking(USER_A, {
       roomId: ROOM,
       periodMonths: 1,
       startDate: futureDate(7),
@@ -64,9 +64,8 @@ describe('createBooking', () => {
     expect(result.roomCode).toBe('TX-01');
   });
 
-  it('aynı oda + aynı tarihte ÇAKIŞAN booking reddedilir', () => {
-    expect(() =>
-      createBooking(USER_B, {
+  it('aynı oda + aynı tarihte ÇAKIŞAN booking reddedilir', async () => {
+    await expect(createBooking(USER_B, {
         roomId: ROOM,
         periodMonths: 1,
         startDate: futureDate(8), // existing 7..37, new 8..37 → overlap
@@ -74,12 +73,11 @@ describe('createBooking', () => {
         projectDescription: 'İkinci test booking açıklaması — çakışmalı.',
         helpNeeded: 'Hiçbiri',
         technologies: ['GPT'],
-      })
-    ).toThrow(HttpError);
+      })).rejects.toThrow(HttpError);
   });
 
-  it('aynı oda + farklı (çakışmayan) tarihte ikinci booking oluşturulabilir', () => {
-    const result = createBooking(USER_B, {
+  it('aynı oda + farklı (çakışmayan) tarihte ikinci booking oluşturulabilir', async () => {
+    const result = await createBooking(USER_B, {
       roomId: ROOM,
       periodMonths: 1,
       startDate: futureDate(90), // 90..120 — overlap yok
@@ -94,14 +92,13 @@ describe('createBooking', () => {
 });
 
 describe('IDOR koruması', () => {
-  it("user A, user B'nin booking'ini güncelleyemez", () => {
+  it("user A, user B'nin booking'ini güncelleyemez", async () => {
     const db = getDb();
     const userBBooking = db
       .prepare('SELECT id FROM bookings WHERE user_id = ? LIMIT 1')
       .get(USER_B) as { id: string };
 
-    expect(() =>
-      updateBooking(USER_A, userBBooking.id, {
+    await expect(updateBooking(USER_A, userBBooking.id, {
         roomId: ROOM,
         periodMonths: 1,
         startDate: futureDate(91),
@@ -109,24 +106,21 @@ describe('IDOR koruması', () => {
         projectDescription: 'Bu update başarısız olmalı — IDOR koruması test.',
         helpNeeded: 'Hiçbiri',
         technologies: ['Claude'],
-      })
-    ).toThrow(/bulunamadı|BOOKING_NOT_FOUND/i);
+      })).rejects.toThrow(/bulunamadı|BOOKING_NOT_FOUND/i);
   });
 
-  it("user A, user B'nin booking'ini silemez", () => {
+  it("user A, user B'nin booking'ini silemez", async () => {
     const db = getDb();
     const userBBooking = db
       .prepare('SELECT id FROM bookings WHERE user_id = ? LIMIT 1')
       .get(USER_B) as { id: string };
 
-    expect(() => deleteBooking(USER_A, userBBooking.id)).toThrow(
-      /bulunamadı|BOOKING_NOT_FOUND/i
-    );
+    await expect(deleteBooking(USER_A, userBBooking.id)).rejects.toThrow(/bulunamadı|BOOKING_NOT_FOUND/i);
   });
 });
 
 describe('Status kısıtı', () => {
-  it('approved booking düzenlenemez', () => {
+  it('approved booking düzenlenemez', async () => {
     const db = getDb();
     // user A'nın booking'ini approved yap
     const aBooking = db
@@ -134,8 +128,7 @@ describe('Status kısıtı', () => {
       .get(USER_A) as { id: string };
     db.prepare("UPDATE bookings SET status = 'approved' WHERE id = ?").run(aBooking.id);
 
-    expect(() =>
-      updateBooking(USER_A, aBooking.id, {
+    await expect(updateBooking(USER_A, aBooking.id, {
         roomId: ROOM,
         periodMonths: 1,
         startDate: futureDate(7),
@@ -143,7 +136,6 @@ describe('Status kısıtı', () => {
         projectDescription: 'Approved booking düzenlenmemeli — status koruması.',
         helpNeeded: 'Hiçbiri',
         technologies: ['Claude'],
-      })
-    ).toThrow(/NOT_EDITABLE|düzenlenemez/i);
+      })).rejects.toThrow(/NOT_EDITABLE|düzenlenemez/i);
   });
 });

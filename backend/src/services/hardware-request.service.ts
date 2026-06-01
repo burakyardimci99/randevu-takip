@@ -11,7 +11,7 @@
  * - reviewed_by + reviewed_at ile audit-able (§8)
  */
 import { nanoid } from 'nanoid';
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import {
   pushNotification,
@@ -144,30 +144,23 @@ export interface CreateHardwareRequestInput {
  * USER — talep oluştur / güncelle / kendi taleplerini listele
  * ============================================================ */
 
-export function createHardwareRequest(
+export async function createHardwareRequest(
   userId: string,
   input: CreateHardwareRequestInput
-): HardwareRequest {
-  const db = getDb();
+): Promise<HardwareRequest> {
   const id = nanoid();
 
-  db.prepare(
-    `INSERT INTO hardware_requests
+  await dbRun(`INSERT INTO hardware_requests
        (id, user_id, equipment_type, equipment_detail, quantity, reason, urgency)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
+     VALUES (?, ?, ?, ?, ?, ?, ?)`, [id,
     userId,
     input.equipmentType,
     input.equipmentDetail?.trim() || null,
     input.quantity,
     input.reason.trim(),
-    input.urgency
-  );
+    input.urgency]);
 
-  const row = db
-    .prepare('SELECT * FROM hardware_requests WHERE id = ?')
-    .get(id) as DbRow;
+  const row = await dbOne('SELECT * FROM hardware_requests WHERE id = ?', [id]) as DbRow;
   const created = rowToHardwareRequest(row);
 
   notifyAdminsHardwareRequested(created);
@@ -180,16 +173,13 @@ export function createHardwareRequest(
  * Sadece 'pending' / 'feedback_requested' düzenlenebilir; düzenlenince
  * status 'pending'e döner (admin yeniden incelesin).
  */
-export function updateHardwareRequest(
+export async function updateHardwareRequest(
   userId: string,
   requestId: string,
   input: CreateHardwareRequestInput
-): HardwareRequest {
-  const db = getDb();
+): Promise<HardwareRequest> {
 
-  const existing = db
-    .prepare('SELECT * FROM hardware_requests WHERE id = ?')
-    .get(requestId) as DbRow | undefined;
+  const existing = await dbOne('SELECT * FROM hardware_requests WHERE id = ?', [requestId]) as DbRow | undefined;
 
   if (!existing || existing.user_id !== userId) {
     throw new HttpError(404, 'Talep bulunamadı.', 'HARDWARE_REQUEST_NOT_FOUND');
@@ -202,46 +192,32 @@ export function updateHardwareRequest(
     );
   }
 
-  db.prepare(
-    `UPDATE hardware_requests SET
+  await dbRun(`UPDATE hardware_requests SET
        equipment_type = ?, equipment_detail = ?, quantity = ?,
        reason = ?, urgency = ?, status = 'pending',
        updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).run(
-    input.equipmentType,
+     WHERE id = ?`, [input.equipmentType,
     input.equipmentDetail?.trim() || null,
     input.quantity,
     input.reason.trim(),
     input.urgency,
-    requestId
-  );
+    requestId]);
 
-  const row = db
-    .prepare('SELECT * FROM hardware_requests WHERE id = ?')
-    .get(requestId) as DbRow;
+  const row = await dbOne('SELECT * FROM hardware_requests WHERE id = ?', [requestId]) as DbRow;
   return rowToHardwareRequest(row);
 }
 
-export function listUserHardwareRequests(userId: string): HardwareRequest[] {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      'SELECT * FROM hardware_requests WHERE user_id = ? ORDER BY created_at DESC'
-    )
-    .all(userId) as DbRow[];
+export async function listUserHardwareRequests(userId: string): Promise<HardwareRequest[]> {
+  const rows = await dbAll('SELECT * FROM hardware_requests WHERE user_id = ? ORDER BY created_at DESC', [userId]) as DbRow[];
   return rows.map(rowToHardwareRequest);
 }
 
 /** Kullanıcının tek talebi (IDOR: sahibi olmalı). */
-export function getUserHardwareRequestById(
+export async function getUserHardwareRequestById(
   userId: string,
   requestId: string
-): HardwareRequest | undefined {
-  const db = getDb();
-  const row = db
-    .prepare('SELECT * FROM hardware_requests WHERE id = ? AND user_id = ?')
-    .get(requestId, userId) as DbRow | undefined;
+): Promise<HardwareRequest | undefined> {
+  const row = await dbOne('SELECT * FROM hardware_requests WHERE id = ? AND user_id = ?', [requestId, userId]) as DbRow | undefined;
   return row ? rowToHardwareRequest(row) : undefined;
 }
 
@@ -249,10 +225,9 @@ export function getUserHardwareRequestById(
  * ADMIN — tüm talepler + review
  * ============================================================ */
 
-export function listAdminHardwareRequests(
+export async function listAdminHardwareRequests(
   statusFilter?: HardwareRequestStatus
-): HardwareRequestWithUser[] {
-  const db = getDb();
+): Promise<HardwareRequestWithUser[]> {
   const params: unknown[] = [];
   let where = '';
   if (statusFilter) {
@@ -260,9 +235,7 @@ export function listAdminHardwareRequests(
     params.push(statusFilter);
   }
 
-  const rows = db
-    .prepare(
-      `${SELECT_ADMIN_REQUEST}
+  const rows = await dbAll(`${SELECT_ADMIN_REQUEST}
        ${where}
        ORDER BY
          CASE hr.status
@@ -270,19 +243,14 @@ export function listAdminHardwareRequests(
            WHEN 'feedback_requested' THEN 1
            ELSE 2
          END,
-         hr.created_at DESC`
-    )
-    .all(...params) as DbRowWithUser[];
+         hr.created_at DESC`, [...params]) as DbRowWithUser[];
   return rows.map(rowToHardwareRequestWithUser);
 }
 
-export function getAdminHardwareRequestById(
+export async function getAdminHardwareRequestById(
   requestId: string
-): HardwareRequestWithUser | undefined {
-  const db = getDb();
-  const row = db
-    .prepare(`${SELECT_ADMIN_REQUEST} WHERE hr.id = ?`)
-    .get(requestId) as DbRowWithUser | undefined;
+): Promise<HardwareRequestWithUser | undefined> {
+  const row = await dbOne(`${SELECT_ADMIN_REQUEST} WHERE hr.id = ?`, [requestId]) as DbRowWithUser | undefined;
   return row ? rowToHardwareRequestWithUser(row) : undefined;
 }
 
@@ -293,16 +261,13 @@ export interface ReviewHardwareRequestInput {
   adminFeedback?: string | null;
 }
 
-export function reviewHardwareRequest(
+export async function reviewHardwareRequest(
   reviewerId: string,
   requestId: string,
   input: ReviewHardwareRequestInput
-): HardwareRequestWithUser {
-  const db = getDb();
+): Promise<HardwareRequestWithUser> {
 
-  const existing = db
-    .prepare('SELECT * FROM hardware_requests WHERE id = ?')
-    .get(requestId) as DbRow | undefined;
+  const existing = await dbOne('SELECT * FROM hardware_requests WHERE id = ?', [requestId]) as DbRow | undefined;
 
   if (!existing) {
     throw new HttpError(404, 'Talep bulunamadı.', 'HARDWARE_REQUEST_NOT_FOUND');
@@ -322,14 +287,12 @@ export function reviewHardwareRequest(
         ? 'rejected'
         : 'feedback_requested';
 
-  db.prepare(
-    `UPDATE hardware_requests SET
+  await dbRun(`UPDATE hardware_requests SET
        status = ?, admin_feedback = ?, reviewed_by = ?,
        reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).run(nextStatus, input.adminFeedback?.trim() || null, reviewerId, requestId);
+     WHERE id = ?`, [nextStatus, input.adminFeedback?.trim() || null, reviewerId, requestId]);
 
-  const result = getAdminHardwareRequestById(requestId)!;
+  const result = (await getAdminHardwareRequestById(requestId))!;
   const label = EQUIPMENT_LABEL[result.equipmentType];
 
   const notifTitle =
@@ -366,15 +329,10 @@ export function reviewHardwareRequest(
  * BİLDİRİM — yeni talepte admin'lere in-app bildirim + SSE
  * ============================================================ */
 
-function notifyAdminsHardwareRequested(request: HardwareRequest): void {
-  const db = getDb();
-  const admins = db
-    .prepare('SELECT id FROM admins WHERE status = 1')
-    .all() as Array<{ id: string }>;
+async function notifyAdminsHardwareRequested(request: HardwareRequest): Promise<void> {
+  const admins = await dbAll('SELECT id FROM admins WHERE status = 1', []) as Array<{ id: string }>;
 
-  const submitter = db
-    .prepare('SELECT full_name FROM users WHERE id = ?')
-    .get(request.userId) as { full_name: string } | undefined;
+  const submitter = await dbOne('SELECT full_name FROM users WHERE id = ?', [request.userId]) as { full_name: string } | undefined;
   const submitterName = submitter?.full_name ?? 'Bir kullanıcı';
   const label = EQUIPMENT_LABEL[request.equipmentType];
 

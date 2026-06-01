@@ -103,7 +103,7 @@ async function start(): Promise<void> {
   // backfill et (idempotent — yalnız embedding'i olmayanları işler). Böylece benzer
   // proje / iş birliği / duplicate-tespiti (#4) re-seed sonrası kutudan çıktığı gibi
   // çalışır; manuel admin backfill gerekmez. Non-blocking.
-  warmupEmbeddings()
+  void warmupEmbeddings()
     .then(() => backfillEmbeddings())
     .then((r) => {
       if (r.processed > 0) {

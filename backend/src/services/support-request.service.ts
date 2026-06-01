@@ -10,7 +10,7 @@
  * - resolved_by + resolved_at ile audit-able (§8)
  */
 import { nanoid } from 'nanoid';
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { pushNotificationBulk } from './notification-center.service';
 import { broadcastToAdmins } from './sse.service';
@@ -86,20 +86,15 @@ const SELECT_ADMIN_REQUEST = `
  * USER — destek talebi oluştur
  * ============================================================ */
 
-export function createSupportRequest(
+export async function createSupportRequest(
   userId: string,
   description: string
-): SupportRequest {
-  const db = getDb();
+): Promise<SupportRequest> {
   const id = nanoid();
 
-  db.prepare(
-    `INSERT INTO support_requests (id, user_id, description) VALUES (?, ?, ?)`
-  ).run(id, userId, description.trim());
+  await dbRun(`INSERT INTO support_requests (id, user_id, description) VALUES (?, ?, ?)`, [id, userId, description.trim()]);
 
-  const row = db
-    .prepare('SELECT * FROM support_requests WHERE id = ?')
-    .get(id) as DbRow;
+  const row = await dbOne('SELECT * FROM support_requests WHERE id = ?', [id]) as DbRow;
   const created = rowToSupportRequest(row);
 
   notifyAdminsSupportRequested(created);
@@ -111,10 +106,9 @@ export function createSupportRequest(
  * ADMIN — destek taleplerini listele + çöz
  * ============================================================ */
 
-export function listAdminSupportRequests(
+export async function listAdminSupportRequests(
   statusFilter?: SupportRequestStatus
-): SupportRequestWithUser[] {
-  const db = getDb();
+): Promise<SupportRequestWithUser[]> {
   const params: unknown[] = [];
   let where = '';
   if (statusFilter) {
@@ -122,27 +116,20 @@ export function listAdminSupportRequests(
     params.push(statusFilter);
   }
 
-  const rows = db
-    .prepare(
-      `${SELECT_ADMIN_REQUEST}
+  const rows = await dbAll(`${SELECT_ADMIN_REQUEST}
        ${where}
        ORDER BY
          CASE sr.status WHEN 'open' THEN 0 ELSE 1 END,
-         sr.created_at DESC`
-    )
-    .all(...params) as DbRowWithUser[];
+         sr.created_at DESC`, [...params]) as DbRowWithUser[];
   return rows.map(rowToSupportRequestWithUser);
 }
 
-export function resolveSupportRequest(
+export async function resolveSupportRequest(
   adminId: string,
   requestId: string
-): SupportRequestWithUser {
-  const db = getDb();
+): Promise<SupportRequestWithUser> {
 
-  const existing = db
-    .prepare('SELECT * FROM support_requests WHERE id = ?')
-    .get(requestId) as DbRow | undefined;
+  const existing = await dbOne('SELECT * FROM support_requests WHERE id = ?', [requestId]) as DbRow | undefined;
 
   if (!existing) {
     throw new HttpError(404, 'Destek talebi bulunamadı.', 'SUPPORT_REQUEST_NOT_FOUND');
@@ -155,16 +142,12 @@ export function resolveSupportRequest(
     );
   }
 
-  db.prepare(
-    `UPDATE support_requests SET
+  await dbRun(`UPDATE support_requests SET
        status = 'resolved', resolved_by = ?,
        resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).run(adminId, requestId);
+     WHERE id = ?`, [adminId, requestId]);
 
-  const row = db
-    .prepare(`${SELECT_ADMIN_REQUEST} WHERE sr.id = ?`)
-    .get(requestId) as DbRowWithUser;
+  const row = await dbOne(`${SELECT_ADMIN_REQUEST} WHERE sr.id = ?`, [requestId]) as DbRowWithUser;
   return rowToSupportRequestWithUser(row);
 }
 
@@ -172,15 +155,10 @@ export function resolveSupportRequest(
  * BİLDİRİM — yeni destek talebinde admin'lere in-app bildirim + SSE
  * ============================================================ */
 
-function notifyAdminsSupportRequested(request: SupportRequest): void {
-  const db = getDb();
-  const admins = db
-    .prepare('SELECT id FROM admins WHERE status = 1')
-    .all() as Array<{ id: string }>;
+async function notifyAdminsSupportRequested(request: SupportRequest): Promise<void> {
+  const admins = await dbAll('SELECT id FROM admins WHERE status = 1', []) as Array<{ id: string }>;
 
-  const submitter = db
-    .prepare('SELECT full_name FROM users WHERE id = ?')
-    .get(request.userId) as { full_name: string } | undefined;
+  const submitter = await dbOne('SELECT full_name FROM users WHERE id = ?', [request.userId]) as { full_name: string } | undefined;
   const submitterName = submitter?.full_name ?? 'Bir kullanıcı';
   const snippet =
     request.description.length > 80

@@ -6,7 +6,7 @@
  *  - SQL parameterized — string concat YOK (app_security §3).
  *  - details kolonu zaten scrubbed (audit.service sanitizeDetails).
  */
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, getDb } from '../db/schema';
 
 export interface AuditLogEntry {
   id: string;
@@ -69,11 +69,10 @@ function rowToEntry(r: AuditRow): AuditLogEntry {
   };
 }
 
-export function listAuditLog(filters: AuditLogFilters = {}): {
+export async function listAuditLog(filters: AuditLogFilters = {}): Promise<{
   entries: AuditLogEntry[];
   total: number;
-} {
-  const db = getDb();
+}> {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
@@ -114,15 +113,9 @@ export function listAuditLog(filters: AuditLogFilters = {}): {
   const limit = Math.min(Math.max(filters.limit ?? 50, 1), 500);
   const offset = Math.max(filters.offset ?? 0, 0);
 
-  const totalRow = db
-    .prepare(`SELECT COUNT(*) AS c FROM audit_logs ${where}`)
-    .get(...params) as { c: number };
+  const totalRow = await dbOne(`SELECT COUNT(*) AS c FROM audit_logs ${where}`, [...params]) as { c: number };
 
-  const rows = db
-    .prepare(
-      `SELECT * FROM audit_logs ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`
-    )
-    .all(...params, limit, offset) as AuditRow[];
+  const rows = await dbAll(`SELECT * FROM audit_logs ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`, [...params, limit, offset]) as AuditRow[];
 
   return {
     entries: rows.map(rowToEntry),
@@ -134,8 +127,8 @@ export function listAuditLog(filters: AuditLogFilters = {}): {
  * CSV export — admin "indir" butonuyla.
  * Sıklıkla SOC ekibine paylaşılır → kolon adları sabit.
  */
-export function exportAuditCsv(filters: AuditLogFilters = {}): string {
-  const { entries } = listAuditLog({ ...filters, limit: 5000, offset: 0 });
+export async function exportAuditCsv(filters: AuditLogFilters = {}): Promise<string> {
+  const { entries } = await listAuditLog({ ...filters, limit: 5000, offset: 0 });
   const header = 'created_at,event_type,subject_type,subject_id,ip_address,success,details';
   const escape = (v: unknown): string => {
     if (v === null || v === undefined) return '';
@@ -162,10 +155,8 @@ export function exportAuditCsv(filters: AuditLogFilters = {}): string {
   return [header, ...lines].join('\n');
 }
 
-export function distinctEventTypes(): string[] {
+export async function distinctEventTypes(): Promise<string[]> {
   return (
-    getDb()
-      .prepare('SELECT DISTINCT event_type FROM audit_logs ORDER BY event_type ASC')
-      .all() as Array<{ event_type: string }>
+    await dbAll('SELECT DISTINCT event_type FROM audit_logs ORDER BY event_type ASC', []) as Array<{ event_type: string }>
   ).map((r) => r.event_type);
 }

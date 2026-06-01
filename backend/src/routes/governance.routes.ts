@@ -46,10 +46,10 @@ router.use(csrfProtection);
 const danismanGuard = requireDanisman;
 
 /** Danışmanın inbox'ı — license_requests + pending/feedback booking'ler. */
-router.get('/danisman/inbox', danismanGuard, (_req, res, next) => {
+router.get('/danisman/inbox', danismanGuard, async (_req, res, next) => {
   try {
-    const licenseRequests = listAdminLicenseRequests();
-    const bookings = listAllBookings();
+    const licenseRequests = await listAdminLicenseRequests();
+    const bookings = await listAllBookings();
     // Danışman için anlamlı durumlar: pending + feedback_requested.
     const pendingBookings = bookings.filter(
       (b) => b.status === 'pending' || b.status === 'feedback_requested'
@@ -71,7 +71,7 @@ router.get('/danisman/inbox', danismanGuard, (_req, res, next) => {
 router.post(
   '/danisman/bookings/:id/review',
   danismanGuard,
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
@@ -79,7 +79,7 @@ router.post(
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
       const input = reviewBookingSchema.parse(req.body);
-      const result = reviewBooking(req.auth!.subjectId, id, input, 'danisman');
+      const result = await reviewBooking(req.auth!.subjectId, id, input, 'danisman');
       res.json({
         booking: result.booking,
         autoWaitlisted: result.autoWaitlisted ?? false,
@@ -95,7 +95,7 @@ router.post(
 router.post(
   '/danisman/license-requests/:id/review',
   danismanGuard,
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
@@ -103,7 +103,7 @@ router.post(
         throw new HttpError(400, 'Geçersiz license id.', 'INVALID_ID');
       }
       const input = reviewLicenseRequestSchema.parse(req.body);
-      const updated = reviewLicenseRequest(req.auth!.subjectId, id, input, 'danisman');
+      const updated = await reviewLicenseRequest(req.auth!.subjectId, id, input, 'danisman');
       res.json({ request: updated });
     } catch (err) {
       next(err);
@@ -118,9 +118,9 @@ router.post(
 const argeGuard = requireArge;
 
 /** Ar-Ge dashboard — onaylı projeler (özellikle advance request veya stage/production'da olanlar). */
-router.get('/arge/projects', argeGuard, (_req, res, next) => {
+router.get('/arge/projects', argeGuard, async (_req, res, next) => {
   try {
-    const bookings = listAllBookings({ status: 'approved' });
+    const bookings = await listAllBookings({ status: 'approved' });
     res.json({
       projects: bookings,
       counts: {
@@ -139,14 +139,14 @@ router.get('/arge/projects', argeGuard, (_req, res, next) => {
 router.post(
   '/arge/bookings/:id/advance-stage',
   argeGuard,
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
       if (!id || id.length < 8 || id.length > 40) {
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
-      const booking = advanceBookingLifecycle(req.auth!.subjectId, id, 'arge');
+      const booking = await advanceBookingLifecycle(req.auth!.subjectId, id, 'arge');
       res.json({ booking });
     } catch (err) {
       next(err);
@@ -158,14 +158,14 @@ router.post(
 router.post(
   '/arge/bookings/:id/regress-stage',
   argeGuard,
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
       if (!id || id.length < 8 || id.length > 40) {
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
-      const booking = regressBookingLifecycle(req.auth!.subjectId, id, 'arge');
+      const booking = await regressBookingLifecycle(req.auth!.subjectId, id, 'arge');
       res.json({ booking });
     } catch (err) {
       next(err);
@@ -177,14 +177,14 @@ router.post(
 router.delete(
   '/arge/bookings/:id/advance-request',
   argeGuard,
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
       if (!id || id.length < 8 || id.length > 40) {
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
-      const booking = rejectStageAdvanceRequest(req.auth!.subjectId, id);
+      const booking = await rejectStageAdvanceRequest(req.auth!.subjectId, id);
       res.json({ booking });
     } catch (err) {
       next(err);
@@ -193,14 +193,14 @@ router.delete(
 );
 
 /** Ar-Ge: tek booking detay (modal için). */
-router.get('/arge/bookings/:id', argeGuard, (req, res, next) => {
+router.get('/arge/bookings/:id', argeGuard, async (req, res, next) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
     if (!id || id.length < 8 || id.length > 40) {
       throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
     }
-    const booking = getBookingByIdAdmin(id);
+    const booking = await getBookingByIdAdmin(id);
     if (!booking) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
     res.json({ booking });
   } catch (err) {
@@ -230,8 +230,8 @@ for (const { prefix, guard } of GOVERNANCE_ROLES) {
         );
         const uid = req.auth!.subjectId;
         res.json({
-          items: listNotifications(uid, 'user'),
-          unread: countUnreadNotifications(uid, 'user'),
+          items: await listNotifications(uid, 'user'),
+          unread: await countUnreadNotifications(uid, 'user'),
         });
       } catch (err) {
         next(err);
@@ -268,7 +268,7 @@ for (const { prefix, guard } of GOVERNANCE_ROLES) {
         const { markAllNotificationsRead } = await import(
           '../services/notification-center.service'
         );
-        const marked = markAllNotificationsRead(req.auth!.subjectId, 'user');
+        const marked = await markAllNotificationsRead(req.auth!.subjectId, 'user');
         res.json({ marked });
       } catch (err) {
         next(err);
@@ -286,7 +286,7 @@ for (const { prefix, guard } of GOVERNANCE_ROLES) {
         const { createSupportRequest } = await import('../services/support-request.service');
         const { recordAudit } = await import('../services/audit.service');
         const input = createSupportRequestSchema.parse(req.body);
-        const request = createSupportRequest(req.auth!.subjectId, input.description);
+        const request = await createSupportRequest(req.auth!.subjectId, input.description);
         recordAudit({
           eventType: 'support_request.created',
           subjectId: req.auth!.subjectId,

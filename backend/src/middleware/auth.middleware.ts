@@ -22,7 +22,7 @@ function extractBearer(req: Request): string | null {
 }
 
 function buildAuthMiddleware(expectedKind: SubjectKind) {
-  return function authGuard(req: Request, res: Response, next: NextFunction): void {
+  return async function authGuard(req: Request, res: Response, next: NextFunction): Promise<void> {
     const token = extractBearer(req);
     if (!token) {
       next(new HttpError(401, 'Kimlik doğrulaması gerekli.', 'AUTH_REQUIRED'));
@@ -31,7 +31,7 @@ function buildAuthMiddleware(expectedKind: SubjectKind) {
 
     try {
       const decoded = verifyAccessToken(expectedKind, token);
-      const subject = findSubjectById(expectedKind, decoded.sub);
+      const subject = await findSubjectById(expectedKind, decoded.sub);
       if (!subject) {
         next(new HttpError(401, 'Oturum geçersiz.', 'SUBJECT_NOT_FOUND'));
         return;
@@ -80,11 +80,11 @@ export const requireArge = buildAuthMiddleware('arge');
  * Rol-bağımsız endpoint'ler için (örn. genel sohbet: her rol katılabilir).
  * Token hangi audience'a aitse o kind çözülür ve req.auth ona göre kurulur.
  */
-export function requireAnySubject(
+export async function requireAnySubject(
   req: Request,
   _res: Response,
   next: NextFunction
-): void {
+): Promise<void> {
   const token = extractBearer(req);
   if (!token) {
     next(new HttpError(401, 'Kimlik doğrulaması gerekli.', 'AUTH_REQUIRED'));
@@ -95,7 +95,7 @@ export function requireAnySubject(
   for (const kind of KINDS) {
     try {
       const decoded = verifyAccessToken(kind, token);
-      const subject = findSubjectById(kind, decoded.sub);
+      const subject = await findSubjectById(kind, decoded.sub);
       if (!subject) continue;
       req.auth = {
         subjectId: subject.id,
@@ -132,11 +132,11 @@ export function requireAnySubject(
  * REDDEDER. Admin panel sayfalarının read-only (GET) erişimini governance
  * rollerine açmak için: GET → requireStaff, mutasyonlar → requireAdmin.
  */
-export function requireStaff(
+export async function requireStaff(
   req: Request,
   _res: Response,
   next: NextFunction
-): void {
+): Promise<void> {
   const token = extractBearer(req);
   if (!token) {
     next(new HttpError(401, 'Kimlik doğrulaması gerekli.', 'AUTH_REQUIRED'));
@@ -147,7 +147,7 @@ export function requireStaff(
   for (const kind of STAFF_KINDS) {
     try {
       const decoded = verifyAccessToken(kind, token);
-      const subject = findSubjectById(kind, decoded.sub);
+      const subject = await findSubjectById(kind, decoded.sub);
       if (!subject) continue;
       req.auth = {
         subjectId: subject.id,
@@ -210,7 +210,7 @@ export function requireAdminRole(...allowedRoles: Array<'admin' | 'super_admin'>
 export function requireGovernanceRole(
   ...allowedRoles: Array<'analitik_danisman' | 'lab_muhendisi' | 'yz_arge'>
 ) {
-  return function governanceGuard(req: Request, _res: Response, next: NextFunction): void {
+  return async function governanceGuard(req: Request, _res: Response, next: NextFunction): Promise<void> {
     if (!req.auth || req.auth.subjectType !== 'admin') {
       next(new HttpError(403, 'Yetki yok.', 'FORBIDDEN'));
       return;
@@ -220,7 +220,7 @@ export function requireGovernanceRole(
       next();
       return;
     }
-    const subject = findSubjectById('admin', req.auth.subjectId) as
+    const subject = await findSubjectById('admin', req.auth.subjectId) as
       | { governance_role?: string | null }
       | undefined;
     const govRole = subject?.governance_role ?? null;

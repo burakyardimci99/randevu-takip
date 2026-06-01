@@ -9,7 +9,7 @@
  * Tek instance varsayımı geçerli (in-memory in-process); multi-instance için
  * Redis lock veya pg_advisory_lock gerekir.
  */
-import { getDb } from '../db/schema';
+import { dbExec, dbOne, dbRun, getDb } from '../db/schema';
 import { logger } from '../utils/logger';
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -46,23 +46,18 @@ const DEFAULT_CONFIG: MaintenanceConfig = {
 
 let timer: NodeJS.Timeout | null = null;
 
-export function runMaintenanceOnce(config: Partial<MaintenanceConfig> = {}): {
+export async function runMaintenanceOnce(config: Partial<MaintenanceConfig> = {}): Promise<{
   refreshTokensDeleted: number;
   auditLogsDeleted: number;
   vacuumed: boolean;
-} {
+}> {
   const cfg = { ...DEFAULT_CONFIG, ...config };
-  const db = getDb();
 
   // 1) Refresh token cleanup
   const tokenCutoff = new Date(Date.now() - cfg.refreshTokenGraceDays * ONE_DAY_MS).toISOString();
-  const tokenRes = db
-    .prepare(
-      `DELETE FROM refresh_tokens
+  const tokenRes = await dbRun(`DELETE FROM refresh_tokens
        WHERE (expires_at < ? OR revoked = 1)
-         AND created_at < ?`
-    )
-    .run(tokenCutoff, tokenCutoff);
+         AND created_at < ?`, [tokenCutoff, tokenCutoff]);
 
   // 2) Audit log retention — yaş bazlı
   let auditDeleted = 0;
@@ -70,24 +65,18 @@ export function runMaintenanceOnce(config: Partial<MaintenanceConfig> = {}): {
     const auditCutoff = new Date(
       Date.now() - cfg.auditRetentionDays * ONE_DAY_MS
     ).toISOString();
-    auditDeleted += db
-      .prepare(`DELETE FROM audit_logs WHERE created_at < ?`)
-      .run(auditCutoff).changes;
+    auditDeleted += (await dbRun(`DELETE FROM audit_logs WHERE created_at < ?`, [auditCutoff])).changes;
   }
 
   // 3) Audit log hacim sınırı — en yeni N kayıt tutulur. Yaş retention'ı aşan
   //    yüksek log üretiminde dosyanın patlamasını engeller.
   if (cfg.auditMaxRows > 0) {
-    const total = (db.prepare('SELECT COUNT(*) AS c FROM audit_logs').get() as { c: number }).c;
+    const total = (await dbOne('SELECT COUNT(*) AS c FROM audit_logs', []) as { c: number }).c;
     if (total > cfg.auditMaxRows) {
-      auditDeleted += db
-        .prepare(
-          `DELETE FROM audit_logs
-           WHERE rowid IN (
-             SELECT rowid FROM audit_logs ORDER BY created_at ASC, rowid ASC LIMIT ?
-           )`
-        )
-        .run(total - cfg.auditMaxRows).changes;
+      auditDeleted += (await dbRun(`DELETE FROM audit_logs
+           WHERE id IN (
+             SELECT id FROM audit_logs ORDER BY created_at ASC, id ASC LIMIT ?
+           )`, [total - cfg.auditMaxRows])).changes;
     }
   }
 
@@ -97,7 +86,7 @@ export function runMaintenanceOnce(config: Partial<MaintenanceConfig> = {}): {
   let vacuumed = false;
   if (cfg.vacuumOnPrune && totalDeleted > 0) {
     try {
-      db.exec('VACUUM');
+      await dbExec('VACUUM'); // pg'de de geçerli; best-effort (try/catch)
       vacuumed = true;
     } catch (err) {
       logger.warn('maintenance_vacuum_failed', { err: (err as Error).message });

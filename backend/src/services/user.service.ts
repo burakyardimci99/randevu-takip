@@ -7,7 +7,7 @@
  * - Soft delete: status=3 (data_security §11) — booking history korunur
  * - Audit log: admin user değişiklikleri loglanır
  */
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import type { AdminUserUpdateInput, ProfileUpdateInput } from '../validators/schemas';
 import { hashPassword } from './auth.service';
@@ -82,10 +82,8 @@ function toDto(r: UserRow): UserProfileDto {
 const PROFILE_COLUMNS =
   'id, email, full_name, role, governance_role, department, title, manager, phone, bio, project_idea, profile_photo, status, created_at, updated_at';
 
-export function getUserProfile(userId: string): UserProfileDto {
-  const row = getDb()
-    .prepare(`SELECT ${PROFILE_COLUMNS} FROM users WHERE id = ? AND status != 3 LIMIT 1`)
-    .get(userId) as UserRow | undefined;
+export async function getUserProfile(userId: string): Promise<UserProfileDto> {
+  const row = await dbOne(`SELECT ${PROFILE_COLUMNS} FROM users WHERE id = ? AND status != 3 LIMIT 1`, [userId]) as UserRow | undefined;
   if (!row) throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
   return toDto(row);
 }
@@ -94,13 +92,10 @@ export function getUserProfile(userId: string): UserProfileDto {
  * Profil günceller. Sadece tanımlı alanlar değiştirilir (partial update).
  * E-posta, parola, role bu endpoint'ten değiştirilemez.
  */
-export function updateUserProfile(userId: string, input: ProfileUpdateInput): UserProfileDto {
-  const db = getDb();
+export async function updateUserProfile(userId: string, input: ProfileUpdateInput): Promise<UserProfileDto> {
 
   // Mevcut user var mı?
-  const exists = db
-    .prepare(`SELECT id FROM users WHERE id = ? AND status != 3 LIMIT 1`)
-    .get(userId);
+  const exists = await dbOne(`SELECT id FROM users WHERE id = ? AND status != 3 LIMIT 1`, [userId]);
   if (!exists) throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
 
   // Sadece undefined olmayan alanları güncelle
@@ -125,14 +120,14 @@ export function updateUserProfile(userId: string, input: ProfileUpdateInput): Us
   }
 
   if (updates.length === 0) {
-    return getUserProfile(userId);
+    return await getUserProfile(userId);
   }
 
   updates.push(`updated_at = CURRENT_TIMESTAMP`);
   params.push(userId);
 
-  db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-  return getUserProfile(userId);
+  await dbRun(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, [...params]);
+  return await getUserProfile(userId);
 }
 
 /* ============================================================
@@ -147,8 +142,7 @@ export interface UserSearchFilters {
   limit?: number;
 }
 
-export function listAllUsers(filters: UserSearchFilters = {}): UserListItemDto[] {
-  const db = getDb();
+export async function listAllUsers(filters: UserSearchFilters = {}): Promise<UserListItemDto[]> {
   const whereParts: string[] = [];
   const params: unknown[] = [];
 
@@ -194,7 +188,7 @@ export function listAllUsers(filters: UserSearchFilters = {}): UserListItemDto[]
   `;
   params.push(limit);
 
-  let rows = db.prepare(baseSql).all(...params) as Array<
+  let rows = await dbAll(baseSql, [...params]) as Array<
     UserRow & {
       booking_count: number;
       approved_count: number;
@@ -220,22 +214,15 @@ export function listAllUsers(filters: UserSearchFilters = {}): UserListItemDto[]
   }));
 }
 
-export function listDepartments(): string[] {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT department FROM users
+export async function listDepartments(): Promise<string[]> {
+  const rows = await dbAll(`SELECT DISTINCT department FROM users
        WHERE department IS NOT NULL AND TRIM(department) != ''
-       ORDER BY department ASC`
-    )
-    .all() as Array<{ department: string }>;
+       ORDER BY department ASC`, []) as Array<{ department: string }>;
   return rows.map((r) => r.department);
 }
 
-export function getUserByIdAdmin(id: string): UserProfileDto {
-  const row = getDb()
-    .prepare(`SELECT ${PROFILE_COLUMNS} FROM users WHERE id = ? LIMIT 1`)
-    .get(id) as UserRow | undefined;
+export async function getUserByIdAdmin(id: string): Promise<UserProfileDto> {
+  const row = await dbOne(`SELECT ${PROFILE_COLUMNS} FROM users WHERE id = ? LIMIT 1`, [id]) as UserRow | undefined;
   if (!row) throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
   return toDto(row);
 }
@@ -244,10 +231,9 @@ export function getUserByIdAdmin(id: string): UserProfileDto {
  * Admin tarafından kullanıcı güncelleme.
  * Status değiştirilebilir (aktif/devre dışı).
  */
-export function adminUpdateUser(id: string, input: AdminUserUpdateInput): UserProfileDto {
-  const db = getDb();
+export async function adminUpdateUser(id: string, input: AdminUserUpdateInput): Promise<UserProfileDto> {
 
-  const exists = db.prepare(`SELECT id FROM users WHERE id = ? LIMIT 1`).get(id);
+  const exists = await dbOne(`SELECT id FROM users WHERE id = ? LIMIT 1`, [id]);
   if (!exists) throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
 
   const updates: string[] = [];
@@ -273,14 +259,14 @@ export function adminUpdateUser(id: string, input: AdminUserUpdateInput): UserPr
   }
 
   if (updates.length === 0) {
-    return getUserByIdAdmin(id);
+    return await getUserByIdAdmin(id);
   }
 
   updates.push(`updated_at = CURRENT_TIMESTAMP`);
   params.push(id);
 
-  db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-  return getUserByIdAdmin(id);
+  await dbRun(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, [...params]);
+  return await getUserByIdAdmin(id);
 }
 
 /**
@@ -288,42 +274,33 @@ export function adminUpdateUser(id: string, input: AdminUserUpdateInput): UserPr
  * Hard delete kullanılmaz çünkü bookings tablosunda RESTRICT FK var.
  * data_security §11: soft delete master data için tercih edilir.
  */
-export function adminDeleteUser(id: string): { deleted: boolean } {
-  const db = getDb();
-  const txn = db.transaction(() => {
-    const existing = db.prepare(`SELECT id, status FROM users WHERE id = ?`).get(id) as
+export async function adminDeleteUser(id: string): Promise<{ deleted: boolean }> {
+  await dbTx(async () => {
+    const existing = await dbOne(`SELECT id, status FROM users WHERE id = ?`, [id]) as
       | { id: string; status: number }
       | undefined;
     if (!existing) throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
     if (existing.status === 3) {
       throw new HttpError(409, 'Kullanıcı zaten devre dışı.', 'ALREADY_DELETED');
     }
-    db.prepare(
-      `UPDATE users SET status = 3, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-    ).run(id);
+    await dbRun(`UPDATE users SET status = 3, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [id]);
     // Aktif refresh token'ları iptal et
-    db.prepare(
-      `UPDATE refresh_tokens SET revoked = 1 WHERE subject_id = ? AND subject_type = 'user'`
-    ).run(id);
+    await dbRun(`UPDATE refresh_tokens SET revoked = 1 WHERE subject_id = ? AND subject_type = 'user'`, [id]);
   });
-  txn();
   return { deleted: true };
 }
 
 /**
  * Soft delete'i geri al (aktifleştir).
  */
-export function adminRestoreUser(id: string): UserProfileDto {
-  const db = getDb();
-  const exists = db.prepare(`SELECT id, status FROM users WHERE id = ?`).get(id) as
+export async function adminRestoreUser(id: string): Promise<UserProfileDto> {
+  const exists = await dbOne(`SELECT id, status FROM users WHERE id = ?`, [id]) as
     | { id: string; status: number }
     | undefined;
   if (!exists) throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
-  if (exists.status === 1) return getUserByIdAdmin(id);
-  db.prepare(
-    `UPDATE users SET status = 1, failed_login_count = 0, locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-  ).run(id);
-  return getUserByIdAdmin(id);
+  if (exists.status === 1) return await getUserByIdAdmin(id);
+  await dbRun(`UPDATE users SET status = 1, failed_login_count = 0, locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [id]);
+  return await getUserByIdAdmin(id);
 }
 
 /**
@@ -335,19 +312,14 @@ export async function adminResetUserPassword(
   id: string,
   newPassword: string
 ): Promise<void> {
-  const db = getDb();
-  const user = db
-    .prepare(`SELECT id FROM users WHERE id = ? AND status != 3`)
-    .get(id) as { id: string } | undefined;
+  const user = await dbOne(`SELECT id FROM users WHERE id = ? AND status != 3`, [id]) as { id: string } | undefined;
   if (!user) throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
 
   const passwordHash = await hashPassword(newPassword);
-  db.prepare(
-    `UPDATE users SET
+  await dbRun(`UPDATE users SET
        password_hash = ?, failed_login_count = 0, locked_until = NULL,
        updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).run(passwordHash, id);
+     WHERE id = ?`, [passwordHash, id]);
 
   revokeAllForSubject('user', id);
 }

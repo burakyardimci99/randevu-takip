@@ -16,7 +16,7 @@
  *   olarak yorumlar. Helmet noSniff (X-Content-Type-Options: nosniff) zaten
  *   MIME-type sniffing'i engelliyor.
  */
-import { getDb } from '../db/schema';
+import { dbOne, dbRun, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { recordAudit } from './audit.service';
 
@@ -69,16 +69,13 @@ export function validateJpegDataUrl(dataUrl: string): void {
   }
 }
 
-export function setUserProfilePhoto(userId: string, dataUrl: string): void {
+export async function setUserProfilePhoto(userId: string, dataUrl: string): Promise<void> {
   validateJpegDataUrl(dataUrl);
-  const db = getDb();
-  const existing = db.prepare('SELECT id FROM users WHERE id = ? AND status != 3').get(userId);
+  const existing = await dbOne('SELECT id FROM users WHERE id = ? AND status != 3', [userId]);
   if (!existing) {
     throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
   }
-  db.prepare(
-    `UPDATE users SET profile_photo = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-  ).run(dataUrl, userId);
+  await dbRun(`UPDATE users SET profile_photo = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [dataUrl, userId]);
 
   recordAudit({
     eventType: 'user.photo_uploaded',
@@ -89,12 +86,8 @@ export function setUserProfilePhoto(userId: string, dataUrl: string): void {
   });
 }
 
-export function clearUserProfilePhoto(userId: string): void {
-  getDb()
-    .prepare(
-      `UPDATE users SET profile_photo = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-    )
-    .run(userId);
+export async function clearUserProfilePhoto(userId: string): Promise<void> {
+  await dbRun(`UPDATE users SET profile_photo = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [userId]);
 
   recordAudit({
     eventType: 'user.photo_uploaded',
@@ -105,9 +98,7 @@ export function clearUserProfilePhoto(userId: string): void {
   });
 }
 
-export function getUserProfilePhoto(userId: string): string | null {
-  const row = getDb()
-    .prepare('SELECT profile_photo FROM users WHERE id = ? AND status != 3')
-    .get(userId) as { profile_photo: string | null } | undefined;
+export async function getUserProfilePhoto(userId: string): Promise<string | null> {
+  const row = await dbOne('SELECT profile_photo FROM users WHERE id = ? AND status != 3', [userId]) as { profile_photo: string | null } | undefined;
   return row?.profile_photo ?? null;
 }

@@ -93,7 +93,7 @@ import {
 import { listBackups, runBackupOnce } from '../services/backup.service';
 import { csrfProtection } from '../middleware/cookie-auth';
 import { HttpError } from '../middleware/error.middleware';
-import { getDb } from '../db/schema';
+import { dbAll, dbRun, getDb } from '../db/schema';
 
 const router = Router();
 
@@ -122,22 +122,22 @@ router.use((req: Request, res: Response, next: NextFunction) => {
 // GET'ler csrf-csrf `ignoredMethods` ile muaf.
 router.use(csrfProtection);
 
-router.get('/rooms', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/rooms', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ rooms: listRooms() });
+    res.json({ rooms: await listRooms() });
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/bookings', (req: Request, res: Response, next: NextFunction) => {
+router.get('/bookings', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const status = req.query.status as string | undefined;
     const allowed = ['pending', 'approved', 'rejected', 'feedback_requested'];
     const filter = status && allowed.includes(status)
       ? (status as 'pending' | 'approved' | 'rejected' | 'feedback_requested')
       : undefined;
-    res.json({ bookings: listAllBookings({ status: filter }) });
+    res.json({ bookings: await listAllBookings({ status: filter }) });
   } catch (err) {
     next(err);
   }
@@ -150,17 +150,17 @@ router.get('/bookings/:id', async (req: Request, res: Response, next: NextFuncti
     if (!id || id.length < 8 || id.length > 40) {
       throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
     }
-    const booking = getBookingByIdAdmin(id);
+    const booking = await getBookingByIdAdmin(id);
     if (!booking) throw new HttpError(404, 'Booking bulunamadı.', 'NOT_FOUND');
     // Yaşam döngüsü zaman çizelgesi — modal "Geçmiş" tab'ında gösterilir.
     const { listStageEvents } = await import('../services/governance.service');
-    res.json({ booking, stageEvents: listStageEvents(id) });
+    res.json({ booking, stageEvents: await listStageEvents(id) });
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/bookings/:id/review', (req: Request, res: Response, next: NextFunction) => {
+router.post('/bookings/:id/review', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
@@ -168,7 +168,7 @@ router.post('/bookings/:id/review', (req: Request, res: Response, next: NextFunc
       throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
     }
     const input = reviewBookingSchema.parse(req.body);
-    const result = reviewBooking(req.auth!.subjectId, id, input);
+    const result = await reviewBooking(req.auth!.subjectId, id, input);
     // Onay/red galeri içeriğini/sırasını değiştirebilir → showcase feed cache'ini tazele.
     void import('../services/showcase-feed.service').then((m) => m.invalidateShowcaseFeed());
 
@@ -198,38 +198,38 @@ router.post('/bookings/:id/review', (req: Request, res: Response, next: NextFunc
 
 /* ============ KULLANICI YÖNETİMİ ============ */
 
-router.get('/users', (req: Request, res: Response, next: NextFunction) => {
+router.get('/users', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parsed = adminUserSearchSchema.safeParse(req.query);
     const filters = parsed.success ? parsed.data : {};
-    res.json({ users: listAllUsers(filters) });
+    res.json({ users: await listAllUsers(filters) });
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/users/meta/departments', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/users/meta/departments', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ departments: listDepartments() });
+    res.json({ departments: await listDepartments() });
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/users/:id', (req: Request, res: Response, next: NextFunction) => {
+router.get('/users/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
     if (!id || id.length < 8 || id.length > 40) {
       throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
     }
-    res.json({ user: getUserByIdAdmin(id) });
+    res.json({ user: await getUserByIdAdmin(id) });
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/users/:id', (req: Request, res: Response, next: NextFunction) => {
+router.put('/users/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
@@ -237,7 +237,7 @@ router.put('/users/:id', (req: Request, res: Response, next: NextFunction) => {
       throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
     }
     const input = adminUserUpdateSchema.parse(req.body);
-    const user = adminUpdateUser(id, input);
+    const user = await adminUpdateUser(id, input);
 
     recordAudit({
       eventType: 'user.update',
@@ -292,7 +292,7 @@ router.get(
         throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
       }
       const { exportUserData } = await import('../services/privacy.service');
-      const data = exportUserData(id);
+      const data = await exportUserData(id);
       recordAudit({
         eventType: 'user.update',
         subjectId: req.auth!.subjectId,
@@ -335,7 +335,7 @@ router.post(
         );
       }
       const { purgeUser } = await import('../services/privacy.service');
-      const result = purgeUser(id, { id: req.auth!.subjectId, type: 'admin' });
+      const result = await purgeUser(id, { id: req.auth!.subjectId, type: 'admin' });
       res.json(result);
     } catch (err) {
       next(err);
@@ -343,14 +343,14 @@ router.post(
   }
 );
 
-router.post('/users/:id/restore', (req: Request, res: Response, next: NextFunction) => {
+router.post('/users/:id/restore', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
     if (!id || id.length < 8 || id.length > 40) {
       throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
     }
-    const user = adminRestoreUser(id);
+    const user = await adminRestoreUser(id);
 
     recordAudit({
       eventType: 'user.restore',
@@ -367,9 +367,9 @@ router.post('/users/:id/restore', (req: Request, res: Response, next: NextFuncti
   }
 });
 
-router.get('/stats', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/stats', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const all = listAllBookings();
+    const all = await listAllBookings();
     const stats = {
       total: all.length,
       pending: all.filter((b) => b.status === 'pending').length,
@@ -438,16 +438,16 @@ router.post(
 /* ============ ODALAR — doluluk + atama ============ */
 
 /** Admin "Odalar" görünümü — her oda + içindeki kullanıcılar. */
-router.get('/rooms/occupancy', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/rooms/occupancy', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ rooms: getRoomsWithOccupancy() });
+    res.json({ rooms: await getRoomsWithOccupancy() });
   } catch (err) {
     next(err);
   }
 });
 
 /** Admin: bir booking'i başka odaya taşır. */
-router.post('/bookings/:id/reassign', (req: Request, res: Response, next: NextFunction) => {
+router.post('/bookings/:id/reassign', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
@@ -455,7 +455,7 @@ router.post('/bookings/:id/reassign', (req: Request, res: Response, next: NextFu
       throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
     }
     const { roomId } = reassignRoomSchema.parse(req.body);
-    const booking = reassignBookingRoom(req.auth!.subjectId, id, roomId);
+    const booking = await reassignBookingRoom(req.auth!.subjectId, id, roomId);
     res.json({ booking });
   } catch (err) {
     next(err);
@@ -465,7 +465,7 @@ router.post('/bookings/:id/reassign', (req: Request, res: Response, next: NextFu
 /** Admin: bir booking'in kullanıcısını değiştirir (oda kullanıcısını "değiştir"). */
 router.post(
   '/bookings/:id/reassign-user',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
@@ -473,7 +473,7 @@ router.post(
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
       const { userId } = reassignUserSchema.parse(req.body);
-      const booking = reassignBookingUser(req.auth!.subjectId, id, userId);
+      const booking = await reassignBookingUser(req.auth!.subjectId, id, userId);
       res.json({ booking });
     } catch (err) {
       next(err);
@@ -482,14 +482,14 @@ router.post(
 );
 
 /** Admin: bir booking'i tamamen siler (oda kullanıcısını "çıkar"). */
-router.delete('/bookings/:id', (req: Request, res: Response, next: NextFunction) => {
+router.delete('/bookings/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
     if (!id || id.length < 8 || id.length > 40) {
       throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
     }
-    const result = adminDeleteBooking(req.auth!.subjectId, id);
+    const result = await adminDeleteBooking(req.auth!.subjectId, id);
     res.json(result);
   } catch (err) {
     next(err);
@@ -499,14 +499,14 @@ router.delete('/bookings/:id', (req: Request, res: Response, next: NextFunction)
 /** Admin: bir booking'i yaşam döngüsünde bir sonraki aşamaya ilerlet. */
 router.post(
   '/bookings/:id/advance-stage',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
       if (!id || id.length < 8 || id.length > 40) {
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
-      const booking = advanceBookingLifecycle(req.auth!.subjectId, id);
+      const booking = await advanceBookingLifecycle(req.auth!.subjectId, id);
       res.json({ booking });
     } catch (err) {
       next(err);
@@ -517,14 +517,14 @@ router.post(
 /** Admin: bir booking'i yaşam döngüsünde bir önceki aşamaya geri al. */
 router.post(
   '/bookings/:id/regress-stage',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
       if (!id || id.length < 8 || id.length > 40) {
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
-      const booking = regressBookingLifecycle(req.auth!.subjectId, id);
+      const booking = await regressBookingLifecycle(req.auth!.subjectId, id);
       res.json({ booking });
     } catch (err) {
       next(err);
@@ -535,7 +535,7 @@ router.post(
 /** Admin: SWAT (fast-track) inceleme akışına al/çıkar. */
 router.post(
   '/bookings/:id/review-track',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
@@ -543,7 +543,7 @@ router.post(
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
       const { track } = setReviewTrackSchema.parse(req.body);
-      const booking = setBookingReviewTrack(req.auth!.subjectId, id, track);
+      const booking = await setBookingReviewTrack(req.auth!.subjectId, id, track);
       res.json({ booking });
     } catch (err) {
       next(err);
@@ -554,7 +554,7 @@ router.post(
 /** Admin: kullanıcının aşama ilerletme talebini reddet (ilerletmeden iptal). */
 router.delete(
   '/bookings/:id/advance-request',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
@@ -563,7 +563,7 @@ router.delete(
       }
       // Body opsiyonel — DELETE üzerinde JSON body olabilir/olmayabilir.
       const note = rejectStageAdvanceSchema.parse(req.body ?? {}).note;
-      const booking = rejectStageAdvanceRequest(req.auth!.subjectId, id, note);
+      const booking = await rejectStageAdvanceRequest(req.auth!.subjectId, id, note);
       res.json({ booking });
     } catch (err) {
       next(err);
@@ -574,12 +574,12 @@ router.delete(
 /* ============ APPOINTMENTS (admin) ============ */
 
 /** Admin: tüm randevuları listele (yönetim takvimi). */
-router.get('/appointments', (req: Request, res: Response, next: NextFunction) => {
+router.get('/appointments', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const fromRaw = req.query.from;
     const toRaw = req.query.to;
     const includeCancelled = req.query.includeCancelled === 'true';
-    const appointments = listAllAppointments({
+    const appointments = await listAllAppointments({
       from: typeof fromRaw === 'string' ? fromRaw : undefined,
       to: typeof toRaw === 'string' ? toRaw : undefined,
       includeCancelled,
@@ -593,14 +593,14 @@ router.get('/appointments', (req: Request, res: Response, next: NextFunction) =>
 /** Admin: bir booking'in randevuları. */
 router.get(
   '/bookings/:id/appointments',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
       if (!id || id.length < 8 || id.length > 40) {
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
-      const appointments = listBookingAppointments(id, { includeCancelled: true });
+      const appointments = await listBookingAppointments(id, { includeCancelled: true });
       res.json({ appointments });
     } catch (err) {
       next(err);
@@ -630,7 +630,7 @@ router.delete(
 );
 
 /** Admin: waitlist sırası değiştirme (öncelik verme). */
-router.post('/waitlist/:id/move', (req: Request, res: Response, next: NextFunction) => {
+router.post('/waitlist/:id/move', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
@@ -639,7 +639,7 @@ router.post('/waitlist/:id/move', (req: Request, res: Response, next: NextFuncti
     }
     const { move } = waitlistMoveSchema.parse(req.body);
     moveWaitlistEntry(id, move);
-    res.json({ entries: listAllWaitlist() });
+    res.json({ entries: await listAllWaitlist() });
   } catch (err) {
     next(err);
   }
@@ -647,7 +647,7 @@ router.post('/waitlist/:id/move', (req: Request, res: Response, next: NextFuncti
 
 /* ============ AUDIT LOG VIEWER ============ */
 
-router.get('/audit', (req: Request, res: Response, next: NextFunction) => {
+router.get('/audit', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const q = req.query;
     const filters: Parameters<typeof listAuditLog>[0] = {
@@ -665,24 +665,24 @@ router.get('/audit', (req: Request, res: Response, next: NextFunction) => {
       limit: typeof q.limit === 'string' ? Math.min(parseInt(q.limit, 10) || 50, 500) : undefined,
       offset: typeof q.offset === 'string' ? Math.max(parseInt(q.offset, 10) || 0, 0) : undefined,
     };
-    res.json(listAuditLog(filters));
+    res.json(await listAuditLog(filters));
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/audit/event-types', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/audit/event-types', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ eventTypes: distinctEventTypes() });
+    res.json({ eventTypes: await distinctEventTypes() });
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/audit/export', (req: Request, res: Response, next: NextFunction) => {
+router.get('/audit/export', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const q = req.query;
-    const csv = exportAuditCsv({
+    const csv = await exportAuditCsv({
       eventType: typeof q.eventType === 'string' ? q.eventType : undefined,
       subjectType:
         q.subjectType === 'user' || q.subjectType === 'admin' || q.subjectType === 'anonymous'
@@ -739,9 +739,9 @@ router.post('/backup', async (req: Request, res: Response, next: NextFunction) =
 
 /* ============ LİSANSLAR ============ */
 
-router.get('/licenses', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/licenses', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(getLicenseReport());
+    res.json(await getLicenseReport());
   } catch (err) {
     next(err);
   }
@@ -762,9 +762,9 @@ router.get('/licenses/catalog', (_req: Request, res: Response, next: NextFunctio
 
 /* ============ ANALYTICS ============ */
 
-router.get('/analytics', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/analytics', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(getAnalytics());
+    res.json(await getAnalytics());
   } catch (err) {
     next(err);
   }
@@ -772,9 +772,9 @@ router.get('/analytics', (_req: Request, res: Response, next: NextFunction) => {
 
 /* ============ WAITLIST (admin görünüm) ============ */
 
-router.get('/waitlist', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/waitlist', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ entries: listAllWaitlist() });
+    res.json({ entries: await listAllWaitlist() });
   } catch (err) {
     next(err);
   }
@@ -802,7 +802,7 @@ router.post('/similar', async (req: Request, res: Response, next: NextFunction) 
     let excludeBookingId: string | undefined;
 
     if (input.bookingId) {
-      const booking = getBookingByIdAdmin(input.bookingId);
+      const booking = await getBookingByIdAdmin(input.bookingId);
       if (!booking) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
       queryText = bookingTextForEmbedding({
         projectName: booking.projectName,
@@ -834,9 +834,9 @@ router.post('/similar', async (req: Request, res: Response, next: NextFunction) 
 
 /* ============ ADMIN MFA ============ */
 
-router.get('/mfa/status', (req: Request, res: Response, next: NextFunction) => {
+router.get('/mfa/status', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(getMfaStatus(req.auth!.subjectId));
+    res.json(await getMfaStatus(req.auth!.subjectId));
   } catch (err) {
     next(err);
   }
@@ -859,10 +859,10 @@ router.post('/mfa/enroll', async (req: Request, res: Response, next: NextFunctio
   }
 });
 
-router.post('/mfa/verify', (req: Request, res: Response, next: NextFunction) => {
+router.post('/mfa/verify', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const input = mfaVerifySchema.parse(req.body);
-    const result = verifyMfaCode(req.auth!.subjectId, input.code);
+    const result = await verifyMfaCode(req.auth!.subjectId, input.code);
     recordAudit({
       eventType: result.valid ? 'auth.mfa.verify.success' : 'auth.mfa.verify.failure',
       subjectId: req.auth!.subjectId,
@@ -880,10 +880,10 @@ router.post('/mfa/verify', (req: Request, res: Response, next: NextFunction) => 
   }
 });
 
-router.post('/mfa/disable', (req: Request, res: Response, next: NextFunction) => {
+router.post('/mfa/disable', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const input = mfaVerifySchema.parse(req.body); // Disable için 1 doğru kod zorunlu
-    const verify = verifyMfaCode(req.auth!.subjectId, input.code);
+    const verify = await verifyMfaCode(req.auth!.subjectId, input.code);
     if (!verify.valid) {
       throw new HttpError(401, 'MFA kodu geçersiz.', 'MFA_INVALID');
     }
@@ -905,7 +905,7 @@ router.post('/mfa/disable', (req: Request, res: Response, next: NextFunction) =>
 
 router.put(
   '/bookings/:id/showcase',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
@@ -922,7 +922,6 @@ router.put(
           'VALIDATION'
         );
       }
-      const db = getDb();
       const sets: string[] = [];
       const params: unknown[] = [];
       if (visible !== undefined) {
@@ -935,10 +934,10 @@ router.put(
       }
       sets.push('updated_at = CURRENT_TIMESTAMP');
       params.push(id);
-      db.prepare(`UPDATE bookings SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+      await dbRun(`UPDATE bookings SET ${sets.join(', ')} WHERE id = ?`, [...params]);
       // Galeri görünürlüğü/highlight değişti → showcase feed cache'ini tazele.
       void import('../services/showcase-feed.service').then((m) => m.invalidateShowcaseFeed());
-      const updated = getBookingByIdAdmin(id);
+      const updated = await getBookingByIdAdmin(id);
       res.json({ booking: updated });
     } catch (err) {
       next(err);
@@ -957,7 +956,7 @@ router.get(
     try {
       const { status } = adminLicenseRequestsFilterSchema.parse(req.query);
       const { listAdminLicenseRequests } = await import('../services/license-request.service');
-      const items = listAdminLicenseRequests(status);
+      const items = await listAdminLicenseRequests(status);
       res.json({ items });
     } catch (err) {
       next(err);
@@ -971,7 +970,7 @@ router.get(
   async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const { getLicenseBudgetReport } = await import('../services/license-request.service');
-      res.json(getLicenseBudgetReport());
+      res.json(await getLicenseBudgetReport());
     } catch (err) {
       next(err);
     }
@@ -991,7 +990,7 @@ router.post(
       }
       const input = reviewLicenseRequestSchema.parse(req.body);
       const { reviewLicenseRequest } = await import('../services/license-request.service');
-      const updated = reviewLicenseRequest(req.auth!.subjectId, id, input);
+      const updated = await reviewLicenseRequest(req.auth!.subjectId, id, input);
       recordAudit({
         eventType: 'license_request.reviewed',
         subjectId: req.auth!.subjectId,
@@ -1030,7 +1029,7 @@ router.get(
       const { getAdminLicenseRequestById } = await import(
         '../services/license-request.service'
       );
-      const request = getAdminLicenseRequestById(id);
+      const request = await getAdminLicenseRequestById(id);
       if (!request) {
         throw new HttpError(404, 'Talep bulunamadı.', 'LICENSE_REQUEST_NOT_FOUND');
       }
@@ -1039,9 +1038,9 @@ router.get(
       const { listStageEvents } = await import('../services/governance.service');
       res.json({
         request,
-        gates: listGatesForRequest(id),
-        approvals: listApprovalsForRequest(id),
-        stageEvents: listStageEvents(id),
+        gates: await listGatesForRequest(id),
+        approvals: await listApprovalsForRequest(id),
+        stageEvents: await listStageEvents(id),
       });
     } catch (err) {
       next(err);
@@ -1055,7 +1054,7 @@ router.get(
   async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const { getGovernanceDashboard } = await import('../services/governance.service');
-      res.json(getGovernanceDashboard());
+      res.json(await getGovernanceDashboard());
     } catch (err) {
       next(err);
     }
@@ -1067,12 +1066,8 @@ router.get(
   '/governance/admins',
   async (_req: Request, res: Response, next: NextFunction) => {
     try {
-      const rows = getDb()
-        .prepare(
-          `SELECT id, full_name, role, governance_role
-           FROM admins WHERE status = 1 ORDER BY full_name`
-        )
-        .all() as Array<{
+      const rows = await dbAll(`SELECT id, full_name, role, governance_role
+           FROM admins WHERE status = 1 ORDER BY full_name`, []) as Array<{
         id: string;
         full_name: string;
         role: string;
@@ -1103,8 +1098,8 @@ router.post(
       const { getAdminLicenseRequestById } = await import(
         '../services/license-request.service'
       );
-      const result = advanceLifecycle(id, req.auth!.subjectId, input.note);
-      const request = getAdminLicenseRequestById(id)!;
+      const result = await advanceLifecycle(id, req.auth!.subjectId, input.note);
+      const request = (await getAdminLicenseRequestById(id))!;
 
       recordAudit({
         eventType: 'license_request.updated',
@@ -1153,7 +1148,7 @@ router.post(
         success: true,
         details: { requestId: id, action: 'assign_engineer', engineerId: input.engineerId },
       });
-      res.json({ request: getAdminLicenseRequestById(id) });
+      res.json({ request: await getAdminLicenseRequestById(id) });
     } catch (err) {
       next(err);
     }
@@ -1179,7 +1174,7 @@ router.post(
         success: true,
         details: { requestId: id, action: 'upgrade_type' },
       });
-      res.json({ request: getAdminLicenseRequestById(id) });
+      res.json({ request: await getAdminLicenseRequestById(id) });
     } catch (err) {
       next(err);
     }
@@ -1194,7 +1189,7 @@ router.put(
       const id = readRequestId(req);
       const input = gateResultSchema.parse(req.body);
       const { setGateResult } = await import('../services/quality-gate.service');
-      const gate = setGateResult(id, input.gateKey, {
+      const gate = await setGateResult(id, input.gateKey, {
         status: input.status,
         score: input.score ?? null,
         detail: input.detail ?? null,
@@ -1226,12 +1221,12 @@ router.post(
       const { getAdminLicenseRequestById } = await import(
         '../services/license-request.service'
       );
-      const approval = decideApproval(id, input.approvalType, req.auth!.subjectId, {
+      const approval = await decideApproval(id, input.approvalType, req.auth!.subjectId, {
         decision: input.decision,
         releaseNote: input.releaseNote,
         riskAssessment: input.riskAssessment,
       });
-      const request = getAdminLicenseRequestById(id)!;
+      const request = (await getAdminLicenseRequestById(id))!;
 
       recordAudit({
         eventType: 'license_request.reviewed',
@@ -1279,8 +1274,8 @@ router.get(
       );
       const aid = req.auth!.subjectId;
       res.json({
-        items: listNotifications(aid, 'admin'),
-        unread: countUnreadNotifications(aid, 'admin'),
+        items: await listNotifications(aid, 'admin'),
+        unread: await countUnreadNotifications(aid, 'admin'),
       });
     } catch (err) {
       next(err);
@@ -1317,7 +1312,7 @@ router.post(
       const { markAllNotificationsRead } = await import(
         '../services/notification-center.service'
       );
-      const changed = markAllNotificationsRead(req.auth!.subjectId, 'admin');
+      const changed = await markAllNotificationsRead(req.auth!.subjectId, 'admin');
       res.json({ marked: changed });
     } catch (err) {
       next(err);
@@ -1332,10 +1327,10 @@ router.post(
 router.get(
   '/hardware/requests',
   requireAdmin,
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { status } = hardwareRequestsFilterSchema.parse(req.query);
-      res.json({ items: listAdminHardwareRequests(status) });
+      res.json({ items: await listAdminHardwareRequests(status) });
     } catch (err) {
       next(err);
     }
@@ -1344,7 +1339,7 @@ router.get(
 
 router.post(
   '/hardware/requests/:id/review',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
@@ -1352,7 +1347,7 @@ router.post(
         throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
       }
       const input = reviewHardwareRequestSchema.parse(req.body);
-      const request = reviewHardwareRequest(req.auth!.subjectId, id, input);
+      const request = await reviewHardwareRequest(req.auth!.subjectId, id, input);
       recordAudit({
         eventType: 'hardware_request.reviewed',
         subjectId: req.auth!.subjectId,
@@ -1375,10 +1370,10 @@ router.post(
 router.get(
   '/support/requests',
   requireAdmin,
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { status } = supportRequestsFilterSchema.parse(req.query);
-      res.json({ items: listAdminSupportRequests(status) });
+      res.json({ items: await listAdminSupportRequests(status) });
     } catch (err) {
       next(err);
     }
@@ -1387,14 +1382,14 @@ router.get(
 
 router.post(
   '/support/requests/:id/resolve',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
       if (!id || id.length < 8 || id.length > 40) {
         throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
       }
-      const request = resolveSupportRequest(req.auth!.subjectId, id);
+      const request = await resolveSupportRequest(req.auth!.subjectId, id);
       recordAudit({
         eventType: 'support_request.resolved',
         subjectId: req.auth!.subjectId,

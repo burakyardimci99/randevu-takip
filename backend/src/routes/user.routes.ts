@@ -75,7 +75,7 @@ import {
 import { recordAudit } from '../services/audit.service';
 import { csrfProtection } from '../middleware/cookie-auth';
 import { HttpError } from '../middleware/error.middleware';
-import { getDb } from '../db/schema';
+import { dbOne, dbRun, getDb } from '../db/schema';
 
 const router = Router();
 
@@ -89,38 +89,38 @@ router.use(csrfProtection);
 
 /* ============ PROFİL ============ */
 
-router.get('/profile', (req: Request, res: Response, next: NextFunction) => {
+router.get('/profile', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const profile = getUserProfile(req.auth!.subjectId);
+    const profile = await getUserProfile(req.auth!.subjectId);
     res.json({ profile });
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/profile', (req: Request, res: Response, next: NextFunction) => {
+router.put('/profile', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const input = profileUpdateSchema.parse(req.body);
-    const profile = updateUserProfile(req.auth!.subjectId, input);
+    const profile = await updateUserProfile(req.auth!.subjectId, input);
     res.json({ profile });
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/rooms', (req: Request, res: Response, next: NextFunction) => {
+router.get('/rooms', async (req: Request, res: Response, next: NextFunction) => {
   try {
     // Opsiyonel takvim filtresi: ?date=YYYY-MM-DD → uygunluk o güne göre.
     const date = typeof req.query.date === 'string' ? req.query.date : undefined;
-    res.json({ rooms: listRooms(date) });
+    res.json({ rooms: await listRooms(date) });
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/bookings', (req: Request, res: Response, next: NextFunction) => {
+router.get('/bookings', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const bookings = listUserBookings(req.auth!.subjectId);
+    const bookings = await listUserBookings(req.auth!.subjectId);
     res.json({ bookings });
   } catch (err) {
     next(err);
@@ -130,7 +130,7 @@ router.get('/bookings', (req: Request, res: Response, next: NextFunction) => {
 router.post('/bookings', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const input = createBookingSchema.parse(req.body);
-    const booking = createBooking(req.auth!.subjectId, input);
+    const booking = await createBooking(req.auth!.subjectId, input);
 
     recordAudit({
       eventType: 'booking.created',
@@ -169,14 +169,14 @@ router.post('/bookings', async (req: Request, res: Response, next: NextFunction)
   }
 });
 
-router.get('/bookings/:id', (req: Request, res: Response, next: NextFunction) => {
+router.get('/bookings/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
     if (!id || id.length < 8 || id.length > 40) {
       throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
     }
-    const booking = getBookingByIdForUser(req.auth!.subjectId, id);
+    const booking = await getBookingByIdForUser(req.auth!.subjectId, id);
     if (!booking) throw new HttpError(404, 'Booking bulunamadı.', 'NOT_FOUND');
     res.json({ booking });
   } catch (err) {
@@ -188,7 +188,7 @@ router.get('/bookings/:id', (req: Request, res: Response, next: NextFunction) =>
  * Booking düzenle (PUT) — yalnızca kullanıcının kendi pending/feedback_requested talepleri.
  * Düzenleme sonrası status → 'pending' (admin tekrar incelesin).
  */
-router.put('/bookings/:id', (req: Request, res: Response, next: NextFunction) => {
+router.put('/bookings/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
@@ -196,7 +196,7 @@ router.put('/bookings/:id', (req: Request, res: Response, next: NextFunction) =>
       throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
     }
     const input = createBookingSchema.parse(req.body);
-    const booking = updateBooking(req.auth!.subjectId, id, input);
+    const booking = await updateBooking(req.auth!.subjectId, id, input);
 
     recordAudit({
       eventType: 'booking.updated',
@@ -220,14 +220,14 @@ router.put('/bookings/:id', (req: Request, res: Response, next: NextFunction) =>
 /**
  * Booking geri çek (DELETE) — yalnızca pending/feedback_requested.
  */
-router.delete('/bookings/:id', (req: Request, res: Response, next: NextFunction) => {
+router.delete('/bookings/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
     if (!id || id.length < 8 || id.length > 40) {
       throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
     }
-    const result = deleteBooking(req.auth!.subjectId, id);
+    const result = await deleteBooking(req.auth!.subjectId, id);
 
     recordAudit({
       eventType: 'booking.withdrawn',
@@ -251,18 +251,18 @@ router.delete('/bookings/:id', (req: Request, res: Response, next: NextFunction)
 
 /* ============ WAITLIST ============ */
 
-router.get('/waitlist', (req: Request, res: Response, next: NextFunction) => {
+router.get('/waitlist', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ entries: listUserWaitlist(req.auth!.subjectId) });
+    res.json({ entries: await listUserWaitlist(req.auth!.subjectId) });
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/waitlist', (req: Request, res: Response, next: NextFunction) => {
+router.post('/waitlist', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const input = joinWaitlistSchema.parse(req.body);
-    const entry = joinWaitlist(req.auth!.subjectId, input);
+    const entry = await joinWaitlist(req.auth!.subjectId, input);
     res.status(201).json({ entry });
   } catch (err) {
     next(err);
@@ -295,7 +295,7 @@ router.post('/similar', async (req: Request, res: Response, next: NextFunction) 
     if (input.bookingId) {
       // Var olan bir booking'in benzerlerini bul — IDOR koruması:
       // user yalnızca kendi booking'ini referans alabilir
-      const own = getBookingByIdForUser(req.auth!.subjectId, input.bookingId);
+      const own = await getBookingByIdForUser(req.auth!.subjectId, input.bookingId);
       if (!own) {
         throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
       }
@@ -338,7 +338,7 @@ router.post('/similar', async (req: Request, res: Response, next: NextFunction) 
 router.post('/collaborations', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const input = collaborationSchema.parse(req.body);
-    const own = getBookingByIdForUser(req.auth!.subjectId, input.bookingId);
+    const own = await getBookingByIdForUser(req.auth!.subjectId, input.bookingId);
     if (!own) {
       throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
     }
@@ -363,9 +363,9 @@ router.post('/collaborations', async (req: Request, res: Response, next: NextFun
 
 /* ============ LEADERBOARD / SIRALAMA (#5a) ============ */
 
-router.get('/leaderboard', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/leaderboard', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(getLeaderboard());
+    res.json(await getLeaderboard());
   } catch (err) {
     next(err);
   }
@@ -373,11 +373,11 @@ router.get('/leaderboard', (_req: Request, res: Response, next: NextFunction) =>
 
 /* ============ ODA × GÜN MÜSAİTLİK ISI-HARİTASI (#5c) ============ */
 
-router.get('/rooms/heatmap', (req: Request, res: Response, next: NextFunction) => {
+router.get('/rooms/heatmap', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const from = typeof req.query.from === 'string' ? req.query.from : undefined;
     const to = typeof req.query.to === 'string' ? req.query.to : undefined;
-    res.json(getRoomWeekdayHeatmap({ from, to }));
+    res.json(await getRoomWeekdayHeatmap({ from, to }));
   } catch (err) {
     next(err);
   }
@@ -411,10 +411,10 @@ router.delete('/me/photo', (req: Request, res: Response, next: NextFunction) => 
 
 router.get(
   '/showcase/:id/likes',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = String(req.params.id ?? '');
-      res.json(getLikeStatus(id, req.auth!.subjectId));
+      res.json(await getLikeStatus(id, req.auth!.subjectId));
     } catch (err) {
       next(err);
     }
@@ -423,10 +423,10 @@ router.get(
 
 router.post(
   '/showcase/:id/like',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = String(req.params.id ?? '');
-      res.json(toggleLike(id, req.auth!.subjectId));
+      res.json(await toggleLike(id, req.auth!.subjectId));
     } catch (err) {
       next(err);
     }
@@ -435,10 +435,10 @@ router.post(
 
 router.get(
   '/showcase/:id/comments',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = String(req.params.id ?? '');
-      res.json({ comments: listComments(id) });
+      res.json({ comments: await listComments(id) });
     } catch (err) {
       next(err);
     }
@@ -447,14 +447,12 @@ router.get(
 
 router.post(
   '/showcase/:id/comments',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = String(req.params.id ?? '');
       const body = String(req.body?.body ?? '');
-      const profile = getDb()
-        .prepare('SELECT full_name FROM users WHERE id = ?')
-        .get(req.auth!.subjectId) as { full_name: string } | undefined;
-      const comment = postComment({
+      const profile = await dbOne('SELECT full_name FROM users WHERE id = ?', [req.auth!.subjectId]) as { full_name: string } | undefined;
+      const comment = await postComment({
         bookingId: id,
         userId: req.auth!.subjectId,
         userFullName: profile?.full_name ?? 'Kullanıcı',
@@ -469,19 +467,19 @@ router.post(
 
 router.delete(
   '/showcase/comments/:id',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = String(req.params.id ?? '');
-      res.json(deleteComment(id, req.auth!.subjectId));
+      res.json(await deleteComment(id, req.auth!.subjectId));
     } catch (err) {
       next(err);
     }
   }
 );
 
-router.get('/showcase/engagement', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/showcase/engagement', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ engagement: getShowcaseEngagement() });
+    res.json({ engagement: await getShowcaseEngagement() });
   } catch (err) {
     next(err);
   }
@@ -489,9 +487,9 @@ router.get('/showcase/engagement', (_req: Request, res: Response, next: NextFunc
 
 /* ============ KENDİ LİSANS KULLANIMI ============ */
 
-router.get('/me/licenses', (req: Request, res: Response, next: NextFunction) => {
+router.get('/me/licenses', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const usage = getUserLicenseUsage(req.auth!.subjectId);
+    const usage = await getUserLicenseUsage(req.auth!.subjectId);
     if (!usage) {
       // Aktif booking yok → boş response
       res.json({
@@ -514,9 +512,9 @@ router.get('/me/licenses', (req: Request, res: Response, next: NextFunction) => 
 /* ============ KVKK — Veri ihracı + Right to be Forgotten ============ */
 
 /** Kullanıcı kendi verilerini JSON olarak indirir. */
-router.get('/me/export', (req: Request, res: Response, next: NextFunction) => {
+router.get('/me/export', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = exportUserData(req.auth!.subjectId);
+    const data = await exportUserData(req.auth!.subjectId);
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="klab-veri-${req.auth!.subjectId}.json"`
@@ -532,7 +530,7 @@ router.get('/me/export', (req: Request, res: Response, next: NextFunction) => {
  * Kullanıcı kendi hesabını ve verilerini siler.
  * Body: { confirmation: 'HESABIMI SİL' } (yanlışlıkla çağrı koruması)
  */
-router.post('/me/purge', (req: Request, res: Response, next: NextFunction) => {
+router.post('/me/purge', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const confirmation = req.body?.confirmation;
     if (confirmation !== 'HESABIMI SİL') {
@@ -542,7 +540,7 @@ router.post('/me/purge', (req: Request, res: Response, next: NextFunction) => {
         'VALIDATION'
       );
     }
-    const result = purgeUser(req.auth!.subjectId, {
+    const result = await purgeUser(req.auth!.subjectId, {
       id: req.auth!.subjectId,
       type: 'user',
     });
@@ -556,7 +554,7 @@ router.post('/me/purge', (req: Request, res: Response, next: NextFunction) => {
 
 router.put(
   '/bookings/:id/showcase',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
@@ -567,16 +565,13 @@ router.put(
       if (typeof visible !== 'boolean') {
         throw new HttpError(400, "'visible' boolean olmalı.", 'VALIDATION');
       }
-      const own = getBookingByIdForUser(req.auth!.subjectId, id);
+      const own = await getBookingByIdForUser(req.auth!.subjectId, id);
       if (!own) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
-      const db = getDb();
-      db.prepare(
-        `UPDATE bookings SET showcase_visible = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND user_id = ?`
-      ).run(visible ? 1 : 0, id, req.auth!.subjectId);
+      await dbRun(`UPDATE bookings SET showcase_visible = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND user_id = ?`, [visible ? 1 : 0, id, req.auth!.subjectId]);
       // Galeri içeriği değişti (proje eklendi/çıkarıldı) → showcase feed cache'ini tazele.
       void import('../services/showcase-feed.service').then((m) => m.invalidateShowcaseFeed());
-      const updated = getBookingByIdForUser(req.auth!.subjectId, id);
+      const updated = await getBookingByIdForUser(req.auth!.subjectId, id);
       res.json({ booking: updated });
     } catch (err) {
       next(err);
@@ -607,7 +602,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { listUserLicenseRequests } = await import('../services/license-request.service');
-      const items = listUserLicenseRequests(req.auth!.subjectId);
+      const items = await listUserLicenseRequests(req.auth!.subjectId);
       res.json({ items });
     } catch (err) {
       next(err);
@@ -622,7 +617,7 @@ router.post(
     try {
       const input = createLicenseRequestSchema.parse(req.body);
       const { createLicenseRequest } = await import('../services/license-request.service');
-      const created = createLicenseRequest(req.auth!.subjectId, input);
+      const created = await createLicenseRequest(req.auth!.subjectId, input);
 
       recordAudit({
         eventType: 'license_request.created',
@@ -671,7 +666,7 @@ router.put(
       }
       const input = createLicenseRequestSchema.parse(req.body);
       const { updateLicenseRequest } = await import('../services/license-request.service');
-      const updated = updateLicenseRequest(req.auth!.subjectId, id, input);
+      const updated = await updateLicenseRequest(req.auth!.subjectId, id, input);
 
       recordAudit({
         eventType: 'license_request.updated',
@@ -706,7 +701,7 @@ router.get(
       const { getUserLicenseRequestById } = await import(
         '../services/license-request.service'
       );
-      const request = getUserLicenseRequestById(req.auth!.subjectId, id);
+      const request = await getUserLicenseRequestById(req.auth!.subjectId, id);
       if (!request) {
         throw new HttpError(404, 'Talep bulunamadı.', 'LICENSE_REQUEST_NOT_FOUND');
       }
@@ -715,9 +710,9 @@ router.get(
       const { listStageEvents } = await import('../services/governance.service');
       res.json({
         request,
-        gates: listGatesForRequest(id),
-        approvals: listApprovalsForRequest(id),
-        stageEvents: listStageEvents(id),
+        gates: await listGatesForRequest(id),
+        approvals: await listApprovalsForRequest(id),
+        stageEvents: await listStageEvents(id),
       });
     } catch (err) {
       next(err);
@@ -737,8 +732,8 @@ router.get(
       );
       const uid = req.auth!.subjectId;
       res.json({
-        items: listNotifications(uid, 'user'),
-        unread: countUnreadNotifications(uid, 'user'),
+        items: await listNotifications(uid, 'user'),
+        unread: await countUnreadNotifications(uid, 'user'),
       });
     } catch (err) {
       next(err);
@@ -775,7 +770,7 @@ router.post(
       const { markAllNotificationsRead } = await import(
         '../services/notification-center.service'
       );
-      const changed = markAllNotificationsRead(req.auth!.subjectId, 'user');
+      const changed = await markAllNotificationsRead(req.auth!.subjectId, 'user');
       res.json({ marked: changed });
     } catch (err) {
       next(err);
@@ -786,7 +781,7 @@ router.post(
 /** Kullanıcı: aşama ilerletme talebi oluştur (admin'den onay bekler). */
 router.post(
   '/bookings/:id/request-advance',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
@@ -794,7 +789,7 @@ router.post(
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
       const { note } = stageAdvanceRequestSchema.parse(req.body ?? {});
-      const booking = requestStageAdvance(req.auth!.subjectId, id, note);
+      const booking = await requestStageAdvance(req.auth!.subjectId, id, note);
       res.json({ booking });
     } catch (err) {
       next(err);
@@ -805,14 +800,14 @@ router.post(
 /* ============ APPOINTMENTS — günlük randevular ============ */
 
 /** Kullanıcının kendi randevuları (varsayılan: scheduled, opsiyonel tarih aralığı). */
-router.get('/appointments', (req: Request, res: Response, next: NextFunction) => {
+router.get('/appointments', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const fromRaw = req.query.from;
     const toRaw = req.query.to;
     const includeCancelled = req.query.includeCancelled === 'true';
     const from = typeof fromRaw === 'string' ? fromRaw : undefined;
     const to = typeof toRaw === 'string' ? toRaw : undefined;
-    const appointments = listUserAppointments(req.auth!.subjectId, {
+    const appointments = await listUserAppointments(req.auth!.subjectId, {
       from,
       to,
       includeCancelled,
@@ -826,7 +821,7 @@ router.get('/appointments', (req: Request, res: Response, next: NextFunction) =>
 /** Bir booking'in randevuları (sahibi görür). */
 router.get(
   '/bookings/:id/appointments',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
@@ -834,11 +829,11 @@ router.get(
         throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
       }
       // IDOR koruması: booking sahibi mi?
-      const booking = getBookingByIdForUser(req.auth!.subjectId, id);
+      const booking = await getBookingByIdForUser(req.auth!.subjectId, id);
       if (!booking) {
         throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
       }
-      const appointments = listBookingAppointments(id);
+      const appointments = await listBookingAppointments(id);
       res.json({ appointments });
     } catch (err) {
       next(err);
@@ -847,10 +842,10 @@ router.get(
 );
 
 /** Yeni randevu oluştur. */
-router.post('/appointments', (req: Request, res: Response, next: NextFunction) => {
+router.post('/appointments', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const input = createAppointmentSchema.parse(req.body);
-    const appointment = createAppointment(req.auth!.subjectId, input);
+    const appointment = await createAppointment(req.auth!.subjectId, input);
     res.status(201).json({ appointment });
   } catch (err) {
     next(err);
@@ -860,14 +855,14 @@ router.post('/appointments', (req: Request, res: Response, next: NextFunction) =
 /** Randevu iptal et (kendi randevusu olmalı). */
 router.delete(
   '/appointments/:id',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const rawId = req.params.id;
       const id = typeof rawId === 'string' ? rawId : '';
       if (!id || id.length < 8 || id.length > 40) {
         throw new HttpError(400, 'Geçersiz randevu id.', 'INVALID_ID');
       }
-      const result = cancelAppointment(req.auth!.subjectId, id, {
+      const result = await cancelAppointment(req.auth!.subjectId, id, {
         ownerCheck: true,
         callerType: 'user',
       });
@@ -882,18 +877,18 @@ router.delete(
  * DONANIM TALEPLERİ — kullanıcı
  * ============================================================ */
 
-router.get('/hardware/requests', (req: Request, res: Response, next: NextFunction) => {
+router.get('/hardware/requests', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ items: listUserHardwareRequests(req.auth!.subjectId) });
+    res.json({ items: await listUserHardwareRequests(req.auth!.subjectId) });
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/hardware/requests', (req: Request, res: Response, next: NextFunction) => {
+router.post('/hardware/requests', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const input = createHardwareRequestSchema.parse(req.body);
-    const request = createHardwareRequest(req.auth!.subjectId, input);
+    const request = await createHardwareRequest(req.auth!.subjectId, input);
 
     recordAudit({
       eventType: 'hardware_request.created',
@@ -914,7 +909,7 @@ router.post('/hardware/requests', (req: Request, res: Response, next: NextFuncti
   }
 });
 
-router.put('/hardware/requests/:id', (req: Request, res: Response, next: NextFunction) => {
+router.put('/hardware/requests/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawId = req.params.id;
     const id = typeof rawId === 'string' ? rawId : '';
@@ -922,7 +917,7 @@ router.put('/hardware/requests/:id', (req: Request, res: Response, next: NextFun
       throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
     }
     const input = createHardwareRequestSchema.parse(req.body);
-    const request = updateHardwareRequest(req.auth!.subjectId, id, input);
+    const request = await updateHardwareRequest(req.auth!.subjectId, id, input);
     res.json({ request });
   } catch (err) {
     next(err);
@@ -933,10 +928,10 @@ router.put('/hardware/requests/:id', (req: Request, res: Response, next: NextFun
  * DESTEK TALEBİ — kullanıcı
  * ============================================================ */
 
-router.post('/support/requests', (req: Request, res: Response, next: NextFunction) => {
+router.post('/support/requests', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const input = createSupportRequestSchema.parse(req.body);
-    const request = createSupportRequest(req.auth!.subjectId, input.description);
+    const request = await createSupportRequest(req.auth!.subjectId, input.description);
 
     recordAudit({
       eventType: 'support_request.created',
@@ -967,9 +962,9 @@ router.post('/visuals', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
-router.get('/visuals', (req: Request, res: Response, next: NextFunction) => {
+router.get('/visuals', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ visuals: listMyVisuals(req.auth!.subjectId) });
+    res.json({ visuals: await listMyVisuals(req.auth!.subjectId) });
   } catch (err) {
     next(err);
   }
@@ -989,14 +984,14 @@ router.post('/visuals/:id/regenerate', async (req: Request, res: Response, next:
 });
 
 // Proje (booking) kartına görsel arkaplan ata / kaldır.
-router.put('/bookings/:id/showcase-image', (req: Request, res: Response, next: NextFunction) => {
+router.put('/bookings/:id/showcase-image', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = typeof req.params.id === 'string' ? req.params.id : '';
     if (id.length < 8 || id.length > 40) {
       throw new HttpError(400, 'Geçersiz proje id.', 'INVALID_ID');
     }
     const input = setShowcaseImageSchema.parse(req.body);
-    const result = setBookingShowcaseImage(req.auth!.subjectId, id, input.visualId);
+    const result = await setBookingShowcaseImage(req.auth!.subjectId, id, input.visualId);
     res.json(result);
   } catch (err) {
     next(err);

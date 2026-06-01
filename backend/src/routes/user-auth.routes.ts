@@ -92,7 +92,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       throw new HttpError(401, 'Refresh token bulunamadı.', 'REFRESH_INVALID');
     }
 
-    const outcome = rotateRefreshToken('user', refreshToken, {
+    const outcome = await rotateRefreshToken('user', refreshToken, {
       sub: decoded.sub,
       email: decoded.email,
       role: decoded.role,

@@ -20,7 +20,7 @@
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, chmodSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { config } from '../config/env';
-import { getDb } from '../db/schema';
+import { getDb, getDialect } from '../db/schema';
 import { logger } from '../utils/logger';
 
 interface BackupConfig {
@@ -50,6 +50,11 @@ function isoSafe(): string {
 }
 
 export async function runBackupOnce(): Promise<{ file: string; sizeBytes: number }> {
+  // PostgreSQL'de uygulama-içi atomic snapshot yok — pg_dump / managed backup kullanılır.
+  if (getDialect() === 'pg') {
+    logger.info('db_backup_skipped_pg', { note: 'pg backup pg_dump/managed ile yapılır' });
+    return { file: '', sizeBytes: 0 };
+  }
   const db = getDb();
   const dir = getBackupDir();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });

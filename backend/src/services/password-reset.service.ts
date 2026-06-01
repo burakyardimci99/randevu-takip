@@ -17,7 +17,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import { getDb } from '../db/schema';
+import { dbOne, dbRun, dbTx, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { logger } from '../utils/logger';
 import { hashPassword } from './auth.service';
@@ -36,12 +36,9 @@ function hashToken(raw: string): string {
  * durumda aynı sonucu görür.
  */
 export async function requestPasswordReset(email: string): Promise<void> {
-  const db = getDb();
   const normalized = email.trim().toLowerCase();
 
-  const user = db
-    .prepare("SELECT id, email, full_name FROM users WHERE email = ? AND status = 1")
-    .get(normalized) as { id: string; email: string; full_name: string } | undefined;
+  const user = await dbOne("SELECT id, email, full_name FROM users WHERE email = ? AND status = 1", [normalized]) as { id: string; email: string; full_name: string } | undefined;
 
   if (!user) {
     // Kullanıcı yok — sessizce çık (varlık ifşası yok).
@@ -50,17 +47,13 @@ export async function requestPasswordReset(email: string): Promise<void> {
   }
 
   // Bu kullanıcının kullanılmamış eski token'larını geçersiz kıl.
-  db.prepare(
-    `UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP
-     WHERE user_id = ? AND used_at IS NULL`
-  ).run(user.id);
+  await dbRun(`UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP
+     WHERE user_id = ? AND used_at IS NULL`, [user.id]);
 
   const rawToken = randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
-  db.prepare(
-    `INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at)
-     VALUES (?, ?, ?, ?)`
-  ).run(nanoid(), user.id, hashToken(rawToken), expiresAt);
+  await dbRun(`INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at)
+     VALUES (?, ?, ?, ?)`, [nanoid(), user.id, hashToken(rawToken), expiresAt]);
 
   const base = process.env.FRONTEND_ORIGIN ?? '';
   const resetUrl = `${base}/reset-password?token=${rawToken}`;
@@ -79,15 +72,10 @@ export async function resetPassword(
   rawToken: string,
   newPassword: string
 ): Promise<{ userId: string }> {
-  const db = getDb();
   const tokenHash = hashToken(rawToken.trim());
 
-  const row = db
-    .prepare(
-      `SELECT id, user_id, expires_at, used_at
-       FROM password_reset_tokens WHERE token_hash = ?`
-    )
-    .get(tokenHash) as
+  const row = await dbOne(`SELECT id, user_id, expires_at, used_at
+       FROM password_reset_tokens WHERE token_hash = ?`, [tokenHash]) as
     | { id: string; user_id: string; expires_at: string; used_at: string | null }
     | undefined;
 
@@ -101,23 +89,15 @@ export async function resetPassword(
 
   const passwordHash = await hashPassword(newPassword);
 
-  const txn = db.transaction(() => {
+  await dbTx(async () => {
     // Token'ı yeniden doğrula (race koruması) + tüket.
-    const fresh = db
-      .prepare('SELECT used_at FROM password_reset_tokens WHERE id = ?')
-      .get(row.id) as { used_at: string | null } | undefined;
+    const fresh = await dbOne('SELECT used_at FROM password_reset_tokens WHERE id = ?', [row.id]) as { used_at: string | null } | undefined;
     if (!fresh || fresh.used_at) {
       throw new HttpError(400, 'Sıfırlama bağlantısı zaten kullanılmış.', 'RESET_TOKEN_USED');
     }
-    db.prepare(
-      'UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = ?'
-    ).run(row.id);
-    db.prepare(
-      'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-    ).run(passwordHash, row.user_id);
+    await dbRun('UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = ?', [row.id]);
+    await dbRun('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [passwordHash, row.user_id]);
   });
-
-  txn();
 
   // Tüm oturumları kapat — eski parolayla açılmış token'lar geçersiz olsun.
   revokeAllForSubject('user', row.user_id);

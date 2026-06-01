@@ -23,7 +23,7 @@
  *  - SSE: kullanıcı + admin kanalına yayın.
  */
 import { nanoid } from 'nanoid';
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { recordAudit } from './audit.service';
 import { broadcastBooking, broadcastToAdmins } from './sse.service';
@@ -117,10 +117,10 @@ interface CreateAppointmentInput {
  * Yeni randevu oluştur. Tüm doğrulamalar SQLite transaction içinde yapılır,
  * race condition'a karşı kapasite + çakışma kontrolleri atomik.
  */
-export function createAppointment(
+export async function createAppointment(
   userId: string,
   input: CreateAppointmentInput
-): AppointmentDto {
+): Promise<AppointmentDto> {
   const start = parseIso(input.startAt);
   const end = parseIso(input.endAt);
   if (!start || !end) {
@@ -149,7 +149,6 @@ export function createAppointment(
     throw new HttpError(400, 'Geçmiş bir tarih için randevu alınamaz.', 'PAST_DATE');
   }
 
-  const db = getDb();
 
   const id = nanoid();
   const startIso = start.toISOString();
@@ -157,14 +156,10 @@ export function createAppointment(
   const title = (input.title ?? '').trim().slice(0, 120);
   const notes = (input.notes ?? '').trim().slice(0, 500);
 
-  const txn = db.transaction(() => {
+  const roomId = await dbTx(async () => {
     // 1. Booking ownership + onay durumu
-    const booking = db
-      .prepare(
-        `SELECT id, user_id, room_id, status, start_date, end_date, project_name
-         FROM bookings WHERE id = ?`
-      )
-      .get(input.bookingId) as
+    const booking = await dbOne(`SELECT id, user_id, room_id, status, start_date, end_date, project_name
+         FROM bookings WHERE id = ?`, [input.bookingId]) as
       | {
           id: string;
           user_id: string;
@@ -206,14 +201,10 @@ export function createAppointment(
     }
 
     // 3. Kullanıcının kendi başka bir randevusu ile çakışıyor mu?
-    const ownConflict = db
-      .prepare(
-        `SELECT id FROM appointments
+    const ownConflict = await dbOne(`SELECT id FROM appointments
          WHERE user_id = ? AND status = 'scheduled'
            AND NOT (end_at <= ? OR start_at >= ?)
-         LIMIT 1`
-      )
-      .get(userId, startIso, endIso);
+         LIMIT 1`, [userId, startIso, endIso]);
     if (ownConflict) {
       throw new HttpError(
         409,
@@ -223,18 +214,12 @@ export function createAppointment(
     }
 
     // 4. Oda kapasitesi — eş zamanlı scheduled appointment sayısı + 1 ≤ capacity
-    const room = db
-      .prepare(`SELECT capacity FROM rooms WHERE id = ?`)
-      .get(booking.room_id) as { capacity: number } | undefined;
+    const room = await dbOne(`SELECT capacity FROM rooms WHERE id = ?`, [booking.room_id]) as { capacity: number } | undefined;
     const capacity = room?.capacity ?? 1;
 
-    const overlapCount = db
-      .prepare(
-        `SELECT COUNT(*) AS c FROM appointments
+    const overlapCount = await dbOne(`SELECT COUNT(*) AS c FROM appointments
          WHERE room_id = ? AND status = 'scheduled'
-           AND NOT (end_at <= ? OR start_at >= ?)`
-      )
-      .get(booking.room_id, startIso, endIso) as { c: number };
+           AND NOT (end_at <= ? OR start_at >= ?)`, [booking.room_id, startIso, endIso]) as { c: number };
     if (overlapCount.c >= capacity) {
       throw new HttpError(
         409,
@@ -244,25 +229,19 @@ export function createAppointment(
     }
 
     // 5. INSERT
-    db.prepare(
-      `INSERT INTO appointments (
+    await dbRun(`INSERT INTO appointments (
          id, booking_id, user_id, room_id, start_at, end_at, title, notes, status
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')`
-    ).run(
-      id,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')`, [id,
       booking.id,
       userId,
       booking.room_id,
       startIso,
       endIso,
       title || booking.project_name,
-      notes
-    );
+      notes]);
 
     return booking.room_id;
   });
-
-  const roomId = txn();
 
   recordAudit({
     eventType: 'appointment.created',
@@ -272,7 +251,7 @@ export function createAppointment(
     details: { appointmentId: id, bookingId: input.bookingId, roomId, startAt: startIso, endAt: endIso },
   });
 
-  const created = getAppointmentById(id, userId, true) as AppointmentDto;
+  const created = await getAppointmentById(id, userId, true) as AppointmentDto;
 
   broadcastBooking(
     { type: 'appointment.changed', data: { appointmentId: id, action: 'created' } },
@@ -290,22 +269,17 @@ export function createAppointment(
  * Randevu iptal et — kullanıcı kendi randevusunu iptal edebilir; admin için
  * isOwnerCheck=false ile çağrılır.
  */
-export function cancelAppointment(
+export async function cancelAppointment(
   callerId: string,
   appointmentId: string,
   options: { ownerCheck: boolean; callerType: 'user' | 'admin' } = {
     ownerCheck: true,
     callerType: 'user',
   }
-): { cancelled: boolean } {
-  const db = getDb();
+): Promise<{ cancelled: boolean }> {
 
-  const txn = db.transaction(() => {
-    const existing = db
-      .prepare(
-        `SELECT id, user_id, room_id, status FROM appointments WHERE id = ?`
-      )
-      .get(appointmentId) as
+  const existing = await dbTx(async () => {
+    const existing = await dbOne(`SELECT id, user_id, room_id, status FROM appointments WHERE id = ?`, [appointmentId]) as
       | { id: string; user_id: string; room_id: string; status: string }
       | undefined;
     if (!existing) {
@@ -321,14 +295,10 @@ export function cancelAppointment(
         'NOT_CANCELLABLE'
       );
     }
-    db.prepare(
-      `UPDATE appointments SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-    ).run(appointmentId);
+    await dbRun(`UPDATE appointments SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [appointmentId]);
 
     return existing;
   });
-
-  const existing = txn();
 
   recordAudit({
     eventType: 'appointment.cancelled',
@@ -367,10 +337,10 @@ const BASE_JOIN = `
  * Kullanıcının kendi randevuları (default: scheduled). `includeCancelled` ile
  * iptaller dahil edilir (geçmiş takvim sayfası).
  */
-export function listUserAppointments(
+export async function listUserAppointments(
   userId: string,
   options: { from?: string; to?: string; includeCancelled?: boolean } = {}
-): AppointmentDto[] {
+): Promise<AppointmentDto[]> {
   const where: string[] = ['a.user_id = ?'];
   const params: unknown[] = [userId];
 
@@ -386,13 +356,9 @@ export function listUserAppointments(
     params.push(options.to);
   }
 
-  const rows = getDb()
-    .prepare(
-      `SELECT ${SELECT_COLS} ${BASE_JOIN}
+  const rows = await dbAll(`SELECT ${SELECT_COLS} ${BASE_JOIN}
        WHERE ${where.join(' AND ')}
-       ORDER BY a.start_at ASC`
-    )
-    .all(...params) as AppointmentRow[];
+       ORDER BY a.start_at ASC`, [...params]) as AppointmentRow[];
 
   return rows.map(rowToDto);
 }
@@ -400,18 +366,14 @@ export function listUserAppointments(
 /**
  * Bir booking'in tüm randevuları (sahibi veya admin görür).
  */
-export function listBookingAppointments(
+export async function listBookingAppointments(
   bookingId: string,
   options: { includeCancelled?: boolean } = {}
-): AppointmentDto[] {
+): Promise<AppointmentDto[]> {
   const statusFilter = options.includeCancelled ? '' : "AND a.status = 'scheduled'";
-  const rows = getDb()
-    .prepare(
-      `SELECT ${SELECT_COLS} ${BASE_JOIN}
+  const rows = await dbAll(`SELECT ${SELECT_COLS} ${BASE_JOIN}
        WHERE a.booking_id = ? ${statusFilter}
-       ORDER BY a.start_at ASC`
-    )
-    .all(bookingId) as AppointmentRow[];
+       ORDER BY a.start_at ASC`, [bookingId]) as AppointmentRow[];
   return rows.map(rowToDto);
 }
 
@@ -419,37 +381,29 @@ export function listBookingAppointments(
  * Bir odanın belirli tarih aralığındaki tüm scheduled randevuları (oda takvimi
  * için — kim ne zaman gelecek görünür).
  */
-export function listRoomAppointments(
+export async function listRoomAppointments(
   roomId: string,
   from: string,
   to: string
-): AppointmentDto[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT ${SELECT_COLS} ${BASE_JOIN}
+): Promise<AppointmentDto[]> {
+  const rows = await dbAll(`SELECT ${SELECT_COLS} ${BASE_JOIN}
        WHERE a.room_id = ?
          AND a.status = 'scheduled'
          AND a.end_at >= ?
          AND a.start_at <= ?
-       ORDER BY a.start_at ASC`
-    )
-    .all(roomId, from, to) as AppointmentRow[];
+       ORDER BY a.start_at ASC`, [roomId, from, to]) as AppointmentRow[];
   return rows.map(rowToDto);
 }
 
 /**
  * Tek randevu çek — owner check ile.
  */
-export function getAppointmentById(
+export async function getAppointmentById(
   id: string,
   callerId: string,
   isAdmin = false
-): AppointmentDto | undefined {
-  const row = getDb()
-    .prepare(
-      `SELECT ${SELECT_COLS} ${BASE_JOIN} WHERE a.id = ? LIMIT 1`
-    )
-    .get(id) as AppointmentRow | undefined;
+): Promise<AppointmentDto | undefined> {
+  const row = await dbOne(`SELECT ${SELECT_COLS} ${BASE_JOIN} WHERE a.id = ? LIMIT 1`, [id]) as AppointmentRow | undefined;
   if (!row) return undefined;
   if (!isAdmin && row.user_id !== callerId) return undefined;
   return rowToDto(row);
@@ -458,9 +412,9 @@ export function getAppointmentById(
 /**
  * Admin: tüm randevular (yönetim takvimi).
  */
-export function listAllAppointments(
+export async function listAllAppointments(
   filters: { from?: string; to?: string; includeCancelled?: boolean } = {}
-): AppointmentDto[] {
+): Promise<AppointmentDto[]> {
   const where: string[] = [];
   const params: unknown[] = [];
   if (!filters.includeCancelled) where.push("a.status = 'scheduled'");
@@ -473,12 +427,8 @@ export function listAllAppointments(
     params.push(filters.to);
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const rows = getDb()
-    .prepare(
-      `SELECT ${SELECT_COLS} ${BASE_JOIN}
+  const rows = await dbAll(`SELECT ${SELECT_COLS} ${BASE_JOIN}
        ${whereSql}
-       ORDER BY a.start_at ASC`
-    )
-    .all(...params) as AppointmentRow[];
+       ORDER BY a.start_at ASC`, [...params]) as AppointmentRow[];
   return rows.map(rowToDto);
 }

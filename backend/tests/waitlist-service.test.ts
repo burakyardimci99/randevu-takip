@@ -30,7 +30,7 @@ const futureDate = (daysFromNow: number) => {
 };
 
 beforeAll(async () => {
-  initSchema();
+  await initSchema();
   const db = getDb();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
   db.prepare(`INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`).run(USER_A, 'wa-a@test.local', hash, 'WL User A');
@@ -45,14 +45,13 @@ beforeAll(async () => {
   ).run(BLOCKING_BOOKING, USER_A, ROOM, futureDate(7), futureDate(36));
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 describe('joinWaitlist', () => {
-  it('müsait olan oda için sıraya yazılamaz (room available)', () => {
-    expect(() =>
-      joinWaitlist(USER_B, {
+  it('müsait olan oda için sıraya yazılamaz (room available)', async () => {
+    await expect(joinWaitlist(USER_B, {
         roomId: ROOM,
         periodMonths: 1,
         desiredStartDate: futureDate(120), // tamamen boş zaman aralığı
@@ -60,12 +59,11 @@ describe('joinWaitlist', () => {
         projectDescription: 'Bu istek başarısız olmalı çünkü tarih aralığı boş.',
         helpNeeded: 'Yok',
         technologies: ['Claude'],
-      })
-    ).toThrow(/ROOM_AVAILABLE|müsait/i);
+      })).rejects.toThrow(/ROOM_AVAILABLE|müsait/i);
   });
 
-  it('dolu zaman aralığı için kullanıcı sıraya yazılır (position 1)', () => {
-    const entry = joinWaitlist(USER_B, {
+  it('dolu zaman aralığı için kullanıcı sıraya yazılır (position 1)', async () => {
+    const entry = await joinWaitlist(USER_B, {
       roomId: ROOM,
       periodMonths: 1,
       desiredStartDate: futureDate(10), // bloklayıcı booking ile çakışır
@@ -79,9 +77,8 @@ describe('joinWaitlist', () => {
     expect(entry.userId).toBe(USER_B);
   });
 
-  it('aynı user aynı oda+tarih için ikinci entry açamaz', () => {
-    expect(() =>
-      joinWaitlist(USER_B, {
+  it('aynı user aynı oda+tarih için ikinci entry açamaz', async () => {
+    await expect(joinWaitlist(USER_B, {
         roomId: ROOM,
         periodMonths: 1,
         desiredStartDate: futureDate(10),
@@ -89,8 +86,7 @@ describe('joinWaitlist', () => {
         projectDescription: 'İkinci kez sıraya yazılma denemesi — başarısız olmalı.',
         helpNeeded: 'Yok',
         technologies: ['GPT'],
-      })
-    ).toThrow(/ALREADY_JOINED|zaten/i);
+      })).rejects.toThrow(/ALREADY_JOINED|zaten/i);
   });
 });
 
@@ -104,7 +100,7 @@ describe('tryPromoteForRoom', () => {
     expect(promoted.length).toBeGreaterThanOrEqual(1);
 
     // User B'nin waitlist entry'si artık 'promoted'
-    const entries = listUserWaitlist(USER_B);
+    const entries = await listUserWaitlist(USER_B);
     const myEntry = entries.find((e) => e.roomCode === 'WL-01');
     expect(myEntry?.status).toBe('promoted');
     expect(myEntry?.promotedBookingId).toBeTruthy();

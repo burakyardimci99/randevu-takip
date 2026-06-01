@@ -21,7 +21,7 @@ const USER_B = nanoid();
 const ROOM = nanoid();
 
 beforeAll(async () => {
-  initSchema();
+  await initSchema();
   const db = getDb();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
   db.prepare(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`).run(
@@ -42,8 +42,8 @@ beforeAll(async () => {
   ).run(ROOM, 'PX-01', 'Periyodik · Oda', 'Test', 'Mahalle', 4);
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 const futureDate = (daysFromNow: number) => {
@@ -64,31 +64,29 @@ const baseInput = (startDays: number, weekdays: number[]) => ({
 });
 
 describe('Periyodik (gün-bazlı) booking çakışması', () => {
-  it('A: Pzt+Çar günleri için booking oluşturur', () => {
-    const r = createBooking(USER_A, baseInput(10, [1, 3]));
+  it('A: Pzt+Çar günleri için booking oluşturur', async () => {
+    const r = await createBooking(USER_A, baseInput(10, [1, 3]));
     expect(r.status).toBe('pending');
     expect(r.weekdays).toEqual([1, 3]);
   });
 
-  it('B: AYNI oda + örtüşen tarih + AYRIK günler (Sal+Per) → çakışma YOK', () => {
-    const r = createBooking(USER_B, baseInput(10, [2, 4]));
+  it('B: AYNI oda + örtüşen tarih + AYRIK günler (Sal+Per) → çakışma YOK', async () => {
+    const r = await createBooking(USER_B, baseInput(10, [2, 4]));
     expect(r.status).toBe('pending');
     expect(r.weekdays).toEqual([2, 4]);
   });
 
-  it('B: AYNI oda + örtüşen tarih + KESİŞEN gün (Çar+Cum) → çakışma (reddedilir)', () => {
-    expect(() => createBooking(USER_B, baseInput(10, [3, 5]))).toThrow(HttpError);
-    expect(() => createBooking(USER_B, baseInput(10, [3, 5]))).toThrow(
-      /dolu|ROOM_NOT_AVAILABLE/i
-    );
+  it('B: AYNI oda + örtüşen tarih + KESİŞEN gün (Çar+Cum) → çakışma (reddedilir)', async () => {
+    await expect(createBooking(USER_B, baseInput(10, [3, 5]))).rejects.toThrow(HttpError);
+    await expect(createBooking(USER_B, baseInput(10, [3, 5]))).rejects.toThrow(/dolu|ROOM_NOT_AVAILABLE/i);
   });
 
-  it('B: AYNI oda + örtüşen tarih + tek kesişen gün (Pzt) → çakışma', () => {
-    expect(() => createBooking(USER_B, baseInput(12, [1])).status).toThrow(HttpError);
+  it('B: AYNI oda + örtüşen tarih + tek kesişen gün (Pzt) → çakışma', async () => {
+    await expect(createBooking(USER_B, baseInput(12, [1]))).rejects.toThrow(HttpError);
   });
 
-  it('B: AYNI gün ama ÖRTÜŞMEYEN tarih (çok ileride) → çakışma YOK', () => {
-    const r = createBooking(USER_B, baseInput(200, [1, 3]));
+  it('B: AYNI gün ama ÖRTÜŞMEYEN tarih (çok ileride) → çakışma YOK', async () => {
+    const r = await createBooking(USER_B, baseInput(200, [1, 3]));
     expect(r.status).toBe('pending');
   });
 });

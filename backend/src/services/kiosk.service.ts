@@ -8,43 +8,30 @@
  * iç URL — #1) + zaman damgası + oda bilgisi döner. Kullanıcı/fikir/tema İFŞA
  * EDİLMEZ (banka veri-yönetişimi).
  */
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, getDb } from '../db/schema';
 // Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
 import type { KioskRoom, KioskData } from '@klab/shared';
 
 export type { KioskRoom, KioskData };
 
 /** Kiosk seçici için aktif odaların minimal listesi (PII yok). */
-export function listKioskRooms(): KioskRoom[] {
-  return getDb()
-    .prepare(
-      `SELECT id, code, name, theme, equipment, room_type AS roomType
-       FROM rooms WHERE is_active = 1 ORDER BY code`
-    )
-    .all() as KioskRoom[];
+export async function listKioskRooms(): Promise<KioskRoom[]> {
+  return await dbAll(`SELECT id, code, name, theme, equipment, room_type AS roomType
+       FROM rooms WHERE is_active = 1 ORDER BY code`, []) as KioskRoom[];
 }
 
 /** Bir odanın kiosk verisi: oda + son hazır görsel (yoksa null → idle screen). */
-export function getRoomKiosk(roomId: string): KioskData | null {
-  const db = getDb();
-  const room = db
-    .prepare(
-      `SELECT id, code, name, theme, equipment, room_type AS roomType
-       FROM rooms WHERE id = ? AND is_active = 1 LIMIT 1`
-    )
-    .get(roomId) as KioskRoom | undefined;
+export async function getRoomKiosk(roomId: string): Promise<KioskData | null> {
+  const room = await dbOne(`SELECT id, code, name, theme, equipment, room_type AS roomType
+       FROM rooms WHERE id = ? AND is_active = 1 LIMIT 1`, [roomId]) as KioskRoom | undefined;
   if (!room) return null;
 
   // Bu odaya bağlı en son 'ready' görsel (image_url dolu). Yalnız URL + zaman.
-  const visual = db
-    .prepare(
-      `SELECT image_url, updated_at
+  const visual = await dbOne(`SELECT image_url, updated_at
        FROM visuals
        WHERE room_id = ? AND status = 'ready' AND image_url IS NOT NULL
        ORDER BY updated_at DESC
-       LIMIT 1`
-    )
-    .get(roomId) as { image_url: string; updated_at: string } | undefined;
+       LIMIT 1`, [roomId]) as { image_url: string; updated_at: string } | undefined;
 
   return {
     room,

@@ -24,7 +24,7 @@ const futureDate = (days: number) => {
 };
 
 beforeAll(async () => {
-  initSchema();
+  await initSchema();
   const db = getDb();
   const hash = await argon2.hash('TestPass123!', { type: argon2.argon2id });
   db.prepare(
@@ -68,13 +68,13 @@ beforeAll(async () => {
   );
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 describe('exportUserData', () => {
-  it('user verisini + bookings + audit dahil eder', () => {
-    const data = exportUserData(USER_ID);
+  it('user verisini + bookings + audit dahil eder', async () => {
+    const data = await exportUserData(USER_ID);
     expect(data.user.id).toBe(USER_ID);
     expect(data.user.email).toBe('kvkk@test.local');
     expect(data.bookings.length).toBeGreaterThanOrEqual(2);
@@ -82,14 +82,14 @@ describe('exportUserData', () => {
     expect(data.schemaVersion).toBe('1.0');
   });
 
-  it('var olmayan user için 404 atar', () => {
-    expect(() => exportUserData('does-not-exist')).toThrow(HttpError);
+  it('var olmayan user için 404 atar', async () => {
+    await expect(exportUserData('does-not-exist')).rejects.toThrow(HttpError);
   });
 });
 
 describe('purgeUser — Right to be Forgotten', () => {
-  it('user silindiğinde PII pseudonymize edilir', () => {
-    const result = purgeUser(USER_ID, { id: USER_ID, type: 'user' });
+  it('user silindiğinde PII pseudonymize edilir', async () => {
+    const result = await purgeUser(USER_ID, { id: USER_ID, type: 'user' });
     expect(result.purgedUser.id).toBe(USER_ID);
     expect(result.purgedUser.pseudonymizedAs).toMatch(/^deleted-/);
 
@@ -109,13 +109,13 @@ describe('purgeUser — Right to be Forgotten', () => {
     expect(user.status).toBe(3); // soft-delete
   });
 
-  it('pending booking silinir', () => {
+  it('pending booking silinir', async () => {
     const db = getDb();
     const pending = db.prepare('SELECT id FROM bookings WHERE id = ?').get(BOOKING_PENDING);
     expect(pending).toBeUndefined(); // silindi
   });
 
-  it('approved booking korunur ama description pseudonymize edilir', () => {
+  it('approved booking korunur ama description pseudonymize edilir', async () => {
     const db = getDb();
     const approved = db
       .prepare('SELECT project_description, status FROM bookings WHERE id = ?')
@@ -124,7 +124,7 @@ describe('purgeUser — Right to be Forgotten', () => {
     expect(approved.project_description).toContain('silindi');
   });
 
-  it('refresh tokenlar revoke edilir', () => {
+  it('refresh tokenlar revoke edilir', async () => {
     const db = getDb();
     // İlk önce bir token ekle
     const tokenId = nanoid();
@@ -147,7 +147,7 @@ describe('purgeUser — Right to be Forgotten', () => {
        VALUES (?, ?, ?, 'user', ?)`
     ).run(otherToken, 'hash-' + otherToken, otherUser, futureDate(7));
 
-    purgeUser(otherUser, { id: otherUser, type: 'user' });
+    await purgeUser(otherUser, { id: otherUser, type: 'user' });
 
     const tokenAfter = db
       .prepare('SELECT revoked FROM refresh_tokens WHERE id = ?')
@@ -155,7 +155,7 @@ describe('purgeUser — Right to be Forgotten', () => {
     expect(tokenAfter.revoked).toBe(1);
   });
 
-  it('audit log: user.delete event yazıldı', () => {
+  it('audit log: user.delete event yazıldı', async () => {
     const db = getDb();
     const logs = db
       .prepare(

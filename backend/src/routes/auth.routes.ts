@@ -116,7 +116,7 @@ router.post(
 
       setRefreshCookie(res, result.kind, result.tokens.refreshToken);
 
-      const mfaRequired = result.kind === 'admin' && isMfaRequired(result.subject.id);
+      const mfaRequired = result.kind === 'admin' && await isMfaRequired(result.subject.id);
 
       res.json({
         accessToken: result.tokens.accessToken,
@@ -244,7 +244,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       throw new HttpError(401, 'Refresh token bulunamadı.', 'REFRESH_INVALID');
     }
 
-    const outcome = rotateRefreshToken(kind, refreshToken, {
+    const outcome = await rotateRefreshToken(kind, refreshToken, {
       sub: decoded.sub,
       email: decoded.email,
       role: decoded.role,

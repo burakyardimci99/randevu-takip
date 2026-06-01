@@ -51,18 +51,18 @@ const sendSchema = z.object({
 });
 
 /** Sohbet edilebilecek kişiler — son mesaj + okunmamış sayısıyla. */
-router.get('/contacts', (req: Request, res: Response, next: NextFunction) => {
+router.get('/contacts', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ contacts: listContacts(actorFromReq(req)) });
+    res.json({ contacts: await listContacts(actorFromReq(req)) });
   } catch (err) {
     next(err);
   }
 });
 
 /** Toplam okunmamış mesaj sayısı — nav rozeti için. */
-router.get('/unread', (req: Request, res: Response, next: NextFunction) => {
+router.get('/unread', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ unread: countUnreadTotal(actorFromReq(req)) });
+    res.json({ unread: await countUnreadTotal(actorFromReq(req)) });
   } catch (err) {
     next(err);
   }
@@ -71,12 +71,12 @@ router.get('/unread', (req: Request, res: Response, next: NextFunction) => {
 /** Bir kişiyle mesaj geçmişi. Açılışta o sohbet okundu işaretlenir. */
 router.get(
   '/conversations/:peerId',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const me = actorFromReq(req);
       const peerId = parsePeerId(req.params.peerId);
-      const messages = listConversation(me, peerId);
-      const marked = markConversationRead(me, peerId);
+      const messages = await listConversation(me, peerId);
+      const marked = await markConversationRead(me, peerId);
       res.json({ messages, markedRead: marked });
     } catch (err) {
       next(err);
@@ -87,11 +87,11 @@ router.get(
 /** Bir sohbeti okundu işaretle (mesaj geçmişini yeniden çekmeden). */
 router.post(
   '/conversations/:peerId/read',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const me = actorFromReq(req);
       const peerId = parsePeerId(req.params.peerId);
-      const marked = markConversationRead(me, peerId);
+      const marked = await markConversationRead(me, peerId);
       res.json({ markedRead: marked });
     } catch (err) {
       next(err);
@@ -100,11 +100,11 @@ router.post(
 );
 
 /** Mesaj gönder + alıcıya realtime SSE bildirimi. */
-router.post('/messages', (req: Request, res: Response, next: NextFunction) => {
+router.post('/messages', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const me = actorFromReq(req);
     const input = sendSchema.parse(req.body);
-    const result = sendMessage(me, input.recipientId, input.recipientKind, input.body);
+    const result = await sendMessage(me, input.recipientId, input.recipientKind, input.body);
 
     // Realtime: alıcıya yeni mesaj + güncel okunmamış toplamı.
     broadcastToSubject(input.recipientId, {

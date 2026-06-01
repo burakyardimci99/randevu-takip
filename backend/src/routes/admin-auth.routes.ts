@@ -49,7 +49,7 @@ router.post(
 
       // MFA aktifse, frontend'i "verify gerekiyor" durumuna sok.
       // Demo akış: MFA opt-in, login başarılı + mfaRequired=true sinyali.
-      const mfaRequired = isMfaRequired(result.subject.id);
+      const mfaRequired = await isMfaRequired(result.subject.id);
 
       res.json({
         accessToken: result.tokens.accessToken,
@@ -97,7 +97,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       throw new HttpError(401, 'Refresh token bulunamadı.', 'REFRESH_INVALID');
     }
 
-    const outcome = rotateRefreshToken('admin', refreshToken, {
+    const outcome = await rotateRefreshToken('admin', refreshToken, {
       sub: decoded.sub,
       email: decoded.email,
       role: decoded.role,

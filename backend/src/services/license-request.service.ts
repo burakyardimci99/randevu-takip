@@ -24,7 +24,7 @@
  * - Admin review reviewed_by + reviewed_at ile audit-able (§8)
  */
 import { nanoid } from 'nanoid';
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { LICENSE_CATALOG, type LicenseInfo } from './license.service';
 import {
@@ -161,19 +161,14 @@ interface ItemRow {
   item_order: number;
 }
 
-function loadItemsForRequests(requestIds: string[]): Map<string, LicenseRequestItem[]> {
+async function loadItemsForRequests(requestIds: string[]): Promise<Map<string, LicenseRequestItem[]>> {
   const map = new Map<string, LicenseRequestItem[]>();
   if (requestIds.length === 0) return map;
-  const db = getDb();
   const placeholders = requestIds.map(() => '?').join(',');
-  const rows = db
-    .prepare(
-      `SELECT request_id, license_key, license_name, vendor, category, item_order
+  const rows = await dbAll(`SELECT request_id, license_key, license_name, vendor, category, item_order
        FROM license_request_items
        WHERE request_id IN (${placeholders})
-       ORDER BY request_id, item_order ASC`
-    )
-    .all(...requestIds) as ItemRow[];
+       ORDER BY request_id, item_order ASC`, [...requestIds]) as ItemRow[];
   for (const r of rows) {
     const list = map.get(r.request_id) ?? [];
     list.push({
@@ -191,7 +186,7 @@ function intToBool(v: number | null): boolean | null {
   return v == null ? null : v === 1;
 }
 
-function rowToLicenseRequest(row: DbRow, items: LicenseRequestItem[]): LicenseRequest {
+async function rowToLicenseRequest(row: DbRow, items: LicenseRequestItem[]): Promise<LicenseRequest> {
   return {
     id: row.id,
     userId: row.user_id,
@@ -220,7 +215,7 @@ function rowToLicenseRequest(row: DbRow, items: LicenseRequestItem[]): LicenseRe
     involvesRealData: intToBool(row.involves_real_data),
     stageEnteredAt: row.stage_entered_at,
     assignedEngineerId: row.assigned_engineer_id,
-    sla: computeSla({
+    sla: await computeSla({
       id: row.id,
       lifecycleStage: row.lifecycle_stage,
       status: row.status,
@@ -232,12 +227,12 @@ function rowToLicenseRequest(row: DbRow, items: LicenseRequestItem[]): LicenseRe
   };
 }
 
-function rowToLicenseRequestWithUser(
+async function rowToLicenseRequestWithUser(
   row: DbRowWithUser,
   items: LicenseRequestItem[]
-): LicenseRequestWithUser {
+): Promise<LicenseRequestWithUser> {
   return {
-    ...rowToLicenseRequest(row, items),
+    ...await rowToLicenseRequest(row, items),
     userFullName: row.user_full_name,
     userEmail: row.user_email,
     userDepartment: row.user_department,
@@ -348,8 +343,8 @@ export interface LicenseBudgetReport {
  * Maliyet katalog (LICENSE_CATALOG) aylık fiyatlarından hesaplanır;
  * custom / katalogda olmayan araçlar fiyatsız sayılır (unpricedItemCount).
  */
-export function getLicenseBudgetReport(): LicenseBudgetReport {
-  const all = listAdminLicenseRequests();
+export async function getLicenseBudgetReport(): Promise<LicenseBudgetReport> {
+  const all = await listAdminLicenseRequests();
 
   let approvedMonthlyUsd = 0;
   let approvedCommitmentUsd = 0;
@@ -468,11 +463,10 @@ function normalizeItem(
   };
 }
 
-export function createLicenseRequest(
+export async function createLicenseRequest(
   userId: string,
   input: CreateLicenseRequestInput
-): LicenseRequest {
-  const db = getDb();
+): Promise<LicenseRequest> {
   const id = nanoid();
 
   const items = input.items.map(normalizeItem);
@@ -485,18 +479,15 @@ export function createLicenseRequest(
   const adminFeedback = autoRejected ? AUTO_REJECT_FEEDBACK : null;
   const reviewedAt = autoRejected ? new Date().toISOString() : null;
 
-  const txn = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO license_requests
+  await dbTx(async () => {
+    await dbRun(`INSERT INTO license_requests
          (id, user_id, license_key, license_name, vendor, category,
           reason, duration_months,
           request_title, expected_benefit, success_criteria,
           project_type, estimated_duration_days, data_to_use, technical_stack,
           uses_external_api, involves_real_data, governance_level,
           status, admin_feedback, reviewed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id,
       userId,
       primary.licenseKey,
       primary.licenseName,
@@ -516,23 +507,20 @@ export function createLicenseRequest(
       governanceLevel,
       status,
       adminFeedback,
-      reviewedAt
-    );
+      reviewedAt]);
 
-    const insertItem = db.prepare(
-      `INSERT INTO license_request_items
-         (id, request_id, license_key, license_name, vendor, category, item_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    );
-    items.forEach((it, idx) => {
-      insertItem.run(nanoid(), id, it.licenseKey, it.licenseName, it.vendor, it.category, idx);
-    });
+    for (const [idx, it] of items.entries()) {
+      await dbRun(
+        `INSERT INTO license_request_items
+           (id, request_id, license_key, license_name, vendor, category, item_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [nanoid(), id, it.licenseKey, it.licenseName, it.vendor, it.category, idx]
+      );
+    }
   });
 
-  txn();
-
   if (autoRejected) {
-    recordStageEvent({
+    await recordStageEvent({
       requestId: id,
       fromStage: 'application',
       toStage: 'application',
@@ -541,9 +529,9 @@ export function createLicenseRequest(
     });
   }
 
-  const row = db.prepare('SELECT * FROM license_requests WHERE id = ?').get(id) as DbRow;
-  const itemMap = loadItemsForRequests([id]);
-  return rowToLicenseRequest(row, itemMap.get(id) ?? []);
+  const row = await dbOne('SELECT * FROM license_requests WHERE id = ?', [id]) as DbRow;
+  const itemMap = await loadItemsForRequests([id]);
+  return await rowToLicenseRequest(row, itemMap.get(id) ?? []);
 }
 
 /**
@@ -553,16 +541,13 @@ export function createLicenseRequest(
  * 'feedback_requested' güncellenince statü 'pending'e döner.
  * Gerçek veri beyanı işaretlenirse güncelleme de otomatik reddedilir.
  */
-export function updateLicenseRequest(
+export async function updateLicenseRequest(
   userId: string,
   requestId: string,
   input: CreateLicenseRequestInput
-): LicenseRequest {
-  const db = getDb();
+): Promise<LicenseRequest> {
 
-  const existing = db
-    .prepare('SELECT * FROM license_requests WHERE id = ?')
-    .get(requestId) as DbRow | undefined;
+  const existing = await dbOne('SELECT * FROM license_requests WHERE id = ?', [requestId]) as DbRow | undefined;
 
   if (!existing || existing.user_id !== userId) {
     throw new HttpError(404, 'Talep bulunamadı.', 'LICENSE_REQUEST_NOT_FOUND');
@@ -583,9 +568,8 @@ export function updateLicenseRequest(
   const adminFeedback = autoRejected ? AUTO_REJECT_FEEDBACK : existing.admin_feedback;
   const reviewedAt = autoRejected ? new Date().toISOString() : existing.reviewed_at;
 
-  const txn = db.transaction(() => {
-    db.prepare(
-      `UPDATE license_requests SET
+  await dbTx(async () => {
+    await dbRun(`UPDATE license_requests SET
          license_key = ?, license_name = ?, vendor = ?, category = ?,
          reason = ?, duration_months = ?,
          request_title = ?, expected_benefit = ?, success_criteria = ?,
@@ -594,9 +578,7 @@ export function updateLicenseRequest(
          uses_external_api = ?, involves_real_data = ?, governance_level = ?,
          status = ?, admin_feedback = ?, reviewed_at = ?,
          updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(
-      primary.licenseKey,
+       WHERE id = ?`, [primary.licenseKey,
       primary.licenseName,
       primary.vendor,
       primary.category,
@@ -615,24 +597,21 @@ export function updateLicenseRequest(
       status,
       adminFeedback,
       reviewedAt,
-      requestId
-    );
+      requestId]);
 
-    db.prepare('DELETE FROM license_request_items WHERE request_id = ?').run(requestId);
-    const insertItem = db.prepare(
-      `INSERT INTO license_request_items
-         (id, request_id, license_key, license_name, vendor, category, item_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    );
-    items.forEach((it, idx) => {
-      insertItem.run(nanoid(), requestId, it.licenseKey, it.licenseName, it.vendor, it.category, idx);
-    });
+    await dbRun('DELETE FROM license_request_items WHERE request_id = ?', [requestId]);
+    for (const [idx, it] of items.entries()) {
+      await dbRun(
+        `INSERT INTO license_request_items
+           (id, request_id, license_key, license_name, vendor, category, item_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [nanoid(), requestId, it.licenseKey, it.licenseName, it.vendor, it.category, idx]
+      );
+    }
   });
 
-  txn();
-
   if (autoRejected) {
-    recordStageEvent({
+    await recordStageEvent({
       requestId,
       fromStage: 'application',
       toStage: 'application',
@@ -641,9 +620,9 @@ export function updateLicenseRequest(
     });
   }
 
-  const row = db.prepare('SELECT * FROM license_requests WHERE id = ?').get(requestId) as DbRow;
-  const itemMap = loadItemsForRequests([requestId]);
-  return rowToLicenseRequest(row, itemMap.get(requestId) ?? []);
+  const row = await dbOne('SELECT * FROM license_requests WHERE id = ?', [requestId]) as DbRow;
+  const itemMap = await loadItemsForRequests([requestId]);
+  return await rowToLicenseRequest(row, itemMap.get(requestId) ?? []);
 }
 
 /**
@@ -652,15 +631,10 @@ export function updateLicenseRequest(
 export async function notifyAdminsLicenseRequested(
   request: LicenseRequest
 ): Promise<void> {
-  const db = getDb();
-  const admins = db
-    .prepare("SELECT id, email FROM admins WHERE status = 1")
-    .all() as Array<{ id: string; email: string }>;
+  const admins = await dbAll("SELECT id, email FROM admins WHERE status = 1", []) as Array<{ id: string; email: string }>;
   if (admins.length === 0) return;
 
-  const submitter = db
-    .prepare('SELECT full_name FROM users WHERE id = ?')
-    .get(request.userId) as { full_name: string } | undefined;
+  const submitter = await dbOne('SELECT full_name FROM users WHERE id = ?', [request.userId]) as { full_name: string } | undefined;
   const submitterName = submitter?.full_name ?? 'Bir kullanıcı';
 
   const tools = request.items.map((i) => i.licenseName).join(', ') || request.licenseName;
@@ -679,25 +653,19 @@ export async function notifyAdminsLicenseRequested(
   });
 }
 
-export function listUserLicenseRequests(userId: string): LicenseRequest[] {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT * FROM license_requests WHERE user_id = ? ORDER BY created_at DESC`
-    )
-    .all(userId) as DbRow[];
-  const itemMap = loadItemsForRequests(rows.map((r) => r.id));
-  return rows.map((r) => rowToLicenseRequest(r, itemMap.get(r.id) ?? []));
+export async function listUserLicenseRequests(userId: string): Promise<LicenseRequest[]> {
+  const rows = await dbAll(`SELECT * FROM license_requests WHERE user_id = ? ORDER BY created_at DESC`, [userId]) as DbRow[];
+  const itemMap = await loadItemsForRequests(rows.map((r) => r.id));
+  return Promise.all(rows.map((r) => rowToLicenseRequest(r, itemMap.get(r.id) ?? [])));
 }
 
 /* ============================================================
  * ADMIN — tüm başvurular + review
  * ============================================================ */
 
-export function listAdminLicenseRequests(
+export async function listAdminLicenseRequests(
   statusFilter?: LicenseRequestStatus
-): LicenseRequestWithUser[] {
-  const db = getDb();
+): Promise<LicenseRequestWithUser[]> {
   const params: unknown[] = [];
   let where = '';
   if (statusFilter) {
@@ -705,9 +673,7 @@ export function listAdminLicenseRequests(
     params.push(statusFilter);
   }
 
-  const rows = db
-    .prepare(
-      `${SELECT_ADMIN_REQUEST}
+  const rows = await dbAll(`${SELECT_ADMIN_REQUEST}
        ${where}
        ORDER BY
          CASE lr.status
@@ -715,38 +681,30 @@ export function listAdminLicenseRequests(
            WHEN 'feedback_requested' THEN 1
            ELSE 2
          END,
-         lr.created_at DESC`
-    )
-    .all(...params) as DbRowWithUser[];
-  const itemMap = loadItemsForRequests(rows.map((r) => r.id));
-  return rows.map((r) => rowToLicenseRequestWithUser(r, itemMap.get(r.id) ?? []));
+         lr.created_at DESC`, [...params]) as DbRowWithUser[];
+  const itemMap = await loadItemsForRequests(rows.map((r) => r.id));
+  return Promise.all(rows.map((r) => rowToLicenseRequestWithUser(r, itemMap.get(r.id) ?? [])));
 }
 
 /** Tek bir başvuruyu (admin görünümü) getirir. */
-export function getAdminLicenseRequestById(
+export async function getAdminLicenseRequestById(
   requestId: string
-): LicenseRequestWithUser | undefined {
-  const db = getDb();
-  const row = db
-    .prepare(`${SELECT_ADMIN_REQUEST} WHERE lr.id = ?`)
-    .get(requestId) as DbRowWithUser | undefined;
+): Promise<LicenseRequestWithUser | undefined> {
+  const row = await dbOne(`${SELECT_ADMIN_REQUEST} WHERE lr.id = ?`, [requestId]) as DbRowWithUser | undefined;
   if (!row) return undefined;
-  const itemMap = loadItemsForRequests([requestId]);
-  return rowToLicenseRequestWithUser(row, itemMap.get(requestId) ?? []);
+  const itemMap = await loadItemsForRequests([requestId]);
+  return await rowToLicenseRequestWithUser(row, itemMap.get(requestId) ?? []);
 }
 
 /** Kullanıcının tek başvurusu (IDOR: sahibi olmalı). */
-export function getUserLicenseRequestById(
+export async function getUserLicenseRequestById(
   userId: string,
   requestId: string
-): LicenseRequest | undefined {
-  const db = getDb();
-  const row = db
-    .prepare('SELECT * FROM license_requests WHERE id = ? AND user_id = ?')
-    .get(requestId, userId) as DbRow | undefined;
+): Promise<LicenseRequest | undefined> {
+  const row = await dbOne('SELECT * FROM license_requests WHERE id = ? AND user_id = ?', [requestId, userId]) as DbRow | undefined;
   if (!row) return undefined;
-  const itemMap = loadItemsForRequests([requestId]);
-  return rowToLicenseRequest(row, itemMap.get(requestId) ?? []);
+  const itemMap = await loadItemsForRequests([requestId]);
+  return await rowToLicenseRequest(row, itemMap.get(requestId) ?? []);
 }
 
 export type ReviewAction = 'approve' | 'reject' | 'request_feedback' | 'swat';
@@ -756,18 +714,15 @@ export interface ReviewLicenseRequestInput {
   adminFeedback?: string | null;
 }
 
-export function reviewLicenseRequest(
+export async function reviewLicenseRequest(
   reviewerId: string,
   requestId: string,
   input: ReviewLicenseRequestInput,
   /** Review eden rol — admin ya da Analitik Danışman. Audit/timeline doğruluğu için. */
   actorType: 'admin' | 'danisman' = 'admin'
-): LicenseRequestWithUser {
-  const db = getDb();
+): Promise<LicenseRequestWithUser> {
 
-  const existing = db
-    .prepare('SELECT * FROM license_requests WHERE id = ?')
-    .get(requestId) as DbRow | undefined;
+  const existing = await dbOne('SELECT * FROM license_requests WHERE id = ?', [requestId]) as DbRow | undefined;
 
   if (!existing) {
     throw new HttpError(404, 'Talep bulunamadı.', 'LICENSE_REQUEST_NOT_FOUND');
@@ -782,15 +737,13 @@ export function reviewLicenseRequest(
 
   /* --- SWAT: multidisipliner inceleme kuyruğuna yönlendir --- */
   if (input.action === 'swat') {
-    db.prepare(
-      `UPDATE license_requests SET
+    await dbRun(`UPDATE license_requests SET
          review_track = 'swat',
          admin_feedback = ?,
          updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(input.adminFeedback?.trim() || existing.admin_feedback, requestId);
+       WHERE id = ?`, [input.adminFeedback?.trim() || existing.admin_feedback, requestId]);
 
-    recordStageEvent({
+    await recordStageEvent({
       requestId,
       fromStage: 'application',
       toStage: 'application',
@@ -799,7 +752,7 @@ export function reviewLicenseRequest(
       note: 'SWAT multidisipliner incelemeye yönlendirildi (SLA ≤ 5 iş günü).',
     });
 
-    const swatResult = getAdminLicenseRequestById(requestId)!;
+    const swatResult = (await getAdminLicenseRequestById(requestId))!;
     pushNotification({
       recipientId: swatResult.userId,
       recipientType: 'user',
@@ -819,22 +772,20 @@ export function reviewLicenseRequest(
         ? 'rejected'
         : 'feedback_requested';
 
-  db.prepare(
-    `UPDATE license_requests SET
+  await dbRun(`UPDATE license_requests SET
        status = ?,
        admin_feedback = ?,
        reviewed_by = ?,
        reviewed_at = CURRENT_TIMESTAMP,
        updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).run(nextStatus, input.adminFeedback?.trim() || null, reviewerId, requestId);
+     WHERE id = ?`, [nextStatus, input.adminFeedback?.trim() || null, reviewerId, requestId]);
 
   // Onaylandıysa projeyi geliştirme aşamasına taşı (kalite kapıları oluşur).
   if (nextStatus === 'approved') {
-    onApplicationApproved(requestId, reviewerId, actorType);
+    await onApplicationApproved(requestId, reviewerId, actorType);
   }
 
-  const result = getAdminLicenseRequestById(requestId)!;
+  const result = (await getAdminLicenseRequestById(requestId))!;
   const reqTitle = result.requestTitle ?? result.licenseName;
 
   // Kullanıcıya sonuç e-postası (best-effort, queue üzerinden).

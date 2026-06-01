@@ -10,7 +10,7 @@
  */
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
-import { getDb } from './schema';
+import { dbAll, dbOne, dbTx, getDb } from './schema';
 import {
   GATE_DEFINITIONS,
   applicableGates,
@@ -454,7 +454,7 @@ const ARGON2_OPTIONS: argon2.Options = {
 
 export async function seedRooms(): Promise<void> {
   const db = getDb();
-  const existing = db.prepare('SELECT COUNT(*) as count FROM rooms').get() as { count: number };
+  const existing = await dbOne('SELECT COUNT(*) as count FROM rooms', []) as { count: number };
   if (existing.count >= ROOMS.length) {
     console.log(`[SEED] Odalar zaten yüklü (${existing.count} adet), atlanıyor.`);
     return;
@@ -490,7 +490,7 @@ export async function seedRooms(): Promise<void> {
 export async function seedUsers(): Promise<void> {
   const db = getDb();
 
-  const existing = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
+  const existing = await dbOne('SELECT COUNT(*) as count FROM users', []) as { count: number };
   if (existing.count >= DEMO_USERS.length) {
     console.log(`[SEED] User'lar zaten yüklü (${existing.count}), atlanıyor.`);
     return;
@@ -521,7 +521,7 @@ export async function seedUsers(): Promise<void> {
 export async function seedAdmins(): Promise<void> {
   const db = getDb();
 
-  const existing = db.prepare('SELECT COUNT(*) as count FROM admins').get() as { count: number };
+  const existing = await dbOne('SELECT COUNT(*) as count FROM admins', []) as { count: number };
   if (existing.count >= DEMO_ADMINS.length) {
     console.log(`[SEED] Admin'ler zaten yüklü (${existing.count}), atlanıyor.`);
     return;
@@ -542,16 +542,16 @@ export async function seedAdmins(): Promise<void> {
 export async function seedBookings(): Promise<void> {
   const db = getDb();
 
-  const existing = db.prepare('SELECT COUNT(*) as count FROM bookings').get() as { count: number };
+  const existing = await dbOne('SELECT COUNT(*) as count FROM bookings', []) as { count: number };
   if (existing.count > 0) {
     console.log(`[SEED] Booking'ler zaten yüklü (${existing.count}), atlanıyor.`);
     return;
   }
 
   // Lookup tablolarını çek
-  const users = db.prepare('SELECT id, email FROM users').all() as Array<{ id: string; email: string }>;
-  const rooms = db.prepare('SELECT id, code FROM rooms').all() as Array<{ id: string; code: string }>;
-  const admins = db.prepare('SELECT id FROM admins WHERE role = ?').all('super_admin') as Array<{ id: string }>;
+  const users = await dbAll('SELECT id, email FROM users', []) as Array<{ id: string; email: string }>;
+  const rooms = await dbAll('SELECT id, code FROM rooms', []) as Array<{ id: string; code: string }>;
+  const admins = await dbAll('SELECT id FROM admins WHERE role = ?', ['super_admin']) as Array<{ id: string }>;
   const reviewerId = admins[0]?.id ?? null;
 
   const userByEmail = new Map(users.map((u) => [u.email, u.id]));
@@ -623,15 +623,15 @@ export async function seedBookings(): Promise<void> {
 export async function seedShowcaseEngagement(): Promise<void> {
   const db = getDb();
 
-  const existing = db.prepare('SELECT COUNT(*) as count FROM showcase_likes').get() as { count: number };
+  const existing = await dbOne('SELECT COUNT(*) as count FROM showcase_likes', []) as { count: number };
   if (existing.count > 0) {
     console.log(`[SEED] Showcase engagement zaten yüklü (${existing.count}), atlanıyor.`);
     return;
   }
 
   // Approved booking'leri ve user'ları çek
-  const approved = db.prepare(`SELECT id FROM bookings WHERE status = 'approved' AND showcase_visible = 1`).all() as Array<{ id: string }>;
-  const users = db.prepare('SELECT id, full_name FROM users').all() as Array<{ id: string; full_name: string }>;
+  const approved = await dbAll(`SELECT id FROM bookings WHERE status = 'approved' AND showcase_visible = 1`, []) as Array<{ id: string }>;
+  const users = await dbAll('SELECT id, full_name FROM users', []) as Array<{ id: string; full_name: string }>;
   if (approved.length === 0 || users.length === 0) return;
 
   const likeInsert = db.prepare(`INSERT OR IGNORE INTO showcase_likes (id, booking_id, user_id) VALUES (?, ?, ?)`);
@@ -1090,14 +1090,14 @@ function seedLifecycle(
 
 export async function seedLicenseRequests(): Promise<void> {
   const db = getDb();
-  const existing = db.prepare('SELECT COUNT(*) as count FROM license_requests').get() as { count: number };
+  const existing = await dbOne('SELECT COUNT(*) as count FROM license_requests', []) as { count: number };
   if (existing.count > 0) {
     console.log(`[SEED] Lisans talepleri zaten yüklü (${existing.count}), atlanıyor.`);
     return;
   }
 
-  const users = db.prepare('SELECT id, email FROM users').all() as Array<{ id: string; email: string }>;
-  const admins = db.prepare('SELECT id FROM admins WHERE role = ?').all('super_admin') as Array<{ id: string }>;
+  const users = await dbAll('SELECT id, email FROM users', []) as Array<{ id: string; email: string }>;
+  const admins = await dbAll('SELECT id FROM admins WHERE role = ?', ['super_admin']) as Array<{ id: string }>;
   const reviewerId = admins[0]?.id ?? null;
   const userByEmail = new Map(users.map((u) => [u.email, u.id]));
 
@@ -1120,7 +1120,7 @@ export async function seedLicenseRequests(): Promise<void> {
   `);
 
   let count = 0;
-  const txn = db.transaction(() => {
+  await dbTx(async () => {
     for (const r of LICENSE_REQUESTS) {
       const userId = userByEmail.get(r.userEmail);
       if (!userId) {
@@ -1204,7 +1204,6 @@ export async function seedLicenseRequests(): Promise<void> {
       count++;
     }
   });
-  txn();
 
   console.log(`[SEED] ${count} lisans talebi eklendi (${LICENSE_REQUESTS.filter((r) => r.status === 'approved').length} approved, ${LICENSE_REQUESTS.filter((r) => r.status === 'pending').length} pending, ${LICENSE_REQUESTS.filter((r) => r.status === 'feedback_requested').length} feedback, ${LICENSE_REQUESTS.filter((r) => r.status === 'rejected').length} rejected).`);
 }
@@ -1235,14 +1234,14 @@ const WAITLIST_ENTRIES: WaitlistSeed[] = [
 
 export async function seedWaitlist(): Promise<void> {
   const db = getDb();
-  const existing = db.prepare('SELECT COUNT(*) as count FROM waitlist').get() as { count: number };
+  const existing = await dbOne('SELECT COUNT(*) as count FROM waitlist', []) as { count: number };
   if (existing.count > 0) {
     console.log(`[SEED] Bekleme listesi zaten yüklü (${existing.count}), atlanıyor.`);
     return;
   }
 
-  const users = db.prepare('SELECT id, email FROM users').all() as Array<{ id: string; email: string }>;
-  const rooms = db.prepare('SELECT id, code FROM rooms').all() as Array<{ id: string; code: string }>;
+  const users = await dbAll('SELECT id, email FROM users', []) as Array<{ id: string; email: string }>;
+  const rooms = await dbAll('SELECT id, code FROM rooms', []) as Array<{ id: string; code: string }>;
   const userByEmail = new Map(users.map((u) => [u.email, u.id]));
   const roomByCode = new Map(rooms.map((r) => [r.code, r.id]));
 
@@ -1257,7 +1256,7 @@ export async function seedWaitlist(): Promise<void> {
   // Oda bazında position sayacı.
   const positionByRoom = new Map<string, number>();
   let count = 0;
-  const txn = db.transaction(() => {
+  await dbTx(async () => {
     for (const w of WAITLIST_ENTRIES) {
       const userId = userByEmail.get(w.userEmail);
       const roomId = roomByCode.get(resolveRoomCode(w.roomCode));
@@ -1283,7 +1282,6 @@ export async function seedWaitlist(): Promise<void> {
       count++;
     }
   });
-  txn();
 
   console.log(`[SEED] ${count} bekleme listesi kaydı eklendi.`);
 }
@@ -1358,7 +1356,7 @@ const NOTIFICATIONS: NotificationSeed[] = [
 
 export async function seedNotifications(): Promise<void> {
   const db = getDb();
-  const existing = db.prepare('SELECT COUNT(*) as count FROM notifications').get() as {
+  const existing = await dbOne('SELECT COUNT(*) as count FROM notifications', []) as {
     count: number;
   };
   if (existing.count > 0) {
@@ -1366,11 +1364,11 @@ export async function seedNotifications(): Promise<void> {
     return;
   }
 
-  const users = db.prepare('SELECT id, email FROM users').all() as Array<{
+  const users = await dbAll('SELECT id, email FROM users', []) as Array<{
     id: string;
     email: string;
   }>;
-  const admins = db.prepare('SELECT id, email FROM admins').all() as Array<{
+  const admins = await dbAll('SELECT id, email FROM admins', []) as Array<{
     id: string;
     email: string;
   }>;

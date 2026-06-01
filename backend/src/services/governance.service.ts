@@ -14,7 +14,7 @@
  * Bu servis license-request.service'i import ETMEZ (döngü olmaması için).
  */
 import { nanoid } from 'nanoid';
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import {
   STAGE_ORDER,
@@ -82,51 +82,38 @@ function rowToStageEvent(row: StageEventRow): StageEvent {
 export type StageActorType = 'user' | 'admin' | 'danisman' | 'arge' | 'system';
 
 /** Bir yaşam döngüsü geçişini audit zaman çizelgesine kaydeder. */
-export function recordStageEvent(args: {
+export async function recordStageEvent(args: {
   requestId: string;
   fromStage: string | null;
   toStage: string;
   actorId?: string | null;
   actorType?: StageActorType;
   note?: string | null;
-}): void {
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO project_stage_events
+}): Promise<void> {
+  await dbRun(`INSERT INTO project_stage_events
        (id, request_id, from_stage, to_stage, actor_id, actor_type, note)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    nanoid(),
+     VALUES (?, ?, ?, ?, ?, ?, ?)`, [nanoid(),
     args.requestId,
     args.fromStage,
     args.toStage,
     args.actorId ?? null,
     args.actorType ?? 'system',
-    args.note?.trim() || null
-  );
+    args.note?.trim() || null]);
 }
 
-export function listStageEvents(requestId: string): StageEvent[] {
-  const db = getDb();
-  const rows = db
-    .prepare(`${SELECT_STAGE_EVENT} WHERE e.request_id = ? ORDER BY e.created_at ASC`)
-    .all(requestId) as StageEventRow[];
+export async function listStageEvents(requestId: string): Promise<StageEvent[]> {
+  const rows = await dbAll(`${SELECT_STAGE_EVENT} WHERE e.request_id = ? ORDER BY e.created_at ASC`, [requestId]) as StageEventRow[];
   return rows.map(rowToStageEvent);
 }
 
-export function listStageEventsForRequests(
+export async function listStageEventsForRequests(
   requestIds: string[]
-): Map<string, StageEvent[]> {
+): Promise<Map<string, StageEvent[]>> {
   const map = new Map<string, StageEvent[]>();
   if (requestIds.length === 0) return map;
-  const db = getDb();
   const placeholders = requestIds.map(() => '?').join(',');
-  const rows = db
-    .prepare(
-      `${SELECT_STAGE_EVENT} WHERE e.request_id IN (${placeholders})
-       ORDER BY e.created_at ASC`
-    )
-    .all(...requestIds) as StageEventRow[];
+  const rows = await dbAll(`${SELECT_STAGE_EVENT} WHERE e.request_id IN (${placeholders})
+       ORDER BY e.created_at ASC`, [...requestIds]) as StageEventRow[];
   for (const r of rows) {
     const list = map.get(r.request_id) ?? [];
     list.push(rowToStageEvent(r));
@@ -171,7 +158,7 @@ function buildSla(checkpoint: string, startIso: string, slaHours: number): SlaIn
  * Talebin o an beklediği SLA kontrol noktasını hesaplar.
  * Aktif bir bekleme yoksa null döner.
  */
-export function computeSla(subject: SlaSubject): SlaInfo | null {
+export async function computeSla(subject: SlaSubject): Promise<SlaInfo | null> {
   // Başvuru aşaması — değerlendirme bekliyor.
   if (
     subject.lifecycleStage === 'application' &&
@@ -186,13 +173,8 @@ export function computeSla(subject: SlaSubject): SlaInfo | null {
   // Stage / Production — bekleyen insan onayı varsa onun SLA'sı.
   if (subject.lifecycleStage === 'stage' || subject.lifecycleStage === 'production') {
     const type: ApprovalType = subject.lifecycleStage === 'stage' ? 'stage' : 'production';
-    const db = getDb();
-    const pending = db
-      .prepare(
-        `SELECT created_at FROM human_approvals
-         WHERE request_id = ? AND approval_type = ? AND decision = 'pending'`
-      )
-      .get(subject.id, type) as { created_at: string } | undefined;
+    const pending = await dbOne(`SELECT created_at FROM human_approvals
+         WHERE request_id = ? AND approval_type = ? AND decision = 'pending'`, [subject.id, type]) as { created_at: string } | undefined;
     if (pending) {
       const hours =
         type === 'stage' ? SLA_HOURS.stage_approval : SLA_HOURS.production_approval;
@@ -216,14 +198,9 @@ interface RequestLifecycleRow {
   project_type: 'poc' | 'integration' | null;
 }
 
-function loadLifecycleRow(requestId: string): RequestLifecycleRow {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT id, lifecycle_stage, governance_level, status, project_type
-       FROM license_requests WHERE id = ?`
-    )
-    .get(requestId) as RequestLifecycleRow | undefined;
+async function loadLifecycleRow(requestId: string): Promise<RequestLifecycleRow> {
+  const row = await dbOne(`SELECT id, lifecycle_stage, governance_level, status, project_type
+       FROM license_requests WHERE id = ?`, [requestId]) as RequestLifecycleRow | undefined;
   if (!row) {
     throw new HttpError(404, 'Talep bulunamadı.', 'LICENSE_REQUEST_NOT_FOUND');
   }
@@ -234,23 +211,20 @@ function loadLifecycleRow(requestId: string): RequestLifecycleRow {
  * Başvuru onaylandığında çağrılır (reviewLicenseRequest → approve).
  * Projeyi 'development' aşamasına taşır, kalite kapılarını oluşturur.
  */
-export function onApplicationApproved(
+export async function onApplicationApproved(
   requestId: string,
   actorId: string,
   actorType: StageActorType = 'admin'
-): void {
-  const db = getDb();
-  const row = loadLifecycleRow(requestId);
+): Promise<void> {
+  const row = await loadLifecycleRow(requestId);
   if (row.lifecycle_stage !== 'application') return; // idempotent
 
-  db.prepare(
-    `UPDATE license_requests
+  await dbRun(`UPDATE license_requests
      SET lifecycle_stage = 'development', stage_entered_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).run(requestId);
+     WHERE id = ?`, [requestId]);
 
-  initGatesForRequest(requestId, row.governance_level);
-  recordStageEvent({
+  await initGatesForRequest(requestId, row.governance_level);
+  await recordStageEvent({
     requestId,
     fromStage: 'application',
     toStage: 'development',
@@ -269,13 +243,12 @@ export interface AdvanceResult {
  * Projeyi bir sonraki yaşam döngüsü aşamasına ilerletir.
  * Geçiş kapısı sağlanmazsa HttpError fırlatır.
  */
-export function advanceLifecycle(
+export async function advanceLifecycle(
   requestId: string,
   actorId: string,
   note?: string | null
-): AdvanceResult {
-  const db = getDb();
-  const row = loadLifecycleRow(requestId);
+): Promise<AdvanceResult> {
+  const row = await loadLifecycleRow(requestId);
   const current = row.lifecycle_stage;
 
   if (current === 'application') {
@@ -294,7 +267,7 @@ export function advanceLifecycle(
 
   // Geçiş kapısı kontrolü
   if (current === 'development') {
-    if (!allGatesPassed(requestId, row.governance_level)) {
+    if (!await allGatesPassed(requestId, row.governance_level)) {
       throw new HttpError(
         400,
         'Tüm kalite kapıları yeşil olmadan Stage aşamasına geçilemez.',
@@ -302,13 +275,9 @@ export function advanceLifecycle(
       );
     }
   } else if (current === 'stage') {
-    const stageApproval = db
-      .prepare(
-        `SELECT decision FROM human_approvals
+    const stageApproval = await dbOne(`SELECT decision FROM human_approvals
          WHERE request_id = ? AND approval_type = 'stage'
-         ORDER BY created_at DESC LIMIT 1`
-      )
-      .get(requestId) as { decision: string } | undefined;
+         ORDER BY created_at DESC LIMIT 1`, [requestId]) as { decision: string } | undefined;
     if (stageApproval?.decision !== 'approved') {
       throw new HttpError(
         400,
@@ -317,13 +286,9 @@ export function advanceLifecycle(
       );
     }
   } else if (current === 'production') {
-    const prodApproval = db
-      .prepare(
-        `SELECT decision FROM human_approvals
+    const prodApproval = await dbOne(`SELECT decision FROM human_approvals
          WHERE request_id = ? AND approval_type = 'production'
-         ORDER BY created_at DESC LIMIT 1`
-      )
-      .get(requestId) as { decision: string } | undefined;
+         ORDER BY created_at DESC LIMIT 1`, [requestId]) as { decision: string } | undefined;
     if (prodApproval?.decision !== 'approved') {
       throw new HttpError(
         400,
@@ -332,20 +297,17 @@ export function advanceLifecycle(
       );
     }
   }
-
-  const txn = db.transaction(() => {
-    db.prepare(
-      `UPDATE license_requests
+  await dbTx(async () => {
+    await dbRun(`UPDATE license_requests
        SET lifecycle_stage = ?, stage_entered_at = CURRENT_TIMESTAMP,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(next, requestId);
+       WHERE id = ?`, [next, requestId]);
 
     // Yeni aşama insan onayı gerektiriyorsa bekleyen onayı aç.
     if (next === 'stage') createPendingApproval(requestId, 'stage');
     if (next === 'production') createPendingApproval(requestId, 'production');
 
-    recordStageEvent({
+    await recordStageEvent({
       requestId,
       fromStage: current,
       toStage: next,
@@ -354,7 +316,6 @@ export function advanceLifecycle(
       note: note?.trim() || null,
     });
   });
-  txn();
 
   return { fromStage: current, toStage: next };
 }
@@ -362,23 +323,19 @@ export function advanceLifecycle(
 /**
  * Lab Mühendisi atar (kılavuz: ortam ataması).
  */
-export function assignEngineer(requestId: string, engineerId: string): void {
-  const db = getDb();
+export async function assignEngineer(requestId: string, engineerId: string): Promise<void> {
   loadLifecycleRow(requestId); // varlık kontrolü
-  db.prepare(
-    `UPDATE license_requests
+  await dbRun(`UPDATE license_requests
      SET assigned_engineer_id = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).run(engineerId, requestId);
+     WHERE id = ?`, [engineerId, requestId]);
 }
 
 /**
  * Proje türünü PoC → Kuruma Entegre yükseltir (kılavuz §3 "Tür yükseltme").
  * Yönetişim seviyesi 'full' olur; geliştirme aşamasındaysa eksik kapılar eklenir.
  */
-export function upgradeProjectType(requestId: string, actorId: string): void {
-  const db = getDb();
-  const row = loadLifecycleRow(requestId);
+export async function upgradeProjectType(requestId: string, actorId: string): Promise<void> {
+  const row = await loadLifecycleRow(requestId);
   if (row.project_type === 'integration') {
     throw new HttpError(
       400,
@@ -387,19 +344,17 @@ export function upgradeProjectType(requestId: string, actorId: string): void {
     );
   }
 
-  db.prepare(
-    `UPDATE license_requests
+  await dbRun(`UPDATE license_requests
      SET project_type = 'integration', governance_level = 'full',
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).run(requestId);
+     WHERE id = ?`, [requestId]);
 
   // Geliştirme aşamasında ise yeni (mimari/framework) kapıları ekle.
   if (row.lifecycle_stage !== 'application') {
-    initGatesForRequest(requestId, 'full');
+    await initGatesForRequest(requestId, 'full');
   }
 
-  recordStageEvent({
+  await recordStageEvent({
     requestId,
     fromStage: row.lifecycle_stage,
     toStage: row.lifecycle_stage,
@@ -431,15 +386,10 @@ export interface GovernanceDashboard {
   gateStats: { passed: number; failed: number; pending: number };
 }
 
-export function getGovernanceDashboard(): GovernanceDashboard {
-  const db = getDb();
+export async function getGovernanceDashboard(): Promise<GovernanceDashboard> {
 
-  const stageRows = db
-    .prepare(
-      `SELECT lifecycle_stage AS stage, COUNT(*) AS count
-       FROM license_requests GROUP BY lifecycle_stage`
-    )
-    .all() as Array<{ stage: LifecycleStage; count: number }>;
+  const stageRows = await dbAll(`SELECT lifecycle_stage AS stage, COUNT(*) AS count
+       FROM license_requests GROUP BY lifecycle_stage`, []) as Array<{ stage: LifecycleStage; count: number }>;
   const stageMap = new Map(stageRows.map((r) => [r.stage, r.count]));
   const stageDistribution = STAGE_ORDER.map((stage) => ({
     stage,
@@ -453,33 +403,21 @@ export function getGovernanceDashboard(): GovernanceDashboard {
   const liveProjects = stageMap.get('live') ?? 0;
 
   const swatQueueCount = (
-    db
-      .prepare(
-        `SELECT COUNT(*) AS c FROM license_requests
-         WHERE review_track = 'swat' AND status = 'pending'`
-      )
-      .get() as { c: number }
+    await dbOne(`SELECT COUNT(*) AS c FROM license_requests
+         WHERE review_track = 'swat' AND status = 'pending'`, []) as { c: number }
   ).c;
 
   const pendingApprovals = (
-    db
-      .prepare(`SELECT COUNT(*) AS c FROM human_approvals WHERE decision = 'pending'`)
-      .get() as { c: number }
+    await dbOne(`SELECT COUNT(*) AS c FROM human_approvals WHERE decision = 'pending'`, []) as { c: number }
   ).c;
 
-  const gateRows = db
-    .prepare(`SELECT status, COUNT(*) AS c FROM quality_gates GROUP BY status`)
-    .all() as Array<{ status: 'pending' | 'passed' | 'failed'; c: number }>;
+  const gateRows = await dbAll(`SELECT status, COUNT(*) AS c FROM quality_gates GROUP BY status`, []) as Array<{ status: 'pending' | 'passed' | 'failed'; c: number }>;
   const gateStats = { passed: 0, failed: 0, pending: 0 };
   for (const g of gateRows) gateStats[g.status] = g.c;
 
   // SLA ihlalleri — her başvuru için aktif SLA hesaplanır.
-  const slaSubjects = db
-    .prepare(
-      `SELECT id, lifecycle_stage, status, review_track, created_at
-       FROM license_requests`
-    )
-    .all() as Array<{
+  const slaSubjects = await dbAll(`SELECT id, lifecycle_stage, status, review_track, created_at
+       FROM license_requests`, []) as Array<{
     id: string;
     lifecycle_stage: LifecycleStage;
     status: string;
@@ -488,7 +426,7 @@ export function getGovernanceDashboard(): GovernanceDashboard {
   }>;
   let slaBreaches = 0;
   for (const s of slaSubjects) {
-    const sla = computeSla({
+    const sla = await computeSla({
       id: s.id,
       lifecycleStage: s.lifecycle_stage,
       status: s.status,

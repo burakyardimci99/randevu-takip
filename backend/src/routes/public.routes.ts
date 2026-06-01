@@ -12,7 +12,7 @@
  * - Rate limit globalde uygulanır.
  */
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { getDb } from '../db/schema';
+import { dbOne, getDb } from '../db/schema';
 import { getPublicProfile } from '../services/public-profile.service';
 import { getShowcaseEngagement } from '../services/showcase.service';
 import {
@@ -35,27 +35,27 @@ const router = Router();
  * + engagement. Frontend Showcase.tsx artık 3 yerine 1 istek atar. Server-side
  * cache showcase-feed.service'te (items/technologies 30s TTL, engagement taze).
  */
-router.get('/showcase/feed', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/showcase/feed', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(getShowcaseFeed());
+    res.json(await getShowcaseFeed());
   } catch (err) {
     next(err);
   }
 });
 
 // Eski tekil endpoint'ler — geriye uyum (aynı cache'li servisi kullanır).
-router.get('/showcase', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/showcase', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(getShowcaseItems());
+    res.json(await getShowcaseItems());
   } catch (err) {
     next(err);
   }
 });
 
 /** Showcase için top teknolojiler (etiket bulutu). */
-router.get('/showcase/technologies', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/showcase/technologies', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ technologies: getShowcaseTechnologies() });
+    res.json({ technologies: await getShowcaseTechnologies() });
   } catch (err) {
     next(err);
   }
@@ -63,14 +63,14 @@ router.get('/showcase/technologies', (_req: Request, res: Response, next: NextFu
 
 /* ============ PUBLIC USER PROFILE ============ */
 
-router.get('/users/:id', (req: Request, res: Response, next: NextFunction) => {
+router.get('/users/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id ?? '');
     if (id.length < 8 || id.length > 40) {
       next(new (require('../middleware/error.middleware').HttpError)(400, 'Geçersiz id.', 'INVALID_ID'));
       return;
     }
-    res.json({ profile: getPublicProfile(id) });
+    res.json({ profile: await getPublicProfile(id) });
   } catch (err) {
     next(err);
   }
@@ -78,9 +78,9 @@ router.get('/users/:id', (req: Request, res: Response, next: NextFunction) => {
 
 /* ============ SHOWCASE ENGAGEMENT (public) ============ */
 
-router.get('/showcase/engagement', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/showcase/engagement', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ engagement: getShowcaseEngagement() });
+    res.json({ engagement: await getShowcaseEngagement() });
   } catch (err) {
     next(err);
   }
@@ -106,7 +106,7 @@ router.get('/visuals/:id/image', async (req: Request, res: Response, next: NextF
     let seed = safeSeed(req.query.v);
     if (seed === null) {
       // ?v yoksa görselin güncel seed'ini DB'den çöz.
-      const row = getDb().prepare('SELECT seed FROM visuals WHERE id = ?').get(id) as
+      const row = await dbOne('SELECT seed FROM visuals WHERE id = ?', [id]) as
         | { seed: number | null }
         | undefined;
       seed = row?.seed ?? null;
@@ -125,9 +125,9 @@ router.get('/visuals/:id/image', async (req: Request, res: Response, next: NextF
 /* ============ KIOSK — oda ekranı (#5b) ============ */
 
 /** Kiosk seçici için aktif odaların minimal listesi. */
-router.get('/rooms', (_req: Request, res: Response, next: NextFunction) => {
+router.get('/rooms', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ rooms: listKioskRooms() });
+    res.json({ rooms: await listKioskRooms() });
   } catch (err) {
     next(err);
   }
@@ -137,13 +137,13 @@ router.get('/rooms', (_req: Request, res: Response, next: NextFunction) => {
  * Bir odanın kiosk verisi: oda + son üretilen 'ready' görsel (yoksa idle screen).
  * Public (oda ekranı); yalnız görsel iç URL'i + zaman + oda bilgisi (PII yok).
  */
-router.get('/rooms/:id/kiosk', (req: Request, res: Response, next: NextFunction) => {
+router.get('/rooms/:id/kiosk', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id ?? '');
     if (id.length < 8 || id.length > 40) {
       throw new HttpError(400, 'Geçersiz oda id.', 'INVALID_ID');
     }
-    const data = getRoomKiosk(id);
+    const data = await getRoomKiosk(id);
     if (!data) {
       throw new HttpError(404, 'Oda bulunamadı.', 'ROOM_NOT_FOUND');
     }

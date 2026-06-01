@@ -73,7 +73,7 @@ const futureDate = (daysFromNow: number) => {
 };
 
 beforeAll(async () => {
-  initSchema();
+  await initSchema();
   // Embedding modelini önceden yükle
   await warmupEmbeddings();
 
@@ -119,8 +119,8 @@ beforeAll(async () => {
   }
 }, 60_000);
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 describe('generateEmbedding', () => {
@@ -139,26 +139,26 @@ describe('generateEmbedding', () => {
 });
 
 describe('cosineSimilarity', () => {
-  it('kendisiyle 1.0', () => {
+  it('kendisiyle 1.0', async () => {
     const v = [0.3, 0.4, 0.5, 0.6];
     expect(cosineSimilarity(v, v)).toBeCloseTo(1.0, 6);
   });
 
-  it('ters yönlü vektörlerle -1.0', () => {
+  it('ters yönlü vektörlerle -1.0', async () => {
     const v = [0.3, 0.4, 0.5];
     const vNeg = v.map((x) => -x);
     expect(cosineSimilarity(v, vNeg)).toBeCloseTo(-1.0, 6);
   });
 
-  it('dik (ortogonal) vektörlerle 0', () => {
+  it('dik (ortogonal) vektörlerle 0', async () => {
     expect(cosineSimilarity([1, 0, 0], [0, 1, 0])).toBeCloseTo(0, 6);
   });
 
-  it('farklı uzunluktaki vektörler için 0 döner', () => {
+  it('farklı uzunluktaki vektörler için 0 döner', async () => {
     expect(cosineSimilarity([1, 2], [1, 2, 3])).toBe(0);
   });
 
-  it('sıfır vektörle 0 döner (NaN değil)', () => {
+  it('sıfır vektörle 0 döner (NaN değil)', async () => {
     expect(cosineSimilarity([0, 0, 0], [1, 2, 3])).toBe(0);
   });
 });
@@ -368,7 +368,7 @@ describe('Privacy — visibility filtresi', () => {
 });
 
 describe('bookingTextForEmbedding', () => {
-  it('name + description + technologies join eder', () => {
+  it('name + description + technologies join eder', async () => {
     const t = bookingTextForEmbedding({
       projectName: 'X',
       projectDescription: 'Y',
@@ -380,7 +380,7 @@ describe('bookingTextForEmbedding', () => {
     expect(t).toContain('B');
   });
 
-  it('technologies string olarak verilirse de çalışır', () => {
+  it('technologies string olarak verilirse de çalışır', async () => {
     const t = bookingTextForEmbedding({
       projectName: 'X',
       projectDescription: 'Y',

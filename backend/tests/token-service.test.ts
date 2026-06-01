@@ -21,21 +21,21 @@ import {
 const SUBJECT_ID = nanoid();
 
 beforeAll(async () => {
-  initSchema();
+  await initSchema();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
   getDb()
     .prepare(`INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`)
     .run(SUBJECT_ID, 'reuse@test.local', hash, 'Reuse Tester');
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 describe('Refresh token rotation + reuse detection', () => {
-  it('rotation: eski revoke, yeni geçerli', () => {
-    const { token: first } = issueRefreshToken('user', SUBJECT_ID);
-    const outcome1 = rotateRefreshToken('user', first, {
+  it('rotation: eski revoke, yeni geçerli', async () => {
+    const { token: first } = await issueRefreshToken('user', SUBJECT_ID);
+    const outcome1 = await rotateRefreshToken('user', first, {
       sub: SUBJECT_ID,
       role: 'user',
       email: 'reuse@test.local',
@@ -48,10 +48,10 @@ describe('Refresh token rotation + reuse detection', () => {
     }
   });
 
-  it('REUSE: revoke edilmiş token tekrar rotate edilemez ve chain iptal olur', () => {
+  it('REUSE: revoke edilmiş token tekrar rotate edilemez ve chain iptal olur', async () => {
     // Yeni bir chain başlat
-    const { token: t1 } = issueRefreshToken('user', SUBJECT_ID);
-    const rotated = rotateRefreshToken('user', t1, {
+    const { token: t1 } = await issueRefreshToken('user', SUBJECT_ID);
+    const rotated = await rotateRefreshToken('user', t1, {
       sub: SUBJECT_ID,
       role: 'user',
       email: 'reuse@test.local',
@@ -59,7 +59,7 @@ describe('Refresh token rotation + reuse detection', () => {
     expect(rotated.ok).toBe(true);
 
     // Eski t1'i tekrar kullan → reuse attack
-    const attack = rotateRefreshToken('user', t1, {
+    const attack = await rotateRefreshToken('user', t1, {
       sub: SUBJECT_ID,
       role: 'user',
       email: 'reuse@test.local',
@@ -69,7 +69,7 @@ describe('Refresh token rotation + reuse detection', () => {
 
     // Chain'in tamamı revoke edildi mi?
     if (rotated.ok) {
-      const followup = rotateRefreshToken('user', rotated.tokens.refreshToken, {
+      const followup = await rotateRefreshToken('user', rotated.tokens.refreshToken, {
         sub: SUBJECT_ID,
         role: 'user',
         email: 'reuse@test.local',
@@ -79,9 +79,9 @@ describe('Refresh token rotation + reuse detection', () => {
     }
   });
 
-  it('kind mismatch: user token admin olarak rotate edilemez', () => {
-    const { token } = issueRefreshToken('user', SUBJECT_ID);
-    const wrongKind = rotateRefreshToken('admin', token, {
+  it('kind mismatch: user token admin olarak rotate edilemez', async () => {
+    const { token } = await issueRefreshToken('user', SUBJECT_ID);
+    const wrongKind = await rotateRefreshToken('admin', token, {
       sub: SUBJECT_ID,
       role: 'admin',
       email: 'reuse@test.local',
@@ -90,9 +90,9 @@ describe('Refresh token rotation + reuse detection', () => {
     if (!wrongKind.ok) expect(wrongKind.reason).toBe('kind_mismatch');
   });
 
-  it('subject mismatch: payload.sub != DB.subject_id reddedilir', () => {
-    const { token } = issueRefreshToken('user', SUBJECT_ID);
-    const wrongSub = rotateRefreshToken('user', token, {
+  it('subject mismatch: payload.sub != DB.subject_id reddedilir', async () => {
+    const { token } = await issueRefreshToken('user', SUBJECT_ID);
+    const wrongSub = await rotateRefreshToken('user', token, {
       sub: 'someone-else',
       role: 'user',
       email: 'reuse@test.local',
@@ -103,7 +103,7 @@ describe('Refresh token rotation + reuse detection', () => {
 });
 
 describe('Access token signing', () => {
-  it('user access token RS256 ve 3-parçalı', () => {
+  it('user access token RS256 ve 3-parçalı', async () => {
     const { token } = signAccessToken('user', {
       sub: SUBJECT_ID,
       role: 'user',

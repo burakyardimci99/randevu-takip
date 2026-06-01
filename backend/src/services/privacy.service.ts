@@ -24,7 +24,7 @@
  *  - export → 'user.data_export' event
  *  - delete → 'user.data_purge' event
  */
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { logger } from '../utils/logger';
 import { recordAudit } from './audit.service';
@@ -42,54 +42,37 @@ export interface UserDataExport {
  * Kullanıcının tüm verilerini JSON olarak döner.
  * IDOR: yalnız çağıran user kendi verisini görür.
  */
-export function exportUserData(userId: string): UserDataExport {
-  const db = getDb();
+export async function exportUserData(userId: string): Promise<UserDataExport> {
 
-  const user = db
-    .prepare(
-      `SELECT id, email, full_name, role, department, title, manager, phone, bio,
+  const user = await dbOne(`SELECT id, email, full_name, role, department, title, manager, phone, bio,
               project_idea, status, created_at, updated_at
-       FROM users WHERE id = ? LIMIT 1`
-    )
-    .get(userId) as Record<string, unknown> | undefined;
+       FROM users WHERE id = ? LIMIT 1`, [userId]) as Record<string, unknown> | undefined;
   if (!user) throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
 
-  const bookings = db
-    .prepare(
-      `SELECT b.id, b.room_id, b.period_months, b.start_date, b.end_date,
+  const bookings = await dbAll(`SELECT b.id, b.room_id, b.period_months, b.start_date, b.end_date,
               b.project_name, b.project_description, b.help_needed, b.technologies,
               b.status, b.admin_feedback, b.reviewed_at, b.created_at, b.updated_at,
               r.code AS room_code, r.name AS room_name
        FROM bookings b
        INNER JOIN rooms r ON r.id = b.room_id
        WHERE b.user_id = ?
-       ORDER BY b.created_at DESC`
-    )
-    .all(userId) as Array<Record<string, unknown>>;
+       ORDER BY b.created_at DESC`, [userId]) as Array<Record<string, unknown>>;
 
-  const waitlist = db
-    .prepare(
-      `SELECT w.id, w.room_id, w.period_months, w.desired_start_date,
+  const waitlist = await dbAll(`SELECT w.id, w.room_id, w.period_months, w.desired_start_date,
               w.project_name, w.project_description, w.help_needed, w.technologies,
               w.position, w.status, w.created_at, w.updated_at,
               r.code AS room_code, r.name AS room_name
        FROM waitlist w
        INNER JOIN rooms r ON r.id = w.room_id
        WHERE w.user_id = ?
-       ORDER BY w.created_at DESC`
-    )
-    .all(userId) as Array<Record<string, unknown>>;
+       ORDER BY w.created_at DESC`, [userId]) as Array<Record<string, unknown>>;
 
   // Audit log: yalnız bu kullanıcıyı subject olarak alan kayıtlar
-  const auditLog = db
-    .prepare(
-      `SELECT event_type, success, details, created_at, ip_address
+  const auditLog = await dbAll(`SELECT event_type, success, details, created_at, ip_address
        FROM audit_logs
        WHERE subject_id = ? AND subject_type = 'user'
        ORDER BY created_at DESC
-       LIMIT 500`
-    )
-    .all(userId) as Array<Record<string, unknown>>;
+       LIMIT 500`, [userId]) as Array<Record<string, unknown>>;
 
   recordAudit({
     eventType: 'user.update', // 'user.data_export' ekleyebiliriz; şimdilik 'user.update'
@@ -131,73 +114,47 @@ export interface PurgeResult {
   deletedEmbeddings: number;
 }
 
-export function purgeUser(userId: string, requestedBy: { id: string; type: 'user' | 'admin' }): PurgeResult {
-  const db = getDb();
+export async function purgeUser(userId: string, requestedBy: { id: string; type: 'user' | 'admin' }): Promise<PurgeResult> {
   const pseudo = `deleted-${userId.slice(0, 8)}`;
 
-  const txn = db.transaction(() => {
-    const existing = db
-      .prepare(`SELECT id, status FROM users WHERE id = ? LIMIT 1`)
-      .get(userId) as { id: string; status: number } | undefined;
+  const counts = await dbTx(async () => {
+    const existing = await dbOne(`SELECT id, status FROM users WHERE id = ? LIMIT 1`, [userId]) as { id: string; status: number } | undefined;
     if (!existing) throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
 
     // 1) Pending/feedback bookings → silinir + embedding sil
-    const deletable = db
-      .prepare(
-        `SELECT id FROM bookings
-         WHERE user_id = ? AND status IN ('pending', 'feedback_requested')`
-      )
-      .all(userId) as Array<{ id: string }>;
+    const deletable = await dbAll(`SELECT id FROM bookings
+         WHERE user_id = ? AND status IN ('pending', 'feedback_requested')`, [userId]) as Array<{ id: string }>;
     for (const b of deletable) {
-      db.prepare('DELETE FROM project_embeddings WHERE booking_id = ?').run(b.id);
+      await dbRun('DELETE FROM project_embeddings WHERE booking_id = ?', [b.id]);
     }
-    const delRes = db
-      .prepare(
-        `DELETE FROM bookings WHERE user_id = ?
-         AND status IN ('pending', 'feedback_requested')`
-      )
-      .run(userId);
+    const delRes = await dbRun(`DELETE FROM bookings WHERE user_id = ?
+         AND status IN ('pending', 'feedback_requested')`, [userId]);
 
     // 2) Approved/rejected bookings → pseudonymize (PII scrub)
-    const pseudonymizeRes = db
-      .prepare(
-        `UPDATE bookings
+    const pseudonymizeRes = await dbRun(`UPDATE bookings
          SET project_description = '[Kullanıcı tarafından silindi]',
              help_needed = '[Kullanıcı tarafından silindi]',
              updated_at = CURRENT_TIMESTAMP
-         WHERE user_id = ? AND status IN ('approved', 'rejected')`
-      )
-      .run(userId);
+         WHERE user_id = ? AND status IN ('approved', 'rejected')`, [userId]);
 
     // Approved bookings'in embedding'lerini de sil (re-index gerekirse)
-    db.prepare(
-      `DELETE FROM project_embeddings
-       WHERE booking_id IN (SELECT id FROM bookings WHERE user_id = ?)`
-    ).run(userId);
+    await dbRun(`DELETE FROM project_embeddings
+       WHERE booking_id IN (SELECT id FROM bookings WHERE user_id = ?)`, [userId]);
 
     // 3) Waitlist → cancelled
-    const waitlistRes = db
-      .prepare(
-        `UPDATE waitlist
+    const waitlistRes = await dbRun(`UPDATE waitlist
          SET status = 'cancelled',
              project_description = '[silindi]',
              help_needed = '[silindi]',
              updated_at = CURRENT_TIMESTAMP
-         WHERE user_id = ? AND status IN ('waiting', 'promoted')`
-      )
-      .run(userId);
+         WHERE user_id = ? AND status IN ('waiting', 'promoted')`, [userId]);
 
     // 4) Refresh tokens → revoke
-    const tokensRes = db
-      .prepare(
-        `UPDATE refresh_tokens SET revoked = 1
-         WHERE subject_id = ? AND subject_type = 'user' AND revoked = 0`
-      )
-      .run(userId);
+    const tokensRes = await dbRun(`UPDATE refresh_tokens SET revoked = 1
+         WHERE subject_id = ? AND subject_type = 'user' AND revoked = 0`, [userId]);
 
     // 5) User row → pseudonymize + status=3
-    db.prepare(
-      `UPDATE users
+    await dbRun(`UPDATE users
        SET email = ?,
            full_name = '[Silinen kullanıcı]',
            department = NULL,
@@ -211,8 +168,7 @@ export function purgeUser(userId: string, requestedBy: { id: string; type: 'user
            failed_login_count = 0,
            locked_until = NULL,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(`${pseudo}@purged.local`, userId);
+       WHERE id = ?`, [`${pseudo}@purged.local`, userId]);
 
     return {
       deletedBookings: delRes.changes,
@@ -222,8 +178,6 @@ export function purgeUser(userId: string, requestedBy: { id: string; type: 'user
       deletedEmbeddings: deletable.length, // approximate count
     };
   });
-
-  const counts = txn();
 
   recordAudit({
     eventType: 'user.delete',

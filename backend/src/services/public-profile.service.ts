@@ -12,7 +12,7 @@
  *
  * Auth gerektirmez (public).
  */
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, getDb } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 
 export interface PublicProfile {
@@ -82,21 +82,14 @@ function parseTechs(raw: string): string[] {
   return [];
 }
 
-export function getPublicProfile(userId: string): PublicProfile {
-  const db = getDb();
-  const user = db
-    .prepare(
-      `SELECT id, full_name, department, title, bio, project_idea, profile_photo, created_at, status
-       FROM users WHERE id = ?`
-    )
-    .get(userId) as UserRow | undefined;
+export async function getPublicProfile(userId: string): Promise<PublicProfile> {
+  const user = await dbOne(`SELECT id, full_name, department, title, bio, project_idea, profile_photo, created_at, status
+       FROM users WHERE id = ?`, [userId]) as UserRow | undefined;
   if (!user || user.status === 3) {
     throw new HttpError(404, 'Profil bulunamadı.', 'USER_NOT_FOUND');
   }
 
-  const projects = db
-    .prepare(
-      `SELECT b.id, b.project_name, b.project_description, b.technologies, b.start_date, b.end_date,
+  const projects = await dbAll(`SELECT b.id, b.project_name, b.project_description, b.technologies, b.start_date, b.end_date,
               b.showcase_highlight, b.reviewed_at,
               r.code AS room_code, r.name AS room_name,
               (SELECT COUNT(*) FROM showcase_likes l WHERE l.booking_id = b.id) AS like_count,
@@ -104,9 +97,7 @@ export function getPublicProfile(userId: string): PublicProfile {
        FROM bookings b
        INNER JOIN rooms r ON r.id = b.room_id
        WHERE b.user_id = ? AND b.status = 'approved' AND b.showcase_visible = 1
-       ORDER BY b.showcase_highlight DESC, b.reviewed_at DESC`
-    )
-    .all(userId) as ProjectRow[];
+       ORDER BY b.showcase_highlight DESC, b.reviewed_at DESC`, [userId]) as ProjectRow[];
 
   const totalLikes = projects.reduce((s, p) => s + p.like_count, 0);
   const totalComments = projects.reduce((s, p) => s + p.comment_count, 0);

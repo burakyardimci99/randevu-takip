@@ -1,7 +1,7 @@
 /**
  * Oda servisi: oda listesi ve uygunluk hesaplaması.
  */
-import { getDb } from '../db/schema';
+import { dbAll, dbOne, getDb } from '../db/schema';
 // Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
 import type { HeatmapCell, HeatmapRoom, RoomHeatmap } from '@klab/shared';
 
@@ -60,25 +60,16 @@ function isoWeekday(dateStr: string): number {
  * (o tarihi kapsayan ve o günün maskesi set olan bir booking varsa oda dolu).
  * Verilmezse genel uygunluk (haftanın 7 günü de dolu mu) döner.
  */
-export function listRooms(date?: string): RoomDto[] {
-  const db = getDb();
-  const rooms = db
-    .prepare(
-      `SELECT id, code, name, district, neighborhood, capacity, description, theme, equipment,
+export async function listRooms(date?: string): Promise<RoomDto[]> {
+  const rooms = await dbAll(`SELECT id, code, name, district, neighborhood, capacity, description, theme, equipment,
               room_type AS roomType, specs
-       FROM rooms WHERE is_active = 1 ORDER BY code`
-    )
-    .all() as RoomRow[];
+       FROM rooms WHERE is_active = 1 ORDER BY code`, []) as RoomRow[];
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const activeBookings = db
-    .prepare(
-      `SELECT room_id, weekday_mask, start_date, end_date FROM bookings
+  const activeBookings = await dbAll(`SELECT room_id, weekday_mask, start_date, end_date FROM bookings
        WHERE status IN ('approved', 'pending', 'feedback_requested')
-         AND end_date >= ?`
-    )
-    .all(today) as ActiveBooking[];
+         AND end_date >= ?`, [today]) as ActiveBooking[];
 
   // Tarih filtresi: belirli bir gün için uygunluk.
   if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -123,14 +114,10 @@ export function listRooms(date?: string): RoomDto[] {
   });
 }
 
-export function getRoomById(id: string): RoomRow | undefined {
-  return getDb()
-    .prepare(
-      `SELECT id, code, name, district, neighborhood, capacity, description, theme, equipment,
+export async function getRoomById(id: string): Promise<RoomRow | undefined> {
+  return await dbOne(`SELECT id, code, name, district, neighborhood, capacity, description, theme, equipment,
               room_type AS roomType, specs
-       FROM rooms WHERE id = ? AND is_active = 1 LIMIT 1`
-    )
-    .get(id) as RoomRow | undefined;
+       FROM rooms WHERE id = ? AND is_active = 1 LIMIT 1`, [id]) as RoomRow | undefined;
 }
 
 /* ============================================================
@@ -173,23 +160,18 @@ interface OccupantRow {
  * Admin "Odalar" görünümü — her oda + içindeki aktif booking'ler (kim,
  * hangi proje, hangi tarih, hangi durum). Süresi geçmiş booking'ler hariç.
  */
-export function getRoomsWithOccupancy(): RoomWithOccupancy[] {
-  const db = getDb();
-  const rooms = listRooms();
+export async function getRoomsWithOccupancy(): Promise<RoomWithOccupancy[]> {
+  const rooms = await listRooms();
   const today = new Date().toISOString().slice(0, 10);
 
-  const rows = db
-    .prepare(
-      `SELECT b.id, b.room_id, b.user_id, b.project_name, b.period_months,
+  const rows = await dbAll(`SELECT b.id, b.room_id, b.user_id, b.project_name, b.period_months,
               b.start_date, b.end_date, b.status,
               u.full_name AS user_full_name, u.email AS user_email
        FROM bookings b
        INNER JOIN users u ON u.id = b.user_id
        WHERE b.status IN ('approved', 'pending', 'feedback_requested')
          AND b.end_date >= ?
-       ORDER BY b.start_date ASC`
-    )
-    .all(today) as OccupantRow[];
+       ORDER BY b.start_date ASC`, [today]) as OccupantRow[];
 
   const byRoom = new Map<string, RoomOccupant[]>();
   for (const r of rows) {
@@ -229,8 +211,7 @@ export function getRoomsWithOccupancy(): RoomWithOccupancy[] {
  * her odanın her günü (weekday_mask biti) için sayılır. Gün-bazlı modelin doğal
  * görselleştirmesi: hangi oda hangi günler yoğun.
  */
-export function getRoomWeekdayHeatmap(opts: { from?: string; to?: string }): RoomHeatmap {
-  const db = getDb();
+export async function getRoomWeekdayHeatmap(opts: { from?: string; to?: string }): Promise<RoomHeatmap> {
   const today = new Date().toISOString().slice(0, 10);
   const valid = (d?: string): d is string => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d);
 
@@ -239,21 +220,13 @@ export function getRoomWeekdayHeatmap(opts: { from?: string; to?: string }): Roo
     ? opts.to
     : new Date(new Date(`${from}T00:00:00Z`).getTime() + 30 * 86400000).toISOString().slice(0, 10);
 
-  const rooms = db
-    .prepare(
-      `SELECT id, code, name, theme, room_type AS roomType
-       FROM rooms WHERE is_active = 1 ORDER BY code`
-    )
-    .all() as Array<{ id: string; code: string; name: string; theme: string; roomType: HeatmapRoom['roomType'] }>;
+  const rooms = await dbAll(`SELECT id, code, name, theme, room_type AS roomType
+       FROM rooms WHERE is_active = 1 ORDER BY code`, []) as Array<{ id: string; code: string; name: string; theme: string; roomType: HeatmapRoom['roomType'] }>;
 
   // [from,to] ile örtüşen aktif booking'ler (NOT (end < from OR start > to)).
-  const bookings = db
-    .prepare(
-      `SELECT room_id, weekday_mask FROM bookings
+  const bookings = await dbAll(`SELECT room_id, weekday_mask FROM bookings
        WHERE status IN ('approved', 'pending', 'feedback_requested')
-         AND NOT (end_date < ? OR start_date > ?)`
-    )
-    .all(from, to) as Array<{ room_id: string; weekday_mask: number }>;
+         AND NOT (end_date < ? OR start_date > ?)`, [from, to]) as Array<{ room_id: string; weekday_mask: number }>;
 
   const counts = new Map<string, number[]>();
   for (const b of bookings) {
