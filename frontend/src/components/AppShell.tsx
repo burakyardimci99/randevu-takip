@@ -80,6 +80,15 @@ const USER_NAV: NavItem[] = [
     ),
   },
   {
+    to: '/liderlik',
+    label: 'Liderlik',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16 4h2a2 2 0 012 2v1a4 4 0 01-4 4M8 4H6a2 2 0 00-2 2v1a4 4 0 004 4m0 0a4 4 0 008 0M8 11v0m4 5v5m-3 0h6"/>
+      </svg>
+    ),
+  },
+  {
     to: '/licenses',
     label: 'Lisanslarım',
     icon: (

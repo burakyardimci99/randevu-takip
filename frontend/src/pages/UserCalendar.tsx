@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { AppointmentModal } from '../components/AppointmentModal';
+import { RoomWeekdayHeatmap } from '../components/RoomWeekdayHeatmap';
 import { EmptyState } from '../components/EmptyState';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
@@ -405,6 +406,11 @@ export default function UserCalendar() {
           </aside>
         </div>
       )}
+
+      {/* Oda × gün yoğunluk ısı-haritası (#5c) — kendi tarih filtresiyle. */}
+      <div className="mt-6">
+        <RoomWeekdayHeatmap />
+      </div>
 
       {scheduling && (
         <AppointmentModal

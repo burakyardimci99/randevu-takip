@@ -25,6 +25,7 @@ import {
   safeSeed,
   serveStoredImage,
 } from '../services/visual-store.service';
+import { getRoomKiosk, listKioskRooms } from '../services/kiosk.service';
 import { HttpError } from '../middleware/error.middleware';
 
 const router = Router();
@@ -116,6 +117,37 @@ router.get('/visuals/:id/image', async (req: Request, res: Response, next: NextF
     }
     const served = await serveStoredImage(res, id, seed);
     if (!served) res.status(404).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============ KIOSK — oda ekranı (#5b) ============ */
+
+/** Kiosk seçici için aktif odaların minimal listesi. */
+router.get('/rooms', (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ rooms: listKioskRooms() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Bir odanın kiosk verisi: oda + son üretilen 'ready' görsel (yoksa idle screen).
+ * Public (oda ekranı); yalnız görsel iç URL'i + zaman + oda bilgisi (PII yok).
+ */
+router.get('/rooms/:id/kiosk', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id ?? '');
+    if (id.length < 8 || id.length > 40) {
+      throw new HttpError(400, 'Geçersiz oda id.', 'INVALID_ID');
+    }
+    const data = getRoomKiosk(id);
+    if (!data) {
+      throw new HttpError(404, 'Oda bulunamadı.', 'ROOM_NOT_FOUND');
+    }
+    res.json(data);
   } catch (err) {
     next(err);
   }

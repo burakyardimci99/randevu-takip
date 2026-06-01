@@ -17,6 +17,9 @@ import UserWaitlist from './pages/UserWaitlist';
 import Chat from './pages/Chat';
 import VisualGenerator from './pages/VisualGenerator';
 import Showcase from './pages/Showcase';
+import Leaderboard from './pages/Leaderboard';
+import KioskIndex from './pages/KioskIndex';
+import KioskScreen from './pages/KioskScreen';
 import PrivacySettings from './pages/PrivacySettings';
 import PublicProfile from './pages/PublicProfile';
 import AdminDashboard from './pages/AdminDashboard';
@@ -47,6 +50,9 @@ export default function App() {
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/showcase" element={<Showcase />} />
             <Route path="/u/:userId" element={<PublicProfile />} />
+            {/* Kiosk — oda ekranı (public, login yok) (#5b) */}
+            <Route path="/kiosk" element={<KioskIndex />} />
+            <Route path="/kiosk/:roomId" element={<KioskScreen />} />
             {/* Eski URL'ler /login'e yönlendirilir — backwards compat */}
             <Route path="/admin/login" element={<Navigate to="/login" replace />} />
 
@@ -111,6 +117,14 @@ export default function App() {
               element={
                 <ProtectedRoute kind="user">
                   <VisualGenerator />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/liderlik"
+              element={
+                <ProtectedRoute kind="user">
+                  <Leaderboard />
                 </ProtectedRoute>
               }
             />

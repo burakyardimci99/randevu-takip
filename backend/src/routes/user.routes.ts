@@ -44,6 +44,8 @@ import {
   detectDuplicate,
   findSimilarBookings,
 } from '../services/embedding.service';
+import { getLeaderboard } from '../services/leaderboard.service';
+import { getRoomWeekdayHeatmap } from '../services/room.service';
 import { exportUserData, purgeUser } from '../services/privacy.service';
 import { getUserLicenseUsage } from '../services/license.service';
 import {
@@ -354,6 +356,28 @@ router.post('/collaborations', async (req: Request, res: Response, next: NextFun
       visibility: 'collaboration', // yalnız public showcase, yazar ifşalı
     });
     res.json({ results });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============ LEADERBOARD / SIRALAMA (#5a) ============ */
+
+router.get('/leaderboard', (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(getLeaderboard());
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============ ODA × GÜN MÜSAİTLİK ISI-HARİTASI (#5c) ============ */
+
+router.get('/rooms/heatmap', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const from = typeof req.query.from === 'string' ? req.query.from : undefined;
+    const to = typeof req.query.to === 'string' ? req.query.to : undefined;
+    res.json(getRoomWeekdayHeatmap({ from, to }));
   } catch (err) {
     next(err);
   }

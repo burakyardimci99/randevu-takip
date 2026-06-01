@@ -804,6 +804,86 @@ export interface SupportRequestWithUser extends SupportRequest {
   userDepartment: string | null;
 }
 
+/* ============================================================
+ * LEADERBOARD / SIRALAMA (#5a)
+ * ============================================================ */
+
+export interface LeaderboardUser {
+  userId: string;
+  fullName: string;
+  department: string | null;
+  approvedBookings: number;
+  utilizationDays: number;
+  likes: number;
+  comments: number;
+  score: number;
+}
+
+export interface LeaderboardProject {
+  bookingId: string;
+  projectName: string;
+  authorId: string;
+  authorFullName: string;
+  roomCode: string;
+  roomName: string;
+  isHighlight: boolean;
+  likes: number;
+  comments: number;
+  score: number;
+}
+
+export interface Leaderboard {
+  users: LeaderboardUser[];
+  projects: LeaderboardProject[];
+  generatedAt: string;
+  scoring: { bookings: number; utilizationDay: number; like: number; comment: number };
+}
+
+/* ============================================================
+ * ODA × GÜN ISI-HARİTASI (#5c)
+ * ============================================================ */
+
+export interface HeatmapCell {
+  weekday: number; // 1=Pzt..7=Paz
+  count: number;
+}
+
+export interface HeatmapRoom {
+  roomId: string;
+  code: string;
+  name: string;
+  theme: string;
+  roomType: 'pod' | 'experience' | 'tribune';
+  days: HeatmapCell[];
+  total: number;
+}
+
+export interface RoomHeatmap {
+  rooms: HeatmapRoom[];
+  from: string;
+  to: string;
+  maxCount: number;
+  weekdays: number[];
+}
+
+/* ============================================================
+ * KIOSK — oda ekranı (#5b)
+ * ============================================================ */
+
+export interface KioskRoom {
+  id: string;
+  code: string;
+  name: string;
+  theme: string;
+  equipment: string;
+  roomType: 'pod' | 'experience' | 'tribune';
+}
+
+export interface KioskData {
+  room: KioskRoom;
+  latestVisual: { imageUrl: string; createdAt: string } | null;
+}
+
 /* ---- Görsel üretimi (gorsel_uretim entegrasyonu) ---- */
 
 export type VisualStatus = 'pending' | 'enhancing' | 'generating' | 'ready' | 'error';

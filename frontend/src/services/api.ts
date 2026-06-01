@@ -57,6 +57,10 @@ import type {
   ShowcaseItem,
   SimilarBooking,
   DuplicateMatch,
+  Leaderboard,
+  RoomHeatmap,
+  KioskRoom,
+  KioskData,
   StageEvent,
   SubjectKind,
   SupportRequest,
@@ -1013,6 +1017,40 @@ export const api = {
 
   async showcaseEngagement() {
     return request<{ engagement: ShowcaseEngagement }>('/public/showcase/engagement', {
+      kind: 'user',
+      auth: false,
+      noAuth: true,
+    });
+  },
+
+  /* ============ LEADERBOARD / HEATMAP / KIOSK (#5) ============ */
+
+  /** Sıralama: kullanıcı (oda kullanımı + etkileşim) + proje (beğeni/yorum). */
+  async leaderboard() {
+    return request<Leaderboard>('/user/leaderboard', { kind: 'user' });
+  },
+
+  /** Oda × haftanın günü müsaitlik ısı-haritası (opsiyonel tarih aralığı). */
+  async roomHeatmap(params?: { from?: string; to?: string }) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set('from', params.from);
+    if (params?.to) qs.set('to', params.to);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request<RoomHeatmap>(`/user/rooms/heatmap${suffix}`, { kind: 'user' });
+  },
+
+  /** Kiosk seçici — aktif odalar (public). */
+  async kioskRooms() {
+    return request<{ rooms: KioskRoom[] }>('/public/rooms', {
+      kind: 'user',
+      auth: false,
+      noAuth: true,
+    });
+  },
+
+  /** Bir odanın kiosk verisi — son görsel + oda (public). */
+  async roomKiosk(roomId: string) {
+    return request<KioskData>(`/public/rooms/${encodeURIComponent(roomId)}/kiosk`, {
       kind: 'user',
       auth: false,
       noAuth: true,
