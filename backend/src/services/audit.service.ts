@@ -3,7 +3,7 @@
  * app_security.md §8: Auth denemeleri, yetki hataları, kritik işlemler loglanır.
  */
 import { nanoid } from 'nanoid';
-import { getDb } from '../db/schema';
+import { dbRun } from '../db/schema';
 import { logger } from '../utils/logger';
 
 export type AuditEventType =
@@ -104,23 +104,18 @@ function isThrottledAudit(event: AuditEvent): boolean {
   return false;
 }
 
-export function recordAudit(event: AuditEvent): void {
+export async function recordAudit(event: AuditEvent): Promise<void> {
   if (isThrottledAudit(event)) return;
   try {
-    const db = getDb();
-    db.prepare(
-      `INSERT INTO audit_logs (id, event_type, subject_id, subject_type, ip_address, user_agent, success, details)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      nanoid(),
+    await dbRun(`INSERT INTO audit_logs (id, event_type, subject_id, subject_type, ip_address, user_agent, success, details)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [nanoid(),
       event.eventType,
       event.subjectId ?? null,
       event.subjectType ?? 'anonymous',
       event.ipAddress ?? null,
       event.userAgent ?? null,
       event.success ? 1 : 0,
-      sanitizeDetails(event.details)
-    );
+      sanitizeDetails(event.details)]);
 
     logger.info('audit', {
       event_type: event.eventType,

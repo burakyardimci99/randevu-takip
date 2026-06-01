@@ -91,8 +91,8 @@ function buildApp(): express.Express {
   return app;
 }
 
-function start(): void {
-  const migrationResult = initSchema();
+async function start(): Promise<void> {
+  const migrationResult = await initSchema();
   logger.info('schema_ready', { applied: migrationResult.applied });
   if (migrationResult.applied.length > 0) {
     // eslint-disable-next-line no-console
@@ -149,4 +149,8 @@ function start(): void {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-start();
+start().catch((err) => {
+  // eslint-disable-next-line no-console
+  console.error('[KLAB] Başlatma hatası:', err);
+  process.exit(1);
+});
