@@ -16,12 +16,13 @@ export default defineConfig({
     },
   },
   server: {
-    host: '127.0.0.1',
+    host: true, // tüm arayüzler — Docker container dışından erişim için
     port: 5173,
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:4000',
+        // Docker'da backend servisine (http://backend:4000), yerelde 127.0.0.1:4000.
+        target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:4000',
         changeOrigin: false,
         secure: false,
       },
