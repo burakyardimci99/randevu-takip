@@ -37,6 +37,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # İlk-boot: şema (idempotent) + demo seed yükle, ardından dev sunucuyu başlat.
+    # db:init idempotenttir (şema CREATE TABLE IF NOT EXISTS; seed "zaten yüklü" ise
+    # atlar) → fresh pg volume'da demo verisi otomatik gelir, dolu volume'da güvenle
+    # atlanır. Böylece tek `docker compose up` sonrası demoda veri hazır olur.
+    command: sh -c "npm run db:init && npm run dev"
     environment:
       NODE_ENV: development
       HOST: 0.0.0.0
