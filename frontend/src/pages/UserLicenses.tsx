@@ -222,15 +222,18 @@ export default function UserLicenses() {
     estDays === '' ||
     (Number.isFinite(estDaysNum) && Number.isInteger(estDaysNum) && estDaysNum! >= 1 && estDaysNum! <= 365);
 
-  const canSubmit =
-    requestTitle.trim().length >= 5 &&
-    reason.trim().length >= 20 &&
-    expectedBenefit.trim().length >= 20 &&
-    successCriteria.trim().length >= 20 &&
-    selectedItems.length >= 1 &&
-    projectType !== '' &&
-    estDaysValid &&
-    dataToUse.trim().length >= 10;
+  // Eksik zorunlu alanlar — tek kaynak: hem buton durumu hem kullanıcıya gösterilen
+  // liste bundan türer (kullanıcı "neden gönderilmiyor" sorusunu yaşamasın).
+  const missingFields: string[] = [];
+  if (requestTitle.trim().length < 5) missingFields.push('Başvuru başlığı (en az 5 karakter)');
+  if (reason.trim().length < 20) missingFields.push('Kullanım amacı (en az 20 karakter)');
+  if (expectedBenefit.trim().length < 20) missingFields.push('Beklenen fayda (en az 20 karakter)');
+  if (successCriteria.trim().length < 20) missingFields.push('Başarı kriteri (en az 20 karakter)');
+  if (selectedItems.length < 1) missingFields.push('En az bir araç/lisans ekleyin');
+  if (projectType === '') missingFields.push('Proje tipini seçin (PoC veya Entegrasyon)');
+  if (!estDaysValid) missingFields.push('Tahmini süre 1–365 gün arasında olmalı');
+  if (dataToUse.trim().length < 10) missingFields.push('Kullanılacak veri açıklaması (en az 10 karakter)');
+  const canSubmit = missingFields.length === 0;
 
   function resetForm() {
     setEditingId(null);
@@ -291,7 +294,11 @@ export default function UserLicenses() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!canSubmit || submitting) return;
+    if (submitting) return;
+    if (!canSubmit) {
+      toast.push('error', `Eksik alan: ${missingFields.join(' · ')}`);
+      return;
+    }
     setSubmitting(true);
     try {
       const payload = {
@@ -789,6 +796,20 @@ export default function UserLicenses() {
               </div>
             </fieldset>
 
+            {/* Eksik alanlar — gönderimi engelleyen zorunlu alanları açıkça listeler. */}
+            {!canSubmit && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
+                <p className="text-sm font-semibold text-amber-900 mb-1.5 flex items-center gap-1.5">
+                  <span aria-hidden>⚠️</span> Göndermeden önce şu alanları tamamla:
+                </p>
+                <ul className="text-sm text-amber-800 space-y-0.5 list-disc list-inside">
+                  {missingFields.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Submit */}
             <div className="flex justify-end gap-2 pt-2 border-t border-kt-gray-100">
               {editingId && (
@@ -796,7 +817,7 @@ export default function UserLicenses() {
                   Vazgeç
                 </button>
               )}
-              <button type="submit" disabled={!canSubmit || submitting} className="btn-primary">
+              <button type="submit" disabled={submitting} className="btn-primary">
                 {submitting
                   ? 'Gönderiliyor…'
                   : editingId
