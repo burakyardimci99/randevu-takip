@@ -59,6 +59,7 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
   const [myVisuals, setMyVisuals] = useState<Visual[]>([]);
   const [visualsLoading, setVisualsLoading] = useState(false);
   const [savingBg, setSavingBg] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
 
   async function ensureLikeStatus() {
     if (likeStatusLoaded || !user) return;
@@ -191,7 +192,7 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
       }
     >
       {bgUrl && (
-        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/55 to-black/25 pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/70 to-black/45 pointer-events-none" />
       )}
       <div className="relative z-10 flex flex-col flex-1 min-h-0">
       <div className="flex items-start justify-between mb-3">
@@ -219,20 +220,27 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
           )}
         </div>
       </div>
-      <h3
-        className={`text-lg font-bold mb-2 line-clamp-2 ${
-          bgUrl ? 'text-white drop-shadow' : 'text-kt-green-900'
-        }`}
+      <button
+        type="button"
+        onClick={() => setShowDetail(true)}
+        className="text-left group/detail flex-1 flex flex-col min-w-0 w-full"
+        title="Detayı ve büyük görseli aç"
       >
-        {item.projectName}
-      </h3>
-      <p
-        className={`text-sm line-clamp-3 mb-3 flex-1 ${
-          bgUrl ? 'text-white/85 drop-shadow' : 'text-kt-gray-600'
-        }`}
-      >
-        {item.projectDescription}
-      </p>
+        <h3
+          className={`text-lg font-bold mb-2 line-clamp-2 group-hover/detail:underline ${
+            bgUrl ? 'text-white drop-shadow-lg' : 'text-kt-green-900'
+          }`}
+        >
+          {item.projectName}
+        </h3>
+        <p
+          className={`text-sm line-clamp-3 mb-3 flex-1 ${
+            bgUrl ? 'text-white font-medium drop-shadow-lg' : 'text-kt-gray-700'
+          }`}
+        >
+          {item.projectDescription}
+        </p>
+      </button>
       <div className="flex flex-wrap gap-1 mb-3">
         {item.technologies.slice(0, 5).map((t) => (
           <span
@@ -273,7 +281,7 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
               >
                 {item.authorFullName}
               </div>
-              <div className={`text-[10px] ${bgUrl ? 'text-white/70' : 'text-kt-gray-500'}`}>
+              <div className={`text-[10px] ${bgUrl ? 'text-white/90' : 'text-kt-gray-500'}`}>
                 {fmtRange(item.startDate, item.endDate)} · {item.periodMonths} ay
               </div>
             </div>
@@ -291,7 +299,7 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
               >
                 {item.authorFullName}
               </div>
-              <div className={`text-[10px] ${bgUrl ? 'text-white/70' : 'text-kt-gray-500'}`}>
+              <div className={`text-[10px] ${bgUrl ? 'text-white/90' : 'text-kt-gray-500'}`}>
                 {fmtRange(item.startDate, item.endDate)}
               </div>
             </div>
@@ -410,6 +418,103 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
       )}
       </div>
     </article>
+
+    {/* Detay modalı — büyük görsel + tam açıklama + tüm teknolojiler. */}
+    {showDetail && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+        onClick={() => setShowDetail(false)}
+      >
+        <div
+          className="bg-white rounded-2xl shadow-kt-card max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="relative">
+            {bgUrl ? (
+              <img src={bgUrl} alt={item.projectName} className="w-full aspect-video object-cover rounded-t-2xl" />
+            ) : (
+              <div className="w-full aspect-video bg-gradient-to-br from-kt-green-700 to-kt-green-900 rounded-t-2xl flex items-center justify-center text-white/40 text-6xl">
+                🗂️
+              </div>
+            )}
+            <button
+              onClick={() => setShowDetail(false)}
+              className="absolute top-3 right-3 p-2 rounded-lg bg-black/40 hover:bg-black/60 text-white backdrop-blur-sm"
+              aria-label="Kapat"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            {item.isHighlight && (
+              <span className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-kt-gold-400 text-kt-gold-900 text-[11px] font-bold uppercase tracking-wider">
+                ⭐ Öne çıkan
+              </span>
+            )}
+          </div>
+
+          <div className="p-6 space-y-4">
+            <div>
+              <div className="text-[11px] font-bold tracking-wider text-kt-gold-700 mb-1">
+                {item.roomCode} · {item.neighborhood}
+              </div>
+              <h2 className="text-2xl font-extrabold text-kt-green-900">{item.projectName}</h2>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center font-bold text-sm shrink-0">
+                {initials(item.authorFullName)}
+              </div>
+              <div className="min-w-0">
+                {authorId ? (
+                  <Link
+                    to={`/u/${authorId}`}
+                    className="text-sm font-semibold text-kt-green-800 hover:text-kt-gold-700 hover:underline"
+                  >
+                    {item.authorFullName}
+                  </Link>
+                ) : (
+                  <span className="text-sm font-semibold text-kt-green-800">{item.authorFullName}</span>
+                )}
+                <div className="text-xs text-kt-gray-500">
+                  {fmtRange(item.startDate, item.endDate)} · {item.periodMonths} ay
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-kt-gray-500 mb-1">Proje Açıklaması</h3>
+              <p className="text-sm text-kt-green-800 leading-relaxed whitespace-pre-wrap">
+                {item.projectDescription}
+              </p>
+            </div>
+
+            {item.technologies.length > 0 && (
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-kt-gray-500 mb-1.5">
+                  Teknolojiler <span className="font-normal normal-case">({item.technologies.length})</span>
+                </h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {item.technologies.map((t) => (
+                    <span
+                      key={t}
+                      className="px-2.5 py-1 rounded-md text-xs font-semibold bg-kt-green-50 text-kt-green-800"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-4 pt-3 border-t border-kt-gray-100 text-sm text-kt-gray-600">
+              <span className="flex items-center gap-1">❤️ {likeCount}</span>
+              <span className="flex items-center gap-1">💬 {commentCount}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
 
     {showPicker && (
       <div
