@@ -4,7 +4,7 @@
  * Her görsel giriş yapan kullanıcıya bağlıdır (IDOR koruması: sahiplik kontrolü).
  */
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbRun, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { getImageProvider, variantSeed } from './image-gen.service';
 import { downloadAndStore, internalImageUrl } from './visual-store.service';

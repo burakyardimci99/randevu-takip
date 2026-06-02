@@ -12,7 +12,7 @@
  *
  * Auth gerektirmez (public).
  */
-import { dbAll, dbOne, getDb } from '../db/schema';
+import { dbAll, dbOne } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 
 export interface PublicProfile {

@@ -16,7 +16,7 @@
  *   olarak yorumlar. Helmet noSniff (X-Content-Type-Options: nosniff) zaten
  *   MIME-type sniffing'i engelliyor.
  */
-import { dbOne, dbRun, getDb } from '../db/schema';
+import { dbOne, dbRun } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { recordAudit } from './audit.service';
 

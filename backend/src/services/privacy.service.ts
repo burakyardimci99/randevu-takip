@@ -24,7 +24,7 @@
  *  - export → 'user.data_export' event
  *  - delete → 'user.data_purge' event
  */
-import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { logger } from '../utils/logger';
 import { recordAudit } from './audit.service';

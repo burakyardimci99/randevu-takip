@@ -1,26 +1,12 @@
 /**
- * DB backup servisi.
+ * DB backup servisi — yalnız PostgreSQL.
  *
- * SQLite için better-sqlite3 `db.backup()` API'sini kullanır — atomic snapshot.
- * PostgreSQL adapter eklendiğinde `pg_dump` veya `pg_basebackup` ile değiştirilir.
+ * PostgreSQL'de uygulama-içi atomic snapshot YOKTUR; backup pg_dump /
+ * pg_basebackup / managed servis (RDS, Cloud SQL, Azure DB) ile yapılır.
+ * Bu servis pg'de NO-OP'tur — arayüz (route + cron) korunur ama dosya yazmaz.
  *
- * Strateji:
- *  - Default: 24 saatte bir backup, klasör: backend/data/backups/
- *  - Retention: en yeni N dosya tutulur (default 7), eskiler silinir.
- *  - Dosya formatı: `klab-YYYY-MM-DD-HHMMSS.db`
- *
- * Manual run: `npm run backup` (script üzerinden).
- *
- * Restore: `npm run restore -- <path-to-backup.db>` — yeni bir helper script.
- *
- * Güvenlik:
- *  - Backup dosyaları 0o600 izinlerle yazılır (data_security §1).
- *  - Production'da off-site (S3/Azure Blob) gönderim önerilir.
+ * Production öneri: yönetilen otomatik yedek + off-site (S3/Blob) saklama.
  */
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, chmodSync } from 'node:fs';
-import { resolve, dirname, join } from 'node:path';
-import { config } from '../config/env';
-import { getDb, getDialect } from '../db/schema';
 import { logger } from '../utils/logger';
 
 interface BackupConfig {
@@ -35,110 +21,23 @@ const DEFAULT_CONFIG: BackupConfig = {
   keepCount: 7,
 };
 
-function getBackupDir(): string {
-  const dbPath = resolve(process.cwd(), config.dbPath);
-  return join(dirname(dbPath), 'backups');
-}
-
-function isoSafe(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-` +
-    `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
-  );
-}
-
 export async function runBackupOnce(): Promise<{ file: string; sizeBytes: number }> {
-  // PostgreSQL'de uygulama-içi atomic snapshot yok — pg_dump / managed backup kullanılır.
-  if (getDialect() === 'pg') {
-    logger.info('db_backup_skipped_pg', { note: 'pg backup pg_dump/managed ile yapılır' });
-    return { file: '', sizeBytes: 0 };
-  }
-  const db = getDb();
-  const dir = getBackupDir();
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-
-  const file = join(dir, `klab-${isoSafe()}.db`);
-  // better-sqlite3 backup — atomic snapshot kopyası
-  await db.backup(file);
-  try {
-    chmodSync(file, 0o600);
-  } catch {
-    /* ignore on platforms without chmod support */
-  }
-  const sizeBytes = statSync(file).size;
-  logger.info('db_backup_created', { file, sizeBytes });
-  return { file, sizeBytes };
+  logger.info('db_backup_skipped_pg', { note: 'pg backup pg_dump/managed ile yapılır' });
+  return { file: '', sizeBytes: 0 };
 }
 
-export function pruneBackups(keepCount = DEFAULT_CONFIG.keepCount): number {
-  const dir = getBackupDir();
-  if (!existsSync(dir)) return 0;
-  const files = readdirSync(dir)
-    .filter((f) => f.startsWith('klab-') && f.endsWith('.db'))
-    .map((f) => ({ f, path: join(dir, f), mtime: statSync(join(dir, f)).mtimeMs }))
-    .sort((a, b) => b.mtime - a.mtime);
-
-  const toDelete = files.slice(keepCount);
-  for (const item of toDelete) {
-    try {
-      unlinkSync(item.path);
-    } catch (err) {
-      logger.warn('backup_prune_failed', { file: item.path, err: (err as Error).message });
-    }
-  }
-  if (toDelete.length > 0) {
-    logger.info('backup_pruned', { deleted: toDelete.length });
-  }
-  return toDelete.length;
+export function pruneBackups(_keepCount = DEFAULT_CONFIG.keepCount): number {
+  return 0;
 }
 
 export function listBackups(): Array<{ file: string; sizeBytes: number; createdAt: string }> {
-  const dir = getBackupDir();
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.startsWith('klab-') && f.endsWith('.db'))
-    .map((f) => {
-      const path = join(dir, f);
-      const stat = statSync(path);
-      return {
-        file: f,
-        sizeBytes: stat.size,
-        createdAt: stat.mtime.toISOString(),
-      };
-    })
-    .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+  return [];
 }
 
-let timer: NodeJS.Timeout | null = null;
-
-export function startBackupCron(config: Partial<BackupConfig> = {}): void {
-  if (timer) return;
-  const cfg = { ...DEFAULT_CONFIG, ...config };
-  const intervalMs = cfg.intervalHours * 60 * 60 * 1000;
-
-  // Server start sonrası 60sn bekle
-  setTimeout(() => {
-    runBackupOnce()
-      .then(() => pruneBackups(cfg.keepCount))
-      .catch((err) =>
-        logger.warn('backup_initial_failed', { err: (err as Error).message })
-      );
-  }, 60_000);
-
-  timer = setInterval(() => {
-    runBackupOnce()
-      .then(() => pruneBackups(cfg.keepCount))
-      .catch((err) =>
-        logger.warn('backup_cron_failed', { err: (err as Error).message })
-      );
-  }, intervalMs);
+export function startBackupCron(_config: Partial<BackupConfig> = {}): void {
+  // pg: uygulama-içi backup yok — cron no-op (managed/pg_dump kullanılır).
 }
 
 export function stopBackupCron(): void {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
+  // no-op (cron çalışmıyor)
 }

@@ -9,7 +9,7 @@
  * Tek instance varsayımı geçerli (in-memory in-process); multi-instance için
  * Redis lock veya pg_advisory_lock gerekir.
  */
-import { dbExec, dbOne, dbRun, getDb } from '../db/schema';
+import { dbExec, dbOne, dbRun } from '../db/schema';
 import { logger } from '../utils/logger';
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;

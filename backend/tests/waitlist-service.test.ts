@@ -10,7 +10,7 @@ import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
-import { initSchema, closeDb, getDb } from '../src/db/schema';
+import { initSchema, closeDb, dbRun, dbOne } from '../src/db/schema';
 import {
   joinWaitlist,
   tryPromoteForRoom,
@@ -31,18 +31,18 @@ const futureDate = (daysFromNow: number) => {
 
 beforeAll(async () => {
   await initSchema();
-  const db = getDb();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
-  db.prepare(`INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`).run(USER_A, 'wa-a@test.local', hash, 'WL User A');
-  db.prepare(`INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`).run(USER_B, 'wa-b@test.local', hash, 'WL User B');
-  db.prepare(`INSERT OR IGNORE INTO rooms (id, code, name, district, neighborhood, capacity) VALUES (?, ?, ?, ?, ?, ?)`).run(ROOM, 'WL-01', 'WL Oda', 'Test', 'Mahalle', 4);
+  await dbRun(`INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`, [USER_A, 'wa-a@test.local', hash, 'WL User A']);
+  await dbRun(`INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`, [USER_B, 'wa-b@test.local', hash, 'WL User B']);
+  await dbRun(`INSERT OR IGNORE INTO rooms (id, code, name, district, neighborhood, capacity) VALUES (?, ?, ?, ?, ?, ?)`, [ROOM, 'WL-01', 'WL Oda', 'Test', 'Mahalle', 4]);
 
   // Bloklayıcı booking — 7 gün sonra başlar, ~37 gün sonra biter
-  db.prepare(
+  await dbRun(
     `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
        project_name, project_description, help_needed, technologies, status)
-     VALUES (?, ?, ?, 1, ?, ?, 'Blok', 'Bloklayıcı booking — waitlist test için.', 'yok', '["X"]', 'approved')`
-  ).run(BLOCKING_BOOKING, USER_A, ROOM, futureDate(7), futureDate(36));
+     VALUES (?, ?, ?, 1, ?, ?, 'Blok', 'Bloklayıcı booking — waitlist test için.', 'yok', '["X"]', 'approved')`,
+    [BLOCKING_BOOKING, USER_A, ROOM, futureDate(7), futureDate(36)]
+  );
 });
 
 afterAll(async () => {
@@ -92,9 +92,8 @@ describe('joinWaitlist', () => {
 
 describe('tryPromoteForRoom', () => {
   it('bloklayıcı booking silinirse waitlist head promote olur', async () => {
-    const db = getDb();
     // Bloklayıcı booking'i sil
-    db.prepare('DELETE FROM bookings WHERE id = ?').run(BLOCKING_BOOKING);
+    await dbRun('DELETE FROM bookings WHERE id = ?', [BLOCKING_BOOKING]);
 
     const promoted = await tryPromoteForRoom(ROOM);
     expect(promoted.length).toBeGreaterThanOrEqual(1);
@@ -106,11 +105,10 @@ describe('tryPromoteForRoom', () => {
     expect(myEntry?.promotedBookingId).toBeTruthy();
 
     // Yeni booking gerçekten oluştu mu?
-    const newBooking = db
-      .prepare(`SELECT id, user_id, status FROM bookings WHERE id = ?`)
-      .get(myEntry!.promotedBookingId!) as
-      | { id: string; user_id: string; status: string }
-      | undefined;
+    const newBooking = (await dbOne(
+      `SELECT id, user_id, status FROM bookings WHERE id = ?`,
+      [myEntry!.promotedBookingId!]
+    )) as { id: string; user_id: string; status: string } | undefined;
     expect(newBooking).toBeDefined();
     expect(newBooking?.user_id).toBe(USER_B);
     expect(newBooking?.status).toBe('pending');

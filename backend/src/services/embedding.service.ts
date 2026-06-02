@@ -16,7 +16,7 @@
  * - DB'de embedding JSON string olarak saklanır (model + dim + values).
  * - Cosine similarity: pure JS, prepared statement ile booking_id eşle.
  */
-import { dbAll, dbRun, getDb } from '../db/schema';
+import { dbAll, dbRun } from '../db/schema';
 import { logger } from '../utils/logger';
 // Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
 import type { SimilarBooking, DuplicateMatch } from '@klab/shared';

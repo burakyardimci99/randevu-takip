@@ -24,7 +24,7 @@
  * - Admin review reviewed_by + reviewed_at ile audit-able (§8)
  */
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { LICENSE_CATALOG, type LicenseInfo } from './license.service';
 import {

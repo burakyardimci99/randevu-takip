@@ -9,7 +9,7 @@
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
 import { config } from '../config/env';
-import { dbOne, dbRun, getDb } from '../db/schema';
+import { dbOne, dbRun } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import type { AdminRecord, SubjectKind, UserRecord } from '../types/auth.types';
 import {

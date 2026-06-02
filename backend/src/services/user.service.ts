@@ -7,7 +7,7 @@
  * - Soft delete: status=3 (data_security §11) — booking history korunur
  * - Audit log: admin user değişiklikleri loglanır
  */
-import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import type { AdminUserUpdateInput, ProfileUpdateInput } from '../validators/schemas';
 import { hashPassword } from './auth.service';

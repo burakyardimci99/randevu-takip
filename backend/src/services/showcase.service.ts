@@ -11,7 +11,7 @@
  * - Audit log: like/comment her ikisi 'showcase.liked' / 'showcase.commented' event'i.
  */
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbRun, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { recordAudit } from './audit.service';
 

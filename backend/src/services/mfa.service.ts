@@ -11,7 +11,7 @@
  */
 import speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
-import { dbOne, dbRun, getDb } from '../db/schema';
+import { dbOne, dbRun } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { config } from '../config/env';
 

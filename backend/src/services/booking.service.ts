@@ -7,7 +7,7 @@
  * - app_security.md §3: Tüm input zod ile doğrulanır, sorgular parameterized.
  */
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import type { CreateBookingInput, ReviewBookingInput } from '../validators/schemas';
 import {

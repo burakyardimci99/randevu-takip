@@ -1,7 +1,7 @@
 /**
  * Oda servisi: oda listesi ve uygunluk hesaplaması.
  */
-import { dbAll, dbOne, getDb } from '../db/schema';
+import { dbAll, dbOne } from '../db/schema';
 // Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
 import type { HeatmapCell, HeatmapRoom, RoomHeatmap } from '@klab/shared';
 

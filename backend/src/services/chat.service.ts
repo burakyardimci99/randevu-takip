@@ -9,7 +9,7 @@
  * bütünlük uygulama katmanında; id'ler nanoid, çakışma pratikte imkânsız.
  */
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbRun, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 
 export type ChatKind = 'user' | 'admin';

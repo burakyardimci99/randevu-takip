@@ -12,7 +12,7 @@
  *    asıl işlem (review, create vb.) etkilenmez.
  */
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbRun, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun } from '../db/schema';
 import { logger } from '../utils/logger';
 
 export type NotificationCategory =

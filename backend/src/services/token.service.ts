@@ -13,7 +13,7 @@ import jwt, { type SignOptions, type VerifyOptions } from 'jsonwebtoken';
 import { createHash, randomBytes } from 'node:crypto';
 import { nanoid } from 'nanoid';
 import { config } from '../config/env';
-import { dbOne, dbRun, dbTx, getDb } from '../db/schema';
+import { dbOne, dbRun, dbTx } from '../db/schema';
 import type { JwtPayload, SubjectKind } from '../types/auth.types';
 import { logger } from '../utils/logger';
 

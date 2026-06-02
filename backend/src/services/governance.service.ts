@@ -14,7 +14,7 @@
  * Bu servis license-request.service'i import ETMEZ (döngü olmaması için).
  */
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import {
   STAGE_ORDER,

@@ -4,12 +4,10 @@
  * Tüm sorgular READ-ONLY ve parameterized.
  * Veri tek bir endpoint'te toplanır → frontend bir kez fetch yapar.
  */
-import { dbAll, dbOne, isPg } from '../db/schema';
+import { dbAll, dbOne } from '../db/schema';
 
-/** Gün farkı (end-start+1) — lehçe-bağımsız: pg date çıkarma, sqlite julianday. */
-const DAY_DIFF = isPg()
-  ? '(b.end_date::date - b.start_date::date + 1)'
-  : '(julianday(b.end_date) - julianday(b.start_date) + 1)';
+/** Gün farkı (end-start+1) — pg tarih çıkarma. */
+const DAY_DIFF = '(b.end_date::date - b.start_date::date + 1)';
 
 export interface DailyBookingPoint {
   date: string; // YYYY-MM-DD

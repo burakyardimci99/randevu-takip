@@ -58,7 +58,6 @@ export interface AppConfig {
   userJwtAudience: string;
   adminJwtAudience: string;
 
-  dbPath: string;
   csrfSecret: string;
 
   maxLoginAttempts: number;
@@ -100,7 +99,6 @@ function loadConfig(): AppConfig {
     userJwtAudience: process.env.USER_JWT_AUDIENCE ?? 'klab-user',
     adminJwtAudience: process.env.ADMIN_JWT_AUDIENCE ?? 'klab-admin',
 
-    dbPath: process.env.DB_PATH ?? './data/klab.db',
     csrfSecret,
 
     maxLoginAttempts: optionalInt('MAX_LOGIN_ATTEMPTS', 5),

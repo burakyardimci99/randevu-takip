@@ -17,7 +17,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import { dbOne, dbRun, dbTx, getDb } from '../db/schema';
+import { dbOne, dbRun, dbTx } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { logger } from '../utils/logger';
 import { hashPassword } from './auth.service';

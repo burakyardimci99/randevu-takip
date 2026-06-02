@@ -7,7 +7,7 @@
  * 'passed' olmadan proje 'stage' aşamasına geçemez.
  */
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx } from '../db/schema';
 import {
   GATE_DEFINITIONS,
   applicableGates,

@@ -1,26 +1,20 @@
 /**
- * Asenkron DB katmanı (#2) — çift sürücü: SQLite (better-sqlite3) | PostgreSQL (pg).
+ * Asenkron DB katmanı (#7) — yalnız PostgreSQL (pg).
  *
- * Sürücü seçimi: `DATABASE_URL` set ise → pg, değilse → sqlite (DB_PATH).
- * Böylece yerel geliştirme/test SQLite ile (Docker gerektirmez), Docker/prod pg ile.
- *
- * Tüm API ASENKRONDUR (pg async; sqlite senkron ama Promise sarmalı). Servisler
+ * Bağlantı: `DATABASE_URL` (ZORUNLU). Tüm API asenkrondur. Servisler
  * `dbAll/dbOne/dbRun/dbExec/dbTx` kullanır; somut sürücüden bağımsızdır.
  *
- * SQL taşınabilirliği (pg adaptöründe otomatik çeviri — SQL'i `?` + SQLite lehçesiyle
- * yazmaya devam edebiliriz):
- *  - `?`               → `$1, $2, …` (pozisyonel)
- *  - `CURRENT_TIMESTAMP`→ `to_char(now(),'YYYY-MM-DD HH24:MI:SS')` (SQLite string formatı korunur)
- *  - `INSERT OR IGNORE`→ `INSERT … ON CONFLICT DO NOTHING`
+ * SQL taşınabilirliği — servisler SQL'i `?` + SQLite-lehçesiyle yazmaya devam
+ * eder, burada pg'ye çevrilir:
+ *  - `?`                → `$1, $2, …` (pozisyonel)
+ *  - `CURRENT_TIMESTAMP`→ `to_char(now(),'YYYY-MM-DD HH24:MI:SS')` (string format korunur)
+ *  - `INSERT OR IGNORE` → `INSERT … ON CONFLICT DO NOTHING`
  * Tarih/zaman kolonları pg'de de TEXT (string karşılaştırma davranışı korunur).
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { existsSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { config } from '../config/env';
 import { logger } from '../utils/logger';
 
-export type Dialect = 'sqlite' | 'pg';
+export type Dialect = 'pg';
 
 export interface RunResult {
   changes: number;
@@ -35,14 +29,12 @@ export interface DbExecutor {
   exec(sql: string): Promise<void>;
 }
 
-const dialect: Dialect = process.env.DATABASE_URL ? 'pg' : 'sqlite';
-
 export function getDialect(): Dialect {
-  return dialect;
+  return 'pg';
 }
 
 export function isPg(): boolean {
-  return dialect === 'pg';
+  return true;
 }
 
 /* ============================================================
@@ -69,57 +61,6 @@ function translateForPg(sql: string): string {
 }
 
 /* ============================================================
- * SQLite sürücüsü (better-sqlite3 — senkron, Promise sarmalı)
- * ============================================================ */
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let sqliteDb: any = null;
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function sqliteHandle(): any {
-  if (sqliteDb) return sqliteDb;
-  // Lazy require — pg ortamında better-sqlite3 hiç yüklenmez.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const Database = require('better-sqlite3');
-  const absolutePath = resolve(process.cwd(), config.dbPath);
-  const dir = dirname(absolutePath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-  sqliteDb = new Database(absolutePath);
-  sqliteDb.pragma('journal_mode = WAL');
-  sqliteDb.pragma('foreign_keys = ON');
-  sqliteDb.pragma('synchronous = NORMAL');
-  return sqliteDb;
-}
-
-/** SQLite migration'ları için ham handle (yalnız sqlite lehçesinde). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getRawSqlite(): any {
-  if (dialect !== 'sqlite') {
-    throw new Error('getRawSqlite yalnız SQLite lehçesinde kullanılabilir.');
-  }
-  return sqliteHandle();
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function sqliteExecutor(handle: any): DbExecutor {
-  return {
-    async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
-      return handle.prepare(sql).all(...params) as T[];
-    },
-    async one<T>(sql: string, params: unknown[] = []): Promise<T | undefined> {
-      return handle.prepare(sql).get(...params) as T | undefined;
-    },
-    async run(sql: string, params: unknown[] = []): Promise<RunResult> {
-      const info = handle.prepare(sql).run(...params);
-      return { changes: info.changes, lastInsertRowid: info.lastInsertRowid };
-    },
-    async exec(sql: string): Promise<void> {
-      handle.exec(sql);
-    },
-  };
-}
-
-/* ============================================================
  * PostgreSQL sürücüsü (pg Pool — asenkron)
  * ============================================================ */
 
@@ -129,13 +70,17 @@ let pgPool: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function pgPoolHandle(): any {
   if (pgPool) return pgPool;
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error('DATABASE_URL gerekli — sistem yalnız PostgreSQL ile çalışır.');
+  }
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const pg = require('pg');
   // COUNT(*) vb. bigint (OID 20) varsayılan string döner → SQLite gibi number yap.
   // (id/sayım değerleri küçük; precision kaybı yok. int4 zaten number döner.)
   pg.types.setTypeParser(20, (v: string) => parseInt(v, 10));
   const { Pool } = pg;
-  pgPool = new Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
+  pgPool = new Pool({ connectionString: url, max: 10 });
   pgPool.on('error', (err: Error) => logger.error('pg_pool_error', { err: err.message }));
   return pgPool;
 }
@@ -167,13 +112,13 @@ function pgExecutor(runner: { query: (text: string, params?: unknown[]) => Promi
  * ============================================================ */
 
 function activeExecutor(): DbExecutor {
-  return dialect === 'pg' ? pgExecutor(pgPoolHandle()) : sqliteExecutor(sqliteHandle());
+  return pgExecutor(pgPoolHandle());
 }
 
 /**
  * Aktif transaction context'i. dbTx içindeyken global dbAll/dbOne/dbRun/dbExec
- * OTOMATİK transaction bağlantısına yönlenir (pg: tx client, sqlite: aynı handle).
- * Böylece transaction gövdesinde ekstra `tx.` kullanımı GEREKMEZ — sadece sarmalama.
+ * OTOMATİK transaction client'ına yönlenir. Böylece transaction gövdesinde ekstra
+ * `tx.` kullanımı GEREKMEZ — sadece sarmalama.
  */
 const txContext = new AsyncLocalStorage<DbExecutor>();
 
@@ -198,55 +143,30 @@ export function dbExec(sql: string): Promise<void> {
 }
 
 /**
- * Atomik transaction. Callback'e işlem-bağlı executor verilir.
- *  - pg: havuzdan tek client, BEGIN/COMMIT/ROLLBACK.
- *  - sqlite: tek bağlantı üstünde BEGIN/COMMIT/ROLLBACK (Node tek-thread + senkron
- *    sqlite → atomik; callback DB-dışı uzun await yapmamalı).
+ * Atomik transaction (pg): havuzdan tek client, BEGIN/COMMIT/ROLLBACK.
+ * ALS: gövdedeki global dbX çağrıları bu client'a (transaction'a) yönlenir.
  */
 export async function dbTx<T>(fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
-  if (dialect === 'pg') {
-    const client = await pgPoolHandle().connect();
-    const tx = pgExecutor(client);
-    try {
-      await client.query('BEGIN');
-      // ALS: gövdedeki global dbX çağrıları bu client'a (transaction'a) yönlenir.
-      const result = await txContext.run(tx, () => fn(tx));
-      await client.query('COMMIT');
-      return result;
-    } catch (err) {
-      try {
-        await client.query('ROLLBACK');
-      } catch {
-        /* ignore */
-      }
-      throw err;
-    } finally {
-      client.release();
-    }
-  }
-
-  const handle = sqliteHandle();
-  const tx = sqliteExecutor(handle);
-  handle.exec('BEGIN');
+  const client = await pgPoolHandle().connect();
+  const tx = pgExecutor(client);
   try {
+    await client.query('BEGIN');
     const result = await txContext.run(tx, () => fn(tx));
-    handle.exec('COMMIT');
+    await client.query('COMMIT');
     return result;
   } catch (err) {
     try {
-      handle.exec('ROLLBACK');
+      await client.query('ROLLBACK');
     } catch {
       /* ignore */
     }
     throw err;
+  } finally {
+    client.release();
   }
 }
 
 export async function closeDb(): Promise<void> {
-  if (sqliteDb) {
-    sqliteDb.close();
-    sqliteDb = null;
-  }
   if (pgPool) {
     await pgPool.end();
     pgPool = null;

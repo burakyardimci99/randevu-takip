@@ -12,7 +12,7 @@ import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
-import { initSchema, closeDb, getDb } from '../src/db/schema';
+import { initSchema, closeDb, dbRun } from '../src/db/schema';
 import { createBooking } from '../src/services/booking.service';
 import { HttpError } from '../src/middleware/error.middleware';
 
@@ -22,24 +22,18 @@ const ROOM = nanoid();
 
 beforeAll(async () => {
   await initSchema();
-  const db = getDb();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
-  db.prepare(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`).run(
-    USER_A,
-    'pa@test.local',
-    hash,
-    'Periyodik A'
-  );
-  db.prepare(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`).run(
-    USER_B,
-    'pb@test.local',
-    hash,
-    'Periyodik B'
-  );
-  db.prepare(
+  await dbRun(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`, [
+    USER_A, 'pa@test.local', hash, 'Periyodik A',
+  ]);
+  await dbRun(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`, [
+    USER_B, 'pb@test.local', hash, 'Periyodik B',
+  ]);
+  await dbRun(
     `INSERT INTO rooms (id, code, name, district, neighborhood, capacity)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(ROOM, 'PX-01', 'Periyodik · Oda', 'Test', 'Mahalle', 4);
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [ROOM, 'PX-01', 'Periyodik · Oda', 'Test', 'Mahalle', 4]
+  );
 });
 
 afterAll(async () => {

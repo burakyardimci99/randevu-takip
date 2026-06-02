@@ -10,7 +10,7 @@ import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
-import { initSchema, closeDb, getDb } from '../src/db/schema';
+import { initSchema, closeDb, dbRun, dbOne } from '../src/db/schema';
 import {
   createBooking,
   deleteBooking,
@@ -24,18 +24,18 @@ const ROOM = nanoid();
 
 beforeAll(async () => {
   await initSchema();
-  const db = getDb();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
-  db.prepare(
-    `INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`
-  ).run(USER_A, 'a@test.local', hash, 'User A');
-  db.prepare(
-    `INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`
-  ).run(USER_B, 'b@test.local', hash, 'User B');
-  db.prepare(
+  await dbRun(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`, [
+    USER_A, 'a@test.local', hash, 'User A',
+  ]);
+  await dbRun(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`, [
+    USER_B, 'b@test.local', hash, 'User B',
+  ]);
+  await dbRun(
     `INSERT INTO rooms (id, code, name, district, neighborhood, capacity)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(ROOM, 'TX-01', 'Test · Oda', 'Test', 'Mahalle', 4);
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [ROOM, 'TX-01', 'Test · Oda', 'Test', 'Mahalle', 4]
+  );
 });
 
 afterAll(async () => {
@@ -93,10 +93,10 @@ describe('createBooking', () => {
 
 describe('IDOR koruması', () => {
   it("user A, user B'nin booking'ini güncelleyemez", async () => {
-    const db = getDb();
-    const userBBooking = db
-      .prepare('SELECT id FROM bookings WHERE user_id = ? LIMIT 1')
-      .get(USER_B) as { id: string };
+    const userBBooking = (await dbOne(
+      'SELECT id FROM bookings WHERE user_id = ? LIMIT 1',
+      [USER_B]
+    )) as { id: string };
 
     await expect(updateBooking(USER_A, userBBooking.id, {
         roomId: ROOM,
@@ -110,10 +110,10 @@ describe('IDOR koruması', () => {
   });
 
   it("user A, user B'nin booking'ini silemez", async () => {
-    const db = getDb();
-    const userBBooking = db
-      .prepare('SELECT id FROM bookings WHERE user_id = ? LIMIT 1')
-      .get(USER_B) as { id: string };
+    const userBBooking = (await dbOne(
+      'SELECT id FROM bookings WHERE user_id = ? LIMIT 1',
+      [USER_B]
+    )) as { id: string };
 
     await expect(deleteBooking(USER_A, userBBooking.id)).rejects.toThrow(/bulunamadı|BOOKING_NOT_FOUND/i);
   });
@@ -121,12 +121,12 @@ describe('IDOR koruması', () => {
 
 describe('Status kısıtı', () => {
   it('approved booking düzenlenemez', async () => {
-    const db = getDb();
     // user A'nın booking'ini approved yap
-    const aBooking = db
-      .prepare('SELECT id FROM bookings WHERE user_id = ? LIMIT 1')
-      .get(USER_A) as { id: string };
-    db.prepare("UPDATE bookings SET status = 'approved' WHERE id = ?").run(aBooking.id);
+    const aBooking = (await dbOne(
+      'SELECT id FROM bookings WHERE user_id = ? LIMIT 1',
+      [USER_A]
+    )) as { id: string };
+    await dbRun("UPDATE bookings SET status = 'approved' WHERE id = ?", [aBooking.id]);
 
     await expect(updateBooking(USER_A, aBooking.id, {
         roomId: ROOM,

@@ -93,7 +93,7 @@ import {
 import { listBackups, runBackupOnce } from '../services/backup.service';
 import { csrfProtection } from '../middleware/cookie-auth';
 import { HttpError } from '../middleware/error.middleware';
-import { dbAll, dbRun, getDb } from '../db/schema';
+import { dbAll, dbRun } from '../db/schema';
 
 const router = Router();
 

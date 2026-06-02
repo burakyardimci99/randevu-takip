@@ -10,12 +10,10 @@
  * sıralaması yalnız opt-in (approved + showcase_visible) projeleri içerir.
  * Endpoint user-auth (lab içi gamification) — tam public DEĞİL.
  */
-import { dbAll, isPg } from '../db/schema';
+import { dbAll } from '../db/schema';
 
-/** Gün farkı (end-start+1) — lehçe-bağımsız: pg date çıkarma, sqlite julianday. */
-const DAY_DIFF = isPg()
-  ? '(b.end_date::date - b.start_date::date + 1)'
-  : '(julianday(b.end_date) - julianday(b.start_date) + 1)';
+/** Gün farkı (end-start+1) — pg tarih çıkarma. */
+const DAY_DIFF = '(b.end_date::date - b.start_date::date + 1)';
 // Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
 import type { Leaderboard, LeaderboardUser, LeaderboardProject } from '@klab/shared';
 

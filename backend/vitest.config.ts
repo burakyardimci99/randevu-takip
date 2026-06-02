@@ -5,8 +5,9 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     globals: false,
-    testTimeout: 10_000,
+    testTimeout: 15_000,
     pool: 'forks',
-    fileParallelism: false, // SQLite shared DB için sequential
+    fileParallelism: false, // tek pg test DB paylaşıldığından sequential
+    globalSetup: ['./tests/global-setup.ts'], // run başında pg şema sıfırlama
   },
 });

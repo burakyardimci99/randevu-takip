@@ -11,7 +11,7 @@ import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
-import { initSchema, closeDb, getDb } from '../src/db/schema';
+import { initSchema, closeDb, dbRun } from '../src/db/schema';
 import {
   issueRefreshToken,
   rotateRefreshToken,
@@ -23,9 +23,10 @@ const SUBJECT_ID = nanoid();
 beforeAll(async () => {
   await initSchema();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
-  getDb()
-    .prepare(`INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`)
-    .run(SUBJECT_ID, 'reuse@test.local', hash, 'Reuse Tester');
+  await dbRun(
+    `INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`,
+    [SUBJECT_ID, 'reuse@test.local', hash, 'Reuse Tester']
+  );
 });
 
 afterAll(async () => {

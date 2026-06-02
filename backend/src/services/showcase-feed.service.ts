@@ -12,7 +12,7 @@
  *  - Galeriyi değiştiren mutasyonlar (showcase görseli, görünürlük toggle) cache'i
  *    açıkça invalidate eder; admin onay/red gibi seyrek değişimler 30 sn TTL ile yakalanır.
  */
-import { dbAll, getDb } from '../db/schema';
+import { dbAll } from '../db/schema';
 import { getShowcaseEngagement } from './showcase.service';
 // Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
 import type { ShowcaseItem, ShowcaseTechnology } from '@klab/shared';

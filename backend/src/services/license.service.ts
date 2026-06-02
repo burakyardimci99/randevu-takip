@@ -21,7 +21,7 @@
  *  - Sadece admin endpoint'ten erişilir.
  *  - Çıktıda PII (e-posta) sadece admin'e döner — public değil.
  */
-import { dbAll, getDb } from '../db/schema';
+import { dbAll } from '../db/schema';
 
 /**
  * Lisans kataloğu. Anahtar: küçük harfli + normalleştirilmiş teknoloji adı.

@@ -17,7 +17,7 @@ import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
-import { initSchema, closeDb, getDb } from '../src/db/schema';
+import { initSchema, closeDb, dbRun } from '../src/db/schema';
 import {
   bookingTextForEmbedding,
   cosineSimilarity,
@@ -77,15 +77,16 @@ beforeAll(async () => {
   // Embedding modelini önceden yükle
   await warmupEmbeddings();
 
-  const db = getDb();
   const hash = await argon2.hash('Test1234!Pass', { type: argon2.argon2id });
-  db.prepare(
-    `INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`
-  ).run(USER_ID, 'emb-user@test.local', hash, 'Embedding Test User');
+  await dbRun(
+    `INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`,
+    [USER_ID, 'emb-user@test.local', hash, 'Embedding Test User']
+  );
 
-  db.prepare(
-    `INSERT OR IGNORE INTO rooms (id, code, name, district, neighborhood, capacity) VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(ROOM_ID, 'EMB-01', 'Embedding Test Oda', 'Test', 'Mahalle', 4);
+  await dbRun(
+    `INSERT OR IGNORE INTO rooms (id, code, name, district, neighborhood, capacity) VALUES (?, ?, ?, ?, ?, ?)`,
+    [ROOM_ID, 'EMB-01', 'Embedding Test Oda', 'Test', 'Mahalle', 4]
+  );
 
   // Booking'leri ekle ve embedding hesapla
   let dayOffset = 100; // existing booking'lerle çakışmaması için ileri tarihler
@@ -94,20 +95,21 @@ beforeAll(async () => {
     const endDate = futureDate(dayOffset + 30);
     dayOffset += 90;
 
-    db.prepare(
+    await dbRun(
       `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
          project_name, project_description, help_needed, technologies, status)
-       VALUES (?, ?, ?, 1, ?, ?, ?, ?, 'yok', ?, ?)`
-    ).run(
-      p.id,
-      USER_ID,
-      ROOM_ID,
-      startDate,
-      endDate,
-      p.name,
-      p.description,
-      JSON.stringify(p.technologies),
-      p.status
+       VALUES (?, ?, ?, 1, ?, ?, ?, ?, 'yok', ?, ?)`,
+      [
+        p.id,
+        USER_ID,
+        ROOM_ID,
+        startDate,
+        endDate,
+        p.name,
+        p.description,
+        JSON.stringify(p.technologies),
+        p.status,
+      ]
     );
 
     const text = bookingTextForEmbedding({
@@ -346,8 +348,7 @@ describe('Privacy — visibility filtresi', () => {
 
   it("showcase_visible=0 olan approved booking dahi gizlenir", async () => {
     // PROJECTS[1] approved, showcase_visible'ı manuel 0 yapalım
-    const db = getDb();
-    db.prepare('UPDATE bookings SET showcase_visible = 0 WHERE id = ?').run(PROJECTS[1].id);
+    await dbRun('UPDATE bookings SET showcase_visible = 0 WHERE id = ?', [PROJECTS[1].id]);
 
     const results = await findSimilarBookings({
       queryText: bookingTextForEmbedding({
@@ -363,7 +364,7 @@ describe('Privacy — visibility filtresi', () => {
     expect(results.find((r) => r.bookingId === PROJECTS[1].id)).toBeUndefined();
 
     // Geri al — sonraki testleri etkilemesin
-    db.prepare('UPDATE bookings SET showcase_visible = 1 WHERE id = ?').run(PROJECTS[1].id);
+    await dbRun('UPDATE bookings SET showcase_visible = 1 WHERE id = ?', [PROJECTS[1].id]);
   });
 });
 

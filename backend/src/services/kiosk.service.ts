@@ -8,7 +8,7 @@
  * iç URL — #1) + zaman damgası + oda bilgisi döner. Kullanıcı/fikir/tema İFŞA
  * EDİLMEZ (banka veri-yönetişimi).
  */
-import { dbAll, dbOne, getDb } from '../db/schema';
+import { dbAll, dbOne } from '../db/schema';
 // Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
 import type { KioskRoom, KioskData } from '@klab/shared';
 

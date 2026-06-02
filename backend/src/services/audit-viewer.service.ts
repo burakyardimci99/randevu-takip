@@ -6,7 +6,7 @@
  *  - SQL parameterized — string concat YOK (app_security §3).
  *  - details kolonu zaten scrubbed (audit.service sanitizeDetails).
  */
-import { dbAll, dbOne, getDb } from '../db/schema';
+import { dbAll, dbOne } from '../db/schema';
 
 export interface AuditLogEntry {
   id: string;

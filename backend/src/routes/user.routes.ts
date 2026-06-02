@@ -75,7 +75,7 @@ import {
 import { recordAudit } from '../services/audit.service';
 import { csrfProtection } from '../middleware/cookie-auth';
 import { HttpError } from '../middleware/error.middleware';
-import { dbOne, dbRun, getDb } from '../db/schema';
+import { dbOne, dbRun } from '../db/schema';
 
 const router = Router();
 

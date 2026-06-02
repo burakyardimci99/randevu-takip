@@ -12,7 +12,7 @@
  * - Rate limit globalde uygulanır.
  */
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { dbOne, getDb } from '../db/schema';
+import { dbOne } from '../db/schema';
 import { getPublicProfile } from '../services/public-profile.service';
 import { getShowcaseEngagement } from '../services/showcase.service';
 import {

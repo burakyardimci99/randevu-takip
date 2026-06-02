@@ -23,7 +23,7 @@
  *  - SSE: kullanıcı + admin kanalına yayın.
  */
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbRun, dbTx, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun, dbTx } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { recordAudit } from './audit.service';
 import { broadcastBooking, broadcastToAdmins } from './sse.service';

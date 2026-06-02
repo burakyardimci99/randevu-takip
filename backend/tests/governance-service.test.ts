@@ -15,7 +15,7 @@ import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
-import { initSchema, closeDb, getDb } from '../src/db/schema';
+import { initSchema, closeDb, dbRun } from '../src/db/schema';
 import {
   createLicenseRequest,
   reviewLicenseRequest,
@@ -43,14 +43,13 @@ const ADMIN = nanoid();
 
 beforeAll(async () => {
   await initSchema();
-  const db = getDb();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
-  db.prepare(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`).run(
-    USER, 'gov-user@test.local', hash, 'Gov User'
-  );
-  db.prepare(`INSERT INTO admins (id, email, password_hash, full_name, role) VALUES (?, ?, ?, ?, ?)`).run(
-    ADMIN, 'gov-admin@test.local', hash, 'Gov Admin', 'super_admin'
-  );
+  await dbRun(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`, [
+    USER, 'gov-user@test.local', hash, 'Gov User',
+  ]);
+  await dbRun(`INSERT INTO admins (id, email, password_hash, full_name, role) VALUES (?, ?, ?, ?, ?)`, [
+    ADMIN, 'gov-admin@test.local', hash, 'Gov Admin', 'super_admin',
+  ]);
 });
 
 afterAll(async () => {

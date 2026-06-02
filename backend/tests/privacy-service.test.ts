@@ -5,7 +5,7 @@ import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
-import { initSchema, closeDb, getDb } from '../src/db/schema';
+import { initSchema, closeDb, dbRun, dbOne } from '../src/db/schema';
 import {
   exportUserData,
   purgeUser,
@@ -25,46 +25,49 @@ const futureDate = (days: number) => {
 
 beforeAll(async () => {
   await initSchema();
-  const db = getDb();
   const hash = await argon2.hash('TestPass123!', { type: argon2.argon2id });
-  db.prepare(
+  await dbRun(
     `INSERT OR IGNORE INTO users (id, email, password_hash, full_name, department)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(USER_ID, 'kvkk@test.local', hash, 'Veri Sahibi', 'Compliance');
-  db.prepare(
+     VALUES (?, ?, ?, ?, ?)`,
+    [USER_ID, 'kvkk@test.local', hash, 'Veri Sahibi', 'Compliance']
+  );
+  await dbRun(
     `INSERT OR IGNORE INTO rooms (id, code, name, district, neighborhood, capacity)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(ROOM_ID, 'KV-01', 'KVKK Test Oda', 'Test', 'Mahalle', 4);
-
-  // 2 booking: 1 pending, 1 approved
-  db.prepare(
-    `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
-       project_name, project_description, help_needed, technologies, status)
-     VALUES (?, ?, ?, 1, ?, ?, ?, ?, 'yok', ?, 'pending')`
-  ).run(
-    BOOKING_PENDING,
-    USER_ID,
-    ROOM_ID,
-    futureDate(200),
-    futureDate(230),
-    'Pending proje',
-    'Bu pending bir proje, silindiğinde tamamen yok olmalı.',
-    JSON.stringify(['Claude'])
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [ROOM_ID, 'KV-01', 'KVKK Test Oda', 'Test', 'Mahalle', 4]
   );
 
-  db.prepare(
+  // 2 booking: 1 pending, 1 approved
+  await dbRun(
     `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
        project_name, project_description, help_needed, technologies, status)
-     VALUES (?, ?, ?, 1, ?, ?, ?, ?, 'yok', ?, 'approved')`
-  ).run(
-    BOOKING_APPROVED,
-    USER_ID,
-    ROOM_ID,
-    futureDate(300),
-    futureDate(330),
-    'Approved proje',
-    'Bu approved bir proje, pseudonymize edilmeli — tarih bütünlüğü için kalır.',
-    JSON.stringify(['GPT'])
+     VALUES (?, ?, ?, 1, ?, ?, ?, ?, 'yok', ?, 'pending')`,
+    [
+      BOOKING_PENDING,
+      USER_ID,
+      ROOM_ID,
+      futureDate(200),
+      futureDate(230),
+      'Pending proje',
+      'Bu pending bir proje, silindiğinde tamamen yok olmalı.',
+      JSON.stringify(['Claude']),
+    ]
+  );
+
+  await dbRun(
+    `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
+       project_name, project_description, help_needed, technologies, status)
+     VALUES (?, ?, ?, 1, ?, ?, ?, ?, 'yok', ?, 'approved')`,
+    [
+      BOOKING_APPROVED,
+      USER_ID,
+      ROOM_ID,
+      futureDate(300),
+      futureDate(330),
+      'Approved proje',
+      'Bu approved bir proje, pseudonymize edilmeli — tarih bütünlüğü için kalır.',
+      JSON.stringify(['GPT']),
+    ]
   );
 });
 
@@ -93,15 +96,15 @@ describe('purgeUser — Right to be Forgotten', () => {
     expect(result.purgedUser.id).toBe(USER_ID);
     expect(result.purgedUser.pseudonymizedAs).toMatch(/^deleted-/);
 
-    const db = getDb();
-    const user = db
-      .prepare('SELECT email, full_name, status, password_hash FROM users WHERE id = ?')
-      .get(USER_ID) as {
-        email: string;
-        full_name: string;
-        status: number;
-        password_hash: string;
-      };
+    const user = (await dbOne(
+      'SELECT email, full_name, status, password_hash FROM users WHERE id = ?',
+      [USER_ID]
+    )) as {
+      email: string;
+      full_name: string;
+      status: number;
+      password_hash: string;
+    };
     // Hassas alanlar temizlendi
     expect(user.email).toContain('@purged.local');
     expect(user.full_name).toBe('[Silinen kullanıcı]');
@@ -110,60 +113,58 @@ describe('purgeUser — Right to be Forgotten', () => {
   });
 
   it('pending booking silinir', async () => {
-    const db = getDb();
-    const pending = db.prepare('SELECT id FROM bookings WHERE id = ?').get(BOOKING_PENDING);
+    const pending = await dbOne('SELECT id FROM bookings WHERE id = ?', [BOOKING_PENDING]);
     expect(pending).toBeUndefined(); // silindi
   });
 
   it('approved booking korunur ama description pseudonymize edilir', async () => {
-    const db = getDb();
-    const approved = db
-      .prepare('SELECT project_description, status FROM bookings WHERE id = ?')
-      .get(BOOKING_APPROVED) as { project_description: string; status: string };
+    const approved = (await dbOne(
+      'SELECT project_description, status FROM bookings WHERE id = ?',
+      [BOOKING_APPROVED]
+    )) as { project_description: string; status: string };
     expect(approved.status).toBe('approved'); // hala kayıtlı
     expect(approved.project_description).toContain('silindi');
   });
 
   it('refresh tokenlar revoke edilir', async () => {
-    const db = getDb();
     // İlk önce bir token ekle
     const tokenId = nanoid();
-    db.prepare(
+    await dbRun(
       `INSERT INTO refresh_tokens (id, token_hash, subject_id, subject_type, expires_at)
-       VALUES (?, ?, ?, 'user', ?)`
-    ).run(tokenId, 'hash-' + tokenId, USER_ID, futureDate(7));
+       VALUES (?, ?, ?, 'user', ?)`,
+      [tokenId, 'hash-' + tokenId, USER_ID, futureDate(7)]
+    );
 
     // Ayrı bir user yarat ki tokenlar yine purge ile silinsin
     const otherUser = nanoid();
-    db.prepare(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`).run(
+    await dbRun(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`, [
       otherUser,
       'other-' + otherUser + '@test.local',
       'x',
-      'Other'
-    );
+      'Other',
+    ]);
     const otherToken = nanoid();
-    db.prepare(
+    await dbRun(
       `INSERT INTO refresh_tokens (id, token_hash, subject_id, subject_type, expires_at)
-       VALUES (?, ?, ?, 'user', ?)`
-    ).run(otherToken, 'hash-' + otherToken, otherUser, futureDate(7));
+       VALUES (?, ?, ?, 'user', ?)`,
+      [otherToken, 'hash-' + otherToken, otherUser, futureDate(7)]
+    );
 
     await purgeUser(otherUser, { id: otherUser, type: 'user' });
 
-    const tokenAfter = db
-      .prepare('SELECT revoked FROM refresh_tokens WHERE id = ?')
-      .get(otherToken) as { revoked: number };
+    const tokenAfter = (await dbOne(
+      'SELECT revoked FROM refresh_tokens WHERE id = ?',
+      [otherToken]
+    )) as { revoked: number };
     expect(tokenAfter.revoked).toBe(1);
   });
 
   it('audit log: user.delete event yazıldı', async () => {
-    const db = getDb();
-    const logs = db
-      .prepare(
-        `SELECT event_type, details FROM audit_logs
-         WHERE event_type = 'user.delete'
-         ORDER BY created_at DESC LIMIT 1`
-      )
-      .get() as { event_type: string; details: string };
+    const logs = (await dbOne(
+      `SELECT event_type, details FROM audit_logs
+       WHERE event_type = 'user.delete'
+       ORDER BY created_at DESC LIMIT 1`
+    )) as { event_type: string; details: string };
     expect(logs.event_type).toBe('user.delete');
     const details = JSON.parse(logs.details);
     expect(details.action).toBe('data_purge');

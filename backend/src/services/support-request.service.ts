@@ -10,7 +10,7 @@
  * - resolved_by + resolved_at ile audit-able (§8)
  */
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbRun, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { pushNotificationBulk } from './notification-center.service';
 import { broadcastToAdmins } from './sse.service';

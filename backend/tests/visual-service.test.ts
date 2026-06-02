@@ -14,7 +14,7 @@ import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
-import { initSchema, closeDb, getDb } from '../src/db/schema';
+import { initSchema, closeDb, dbRun, dbOne } from '../src/db/schema';
 import {
   getVisualForUser,
   listMyVisuals,
@@ -33,51 +33,56 @@ const VISUAL_B = nanoid(); // B'nin görseli
 
 beforeAll(async () => {
   await initSchema();
-  const db = getDb();
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
   for (const [id, email, name] of [
     [USER_A, 'va@test.local', 'Visual A'],
     [USER_B, 'vb@test.local', 'Visual B'],
   ]) {
-    db.prepare(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`).run(
+    await dbRun(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`, [
       id,
       email,
       hash,
-      name
-    );
+      name,
+    ]);
   }
-  db.prepare(
-    `INSERT INTO rooms (id, code, name, district, neighborhood, capacity) VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(ROOM, 'VX-01', 'Visual · Oda', 'Test', 'Mahalle', 4);
+  await dbRun(
+    `INSERT INTO rooms (id, code, name, district, neighborhood, capacity) VALUES (?, ?, ?, ?, ?, ?)`,
+    [ROOM, 'VX-01', 'Visual · Oda', 'Test', 'Mahalle', 4]
+  );
 
   // Booking'ler (showcase-image ataması için)
-  db.prepare(
+  await dbRun(
     `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
        project_name, project_description, help_needed, technologies, status)
-     VALUES (?, ?, ?, 1, '2099-01-01', '2099-02-01', 'A Proje', 'A açıklaması yeterince uzun.', '-', '[]', 'approved')`
-  ).run(BOOKING_A, USER_A, ROOM);
-  db.prepare(
+     VALUES (?, ?, ?, 1, '2099-01-01', '2099-02-01', 'A Proje', 'A açıklaması yeterince uzun.', '-', '[]', 'approved')`,
+    [BOOKING_A, USER_A, ROOM]
+  );
+  await dbRun(
     `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
        project_name, project_description, help_needed, technologies, status)
-     VALUES (?, ?, ?, 1, '2099-01-01', '2099-02-01', 'B Proje', 'B açıklaması yeterince uzun.', '-', '[]', 'approved')`
-  ).run(BOOKING_B, USER_B, ROOM);
+     VALUES (?, ?, ?, 1, '2099-01-01', '2099-02-01', 'B Proje', 'B açıklaması yeterince uzun.', '-', '[]', 'approved')`,
+    [BOOKING_B, USER_B, ROOM]
+  );
 
   // Görseller — doğrudan SQL (ağ yok)
   const readyVariants = JSON.stringify([
     { seed: 123, url: '/api/public/visuals/' + VISUAL_A + '/image?v=123', stored: true, ext: 'jpg', created_at: 1 },
   ]);
-  db.prepare(
+  await dbRun(
     `INSERT INTO visuals (id, user_id, fikir, tema, prompt_en, image_url, seed, status, variant_index, variants)
-     VALUES (?, ?, 'fikir A', 'tema', 'prompt A', ?, 123, 'ready', 0, ?)`
-  ).run(VISUAL_A, USER_A, '/api/public/visuals/' + VISUAL_A + '/image?v=123', readyVariants);
-  db.prepare(
+     VALUES (?, ?, 'fikir A', 'tema', 'prompt A', ?, 123, 'ready', 0, ?)`,
+    [VISUAL_A, USER_A, '/api/public/visuals/' + VISUAL_A + '/image?v=123', readyVariants]
+  );
+  await dbRun(
     `INSERT INTO visuals (id, user_id, fikir, tema, prompt_en, image_url, seed, status, variant_index, variants)
-     VALUES (?, ?, 'fikir A2', NULL, NULL, NULL, NULL, 'enhancing', 0, NULL)`
-  ).run(VISUAL_A_NOTREADY, USER_A);
-  db.prepare(
+     VALUES (?, ?, 'fikir A2', NULL, NULL, NULL, NULL, 'enhancing', 0, NULL)`,
+    [VISUAL_A_NOTREADY, USER_A]
+  );
+  await dbRun(
     `INSERT INTO visuals (id, user_id, fikir, tema, prompt_en, image_url, seed, status, variant_index, variants)
-     VALUES (?, ?, 'fikir B', 'tema', 'prompt B', ?, 999, 'ready', 0, ?)`
-  ).run(VISUAL_B, USER_B, '/api/public/visuals/' + VISUAL_B + '/image?v=999', JSON.stringify([{ seed: 999, url: 'x', stored: false, created_at: 1 }]));
+     VALUES (?, ?, 'fikir B', 'tema', 'prompt B', ?, 999, 'ready', 0, ?)`,
+    [VISUAL_B, USER_B, '/api/public/visuals/' + VISUAL_B + '/image?v=999', JSON.stringify([{ seed: 999, url: 'x', stored: false, created_at: 1 }])]
+  );
 });
 
 afterAll(async () => {
@@ -122,9 +127,10 @@ describe('Showcase arkaplan görseli — sahiplik', () => {
     const res = await setBookingShowcaseImage(USER_A, BOOKING_A, VISUAL_A);
     expect(res.showcaseImageUrl).toContain(VISUAL_A);
     // DB'ye yazıldı mı?
-    const row = getDb()
-      .prepare('SELECT showcase_image_url FROM bookings WHERE id = ?')
-      .get(BOOKING_A) as { showcase_image_url: string | null };
+    const row = (await dbOne(
+      'SELECT showcase_image_url FROM bookings WHERE id = ?',
+      [BOOKING_A]
+    )) as { showcase_image_url: string | null };
     expect(row.showcase_image_url).toContain(VISUAL_A);
   });
 
