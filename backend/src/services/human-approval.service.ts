@@ -6,7 +6,7 @@
  * YZ/Ar-Ge Mühendisi kararı verir; karar olmadan bir sonraki aşamaya geçilemez.
  */
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbRun, getDb } from '../db/schema';
+import { dbAll, dbOne, dbRun } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 
 export type ApprovalType = 'stage' | 'production';
@@ -140,7 +140,6 @@ export async function decideApproval(
     input.riskAssessment?.trim() || null,
     pending.id]);
 
-  const db2 = getDb();
   const row = await dbOne(`${SELECT_WITH_APPROVER} WHERE ha.id = ?`, [pending.id]) as ApprovalRow;
   return rowToApproval(row);
 }
