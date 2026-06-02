@@ -56,6 +56,9 @@ services:
       ADMIN_JWT_PRIVATE_KEY_PATH: ./keys/admin_private.pem
       ADMIN_JWT_PUBLIC_KEY_PATH: ./keys/admin_public.pem
       IMAGE_PROVIDER: pollinations
+      # Pollinations ücretsiz token (auth.pollinations.ai) — host ortamından geçirilir.
+      # `export POLLINATIONS_TOKEN=...` ile çalıştır; yoksa görsel üretimi 402 alır.
+      POLLINATIONS_TOKEN: ${POLLINATIONS_TOKEN:-}
     ports:
       - '4000:4000'
     volumes:

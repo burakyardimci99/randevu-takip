@@ -127,13 +127,20 @@ async function persistVariant(
   id: string,
   seed: number,
   externalUrl: string
-): Promise<{ url: string; stored: boolean; ext?: string }> {
+): Promise<{ url: string; stored: boolean; ext?: string; authError?: boolean }> {
   const result = await downloadAndStore(id, seed, externalUrl);
-  if (result) {
+  if (result.ok) {
     return { url: internalImageUrl(id, seed), stored: true, ext: result.ext };
   }
-  return { url: externalUrl, stored: false };
+  // Saklanamadı: 'auth' (token/ödeme) KALICI → çağıran error yapmalı; 'transient'
+  // (zaman aşımı/5xx) ise dış URL'de fallback (provider sonra düzelir).
+  return { url: externalUrl, stored: false, authError: result.reason === 'auth' };
 }
+
+/** Pollinations anonim erişim 402 verdiğinde gösterilecek net kullanıcı mesajı. */
+const PROVIDER_AUTH_ERROR =
+  'Görsel sağlayıcı kimlik doğrulama/ödeme gerektiriyor. Yöneticinin POLLINATIONS_TOKEN ' +
+  'ayarlaması gerekiyor (auth.pollinations.ai üzerinden ücretsiz token alınır).';
 
 /** Arkaplan boru hattı: prompt → generate → diske sakla → DB güncelle → SSE push. */
 async function runVisualPipeline(
@@ -151,6 +158,8 @@ async function runVisualPipeline(
     const result = await getImageProvider().generate({ prompt: promptEn });
     // Üretilen görseli sunucuda sakla → image_url prompt'suz iç URL olur (fallback: dış URL).
     const persisted = await persistVariant(id, result.seed, result.url);
+    // Sağlayıcı kimlik/ödeme istiyorsa (anonim 402) 'ready' deyip kırık URL VERME → net hata.
+    if (!persisted.stored && persisted.authError) throw new Error(PROVIDER_AUTH_ERROR);
     const variant: VisualVariant = {
       seed: result.seed,
       url: persisted.url,
@@ -199,6 +208,7 @@ async function runRegeneratePipeline(
     const result = await getImageProvider().generate({ prompt: promptEn, seed: newSeed });
     // Yeni varyantı sunucuda sakla → iç URL (fallback: dış URL).
     const persisted = await persistVariant(visualId, result.seed, result.url);
+    if (!persisted.stored && persisted.authError) throw new Error(PROVIDER_AUTH_ERROR);
     const variant: VisualVariant = {
       seed: result.seed,
       url: persisted.url,

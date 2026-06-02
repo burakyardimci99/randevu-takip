@@ -81,15 +81,35 @@ export function internalImageUrl(id: string, seed: number): string {
 }
 
 /**
+ * downloadAndStore sonucu:
+ *  - ok=true  → diske yazıldı (iç URL kullanılabilir).
+ *  - ok=false, reason='auth'      → 401/402/403: sağlayıcı kimlik/ödeme istiyor
+ *    (KALICI; token gerekir). Çağıran bunu kullanıcıya hata olarak göstermeli.
+ *  - ok=false, reason='transient' → zaman aşımı / 5xx / ağ / içerik hatası
+ *    (GEÇİCİ; dış URL'de fallback mantıklı, sonra tekrar denenebilir).
+ */
+export type StoreResult =
+  | { ok: true; ext: string }
+  | { ok: false; reason: 'auth' | 'transient' };
+
+/**
  * Verilen görseli provider URL'inden indirir ve diske yazar.
- * Başarılıysa { ext } döner; herhangi bir hata/zaman aşımında null (fallback).
+ *
+ * Pollinations token (POLLINATIONS_TOKEN) varsa `Authorization: Bearer` ile
+ * gönderilir — token YALNIZ sunucu tarafında kalır, client URL'ine sızmaz
+ * (Pollinations güvenlik kılavuzu: token'ı public URL'de gösterme). Anonim
+ * erişim 402 (ödeme) verdiğinden token'sız üretim 'auth' hatasıyla döner.
  */
 export async function downloadAndStore(
   id: string,
   seed: number,
   sourceUrl: string
-): Promise<{ ext: string } | null> {
-  if (!isSafeVisualId(id) || safeSeed(seed) === null) return null;
+): Promise<StoreResult> {
+  if (!isSafeVisualId(id) || safeSeed(seed) === null) return { ok: false, reason: 'transient' };
+
+  const headers: Record<string, string> = { Accept: 'image/*' };
+  const token = process.env.POLLINATIONS_TOKEN?.trim();
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
@@ -97,23 +117,27 @@ export async function downloadAndStore(
     const res = await fetch(sourceUrl, {
       signal: controller.signal,
       redirect: 'follow',
-      headers: { Accept: 'image/*' },
+      headers,
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // 401/402/403 → kimlik/ödeme (kalıcı); diğer HTTP hataları → geçici.
+      const reason = res.status === 401 || res.status === 402 || res.status === 403 ? 'auth' : 'transient';
+      return { ok: false, reason };
+    }
 
     const contentType = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
     const ext = CONTENT_TYPE_TO_EXT[contentType];
-    if (!ext) return null; // yalnız görsel türleri
+    if (!ext) return { ok: false, reason: 'transient' }; // yalnız görsel türleri
 
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.byteLength === 0 || buf.byteLength > MAX_BYTES) return null;
+    if (buf.byteLength === 0 || buf.byteLength > MAX_BYTES) return { ok: false, reason: 'transient' };
 
     await mkdir(VISUALS_DIR, { recursive: true, mode: 0o700 });
     await writeFile(storedPath(id, seed, ext), buf);
-    return { ext };
+    return { ok: true, ext };
   } catch {
-    // Provider çökük / zaman aşımı / ağ hatası → fallback (dış URL'de kal).
-    return null;
+    // Zaman aşımı / ağ hatası → geçici (dış URL'de fallback).
+    return { ok: false, reason: 'transient' };
   } finally {
     clearTimeout(timer);
   }
