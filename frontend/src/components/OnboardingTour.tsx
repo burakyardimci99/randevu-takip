@@ -91,6 +91,7 @@ export function OnboardingTour({ kind }: Props) {
   const steps = kind === 'admin' ? ADMIN_STEPS : USER_STEPS;
   const [step, setStep] = useState(0);
   const [open, setOpen] = useState(false);
+  const [dontShowAgain, setDontShowAgain] = useState(true);
 
   // Mount sonrası: localStorage check
   useEffect(() => {
@@ -104,7 +105,9 @@ export function OnboardingTour({ kind }: Props) {
   }, [kind]);
 
   function finish() {
-    localStorage.setItem(STORAGE_KEY(kind), '1');
+    // "Bunu bir daha gösterme" işaretliyse kalıcı kapat (localStorage); işaret
+    // kaldırılmışsa yalnız bu oturumu kapat → sonraki girişte tur tekrar görünür.
+    if (dontShowAgain) localStorage.setItem(STORAGE_KEY(kind), '1');
     setOpen(false);
   }
 
@@ -203,6 +206,17 @@ export function OnboardingTour({ kind }: Props) {
               </button>
             )}
           </div>
+
+          {/* Kalıcı kapatma seçeneği — işaretliyse "Atla/Başlayalım" sonrası bir daha açılmaz. */}
+          <label className="flex items-center justify-center gap-2 mt-5 text-xs text-kt-gray-500 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={dontShowAgain}
+              onChange={(e) => setDontShowAgain(e.target.checked)}
+              className="w-3.5 h-3.5 rounded border-kt-gray-300 text-kt-green-600 focus:ring-2 focus:ring-kt-green-500/40"
+            />
+            Bunu bir daha gösterme
+          </label>
         </div>
       </div>
     </div>
