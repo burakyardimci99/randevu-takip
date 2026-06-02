@@ -45,6 +45,8 @@ export interface BookingDto {
   userId: string;
   userEmail?: string;
   userFullName?: string;
+  /** Talep sahibinin profil fotoğrafı (base64 data URL) — admin talep detayında avatar. */
+  userPhoto?: string | null;
   roomId: string;
   roomName: string;
   roomCode: string;
@@ -80,6 +82,7 @@ interface BookingRow {
   user_id: string;
   user_email?: string;
   user_full_name?: string;
+  user_photo?: string | null;
   room_id: string;
   room_name: string;
   room_code: string;
@@ -117,6 +120,7 @@ function rowToDto(r: BookingRow): BookingDto {
     userId: r.user_id,
     userEmail: r.user_email,
     userFullName: r.user_full_name,
+    userPhoto: r.user_photo,
     roomId: r.room_id,
     roomName: r.room_name,
     roomCode: r.room_code,
@@ -391,18 +395,22 @@ export async function deleteBooking(userId: string, bookingId: string): Promise<
 }
 
 export async function listUserBookings(userId: string): Promise<BookingDto[]> {
-  const rows = await dbAll(`SELECT b.*, r.name AS room_name, r.code AS room_code
+  const rows = await dbAll(`SELECT b.*, r.name AS room_name, r.code AS room_code,
+              u.email AS user_email, u.full_name AS user_full_name, u.profile_photo AS user_photo
        FROM bookings b
        INNER JOIN rooms r ON r.id = b.room_id
+       INNER JOIN users u ON u.id = b.user_id
        WHERE b.user_id = ?
        ORDER BY b.created_at DESC`, [userId]) as BookingRow[];
   return rows.map(rowToDto);
 }
 
 export async function getBookingByIdForUser(userId: string, bookingId: string): Promise<BookingDto | undefined> {
-  const row = await dbOne(`SELECT b.*, r.name AS room_name, r.code AS room_code
+  const row = await dbOne(`SELECT b.*, r.name AS room_name, r.code AS room_code,
+              u.email AS user_email, u.full_name AS user_full_name, u.profile_photo AS user_photo
        FROM bookings b
        INNER JOIN rooms r ON r.id = b.room_id
+       INNER JOIN users u ON u.id = b.user_id
        WHERE b.id = ? AND b.user_id = ?
        LIMIT 1`, [bookingId, userId]) as BookingRow | undefined;
   return row ? rowToDto(row) : undefined;
@@ -414,7 +422,7 @@ export async function listAllBookings(filters?: {
   let sql = `
     SELECT b.*,
            r.name AS room_name, r.code AS room_code,
-           u.email AS user_email, u.full_name AS user_full_name
+           u.email AS user_email, u.full_name AS user_full_name, u.profile_photo AS user_photo
     FROM bookings b
     INNER JOIN rooms r ON r.id = b.room_id
     INNER JOIN users u ON u.id = b.user_id
@@ -435,7 +443,7 @@ export async function listAllBookings(filters?: {
 export async function getBookingByIdAdmin(bookingId: string): Promise<BookingDto | undefined> {
   const row = await dbOne(`SELECT b.*,
               r.name AS room_name, r.code AS room_code,
-              u.email AS user_email, u.full_name AS user_full_name
+              u.email AS user_email, u.full_name AS user_full_name, u.profile_photo AS user_photo
        FROM bookings b
        INNER JOIN rooms r ON r.id = b.room_id
        INNER JOIN users u ON u.id = b.user_id

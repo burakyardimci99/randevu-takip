@@ -286,9 +286,26 @@ export function BookingDetailModal({
 
           <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-kt-gray-50 rounded-xl p-4">
-              <div className="text-xs font-semibold uppercase tracking-wider text-kt-gray-500 mb-1">Kullanıcı</div>
-              <div className="font-semibold text-kt-green-900">{booking.userFullName}</div>
-              <div className="text-sm text-kt-gray-600 break-all">{booking.userEmail}</div>
+              <div className="text-xs font-semibold uppercase tracking-wider text-kt-gray-500 mb-2">Kullanıcı</div>
+              <div className="flex items-center gap-3">
+                {booking.userPhoto ? (
+                  <img
+                    src={booking.userPhoto}
+                    alt={booking.userFullName || 'Kullanıcı'}
+                    className="w-11 h-11 rounded-full object-cover border border-kt-gray-200 shrink-0"
+                  />
+                ) : (
+                  <div className="w-11 h-11 rounded-full bg-kt-green-100 text-kt-green-700 font-bold flex items-center justify-center shrink-0">
+                    {(booking.userFullName || booking.userEmail || '?').trim().charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <div className="font-semibold text-kt-green-900 truncate">
+                    {booking.userFullName || 'İsimsiz kullanıcı'}
+                  </div>
+                  <div className="text-sm text-kt-gray-600 break-all">{booking.userEmail}</div>
+                </div>
+              </div>
             </div>
             <div className="bg-kt-gray-50 rounded-xl p-4">
               <div className="text-xs font-semibold uppercase tracking-wider text-kt-gray-500 mb-1">Oda</div>

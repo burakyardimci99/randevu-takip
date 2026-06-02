@@ -143,6 +143,8 @@ export interface Booking {
   userId: string;
   userEmail?: string;
   userFullName?: string;
+  /** Talep sahibinin profil fotoğrafı (base64 data URL) — admin talep detayında avatar. */
+  userPhoto?: string | null;
   roomId: string;
   roomCode: string;
   roomName: string;
