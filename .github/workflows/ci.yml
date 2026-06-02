@@ -12,6 +12,21 @@ jobs:
   backend:
     name: Backend — typecheck + test
     runs-on: ubuntu-latest
+    # Testler PostgreSQL gerektirir (#7 — SQLite kaldırıldı). Servis DB'si: klab_test.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: klab
+          POSTGRES_PASSWORD: klab_dev_password
+          POSTGRES_DB: klab_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: backend
@@ -33,8 +48,10 @@ jobs:
       - name: Tip kontrolü + build (tsc, noEmitOnError)
         run: npm run build
 
-      - name: Testler (vitest)
+      - name: Testler (vitest — pg klab_test)
         run: npm test
+        env:
+          TEST_DATABASE_URL: postgres://klab:klab_dev_password@localhost:5432/klab_test
 
       - name: Bağımlılık CVE taraması
         run: npm audit --omit=dev --audit-level=high
