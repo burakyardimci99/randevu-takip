@@ -10,7 +10,7 @@
  */
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
-import { dbAll, dbOne, dbTx, getDb } from './schema';
+import { dbAll, dbOne, dbRun, dbTx } from './schema';
 import {
   GATE_DEFINITIONS,
   applicableGates,
@@ -453,21 +453,21 @@ const ARGON2_OPTIONS: argon2.Options = {
  * ============================================================ */
 
 export async function seedRooms(): Promise<void> {
-  const db = getDb();
   const existing = await dbOne('SELECT COUNT(*) as count FROM rooms', []) as { count: number };
   if (existing.count >= ROOMS.length) {
     console.log(`[SEED] Odalar zaten yüklü (${existing.count} adet), atlanıyor.`);
     return;
   }
 
-  const insert = db.prepare(`
+  const INSERT_ROOM = `
     INSERT OR IGNORE INTO rooms (id, code, name, district, neighborhood, capacity, description, theme, equipment, room_type, specs)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  `;
 
-  const txn = db.transaction((rooms: RoomSeed[]) => {
-    for (const room of rooms) {
-      insert.run(
+  // Tüm odaları tek transaction'da ekle (ALS: içerideki dbRun otomatik tx'e gider).
+  await dbTx(async () => {
+    for (const room of ROOMS) {
+      await dbRun(INSERT_ROOM, [
         nanoid(),
         room.code,
         room.name,
@@ -478,32 +478,29 @@ export async function seedRooms(): Promise<void> {
         room.theme,
         room.equipment,
         room.roomType,
-        room.specs
-      );
+        room.specs,
+      ]);
     }
   });
 
-  txn(ROOMS);
   console.log(`[SEED] ${ROOMS.length} oda eklendi.`);
 }
 
 export async function seedUsers(): Promise<void> {
-  const db = getDb();
-
   const existing = await dbOne('SELECT COUNT(*) as count FROM users', []) as { count: number };
   if (existing.count >= DEMO_USERS.length) {
     console.log(`[SEED] User'lar zaten yüklü (${existing.count}), atlanıyor.`);
     return;
   }
 
-  const insert = db.prepare(`
+  const INSERT_USER = `
     INSERT OR IGNORE INTO users (id, email, password_hash, full_name, department, title, manager, bio, governance_role)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  `;
 
   for (const u of DEMO_USERS) {
     const hash = await argon2.hash(u.password, ARGON2_OPTIONS);
-    insert.run(
+    await dbRun(INSERT_USER, [
       nanoid(),
       u.email,
       hash,
@@ -512,36 +509,32 @@ export async function seedUsers(): Promise<void> {
       u.title ?? null,
       u.manager ?? null,
       u.bio ?? null,
-      u.governanceRole ?? null
-    );
+      u.governanceRole ?? null,
+    ]);
   }
   console.log(`[SEED] ${DEMO_USERS.length} user eklendi.`);
 }
 
 export async function seedAdmins(): Promise<void> {
-  const db = getDb();
-
   const existing = await dbOne('SELECT COUNT(*) as count FROM admins', []) as { count: number };
   if (existing.count >= DEMO_ADMINS.length) {
     console.log(`[SEED] Admin'ler zaten yüklü (${existing.count}), atlanıyor.`);
     return;
   }
 
-  const insert = db.prepare(`
+  const INSERT_ADMIN = `
     INSERT OR IGNORE INTO admins (id, email, password_hash, full_name, role, governance_role)
     VALUES (?, ?, ?, ?, ?, ?)
-  `);
+  `;
 
   for (const a of DEMO_ADMINS) {
     const hash = await argon2.hash(a.password, ARGON2_OPTIONS);
-    insert.run(nanoid(), a.email, hash, a.fullName, a.role, a.governanceRole ?? null);
+    await dbRun(INSERT_ADMIN, [nanoid(), a.email, hash, a.fullName, a.role, a.governanceRole ?? null]);
   }
   console.log(`[SEED] ${DEMO_ADMINS.length} admin eklendi.`);
 }
 
 export async function seedBookings(): Promise<void> {
-  const db = getDb();
-
   const existing = await dbOne('SELECT COUNT(*) as count FROM bookings', []) as { count: number };
   if (existing.count > 0) {
     console.log(`[SEED] Booking'ler zaten yüklü (${existing.count}), atlanıyor.`);
@@ -557,7 +550,7 @@ export async function seedBookings(): Promise<void> {
   const userByEmail = new Map(users.map((u) => [u.email, u.id]));
   const roomByCode = new Map(rooms.map((r) => [r.code, r.id]));
 
-  const insert = db.prepare(`
+  const INSERT_BOOKING = `
     INSERT INTO bookings (
       id, user_id, room_id, period_months, start_date, end_date,
       project_name, project_description, help_needed, technologies,
@@ -565,7 +558,7 @@ export async function seedBookings(): Promise<void> {
       showcase_visible, showcase_highlight,
       created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  `;
 
   let inserted = 0;
   for (const b of BOOKINGS) {
@@ -593,7 +586,7 @@ export async function seedBookings(): Promise<void> {
     const showcaseVisible = b.status === 'approved' ? 1 : 0;
     const highlight = b.highlight && b.status === 'approved' ? 1 : 0;
 
-    insert.run(
+    await dbRun(INSERT_BOOKING, [
       nanoid(),
       userId,
       roomId,
@@ -613,7 +606,7 @@ export async function seedBookings(): Promise<void> {
       // created_at = start_date - 3 gün (talep oluşturulma zamanı)
       new Date(start.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
       reviewedAt ?? new Date(start.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    );
+    ]);
     inserted++;
   }
 
@@ -621,8 +614,6 @@ export async function seedBookings(): Promise<void> {
 }
 
 export async function seedShowcaseEngagement(): Promise<void> {
-  const db = getDb();
-
   const existing = await dbOne('SELECT COUNT(*) as count FROM showcase_likes', []) as { count: number };
   if (existing.count > 0) {
     console.log(`[SEED] Showcase engagement zaten yüklü (${existing.count}), atlanıyor.`);
@@ -634,8 +625,8 @@ export async function seedShowcaseEngagement(): Promise<void> {
   const users = await dbAll('SELECT id, full_name FROM users', []) as Array<{ id: string; full_name: string }>;
   if (approved.length === 0 || users.length === 0) return;
 
-  const likeInsert = db.prepare(`INSERT OR IGNORE INTO showcase_likes (id, booking_id, user_id) VALUES (?, ?, ?)`);
-  const commentInsert = db.prepare(`INSERT INTO showcase_comments (id, booking_id, user_id, user_full_name, body, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
+  const INSERT_LIKE = `INSERT OR IGNORE INTO showcase_likes (id, booking_id, user_id) VALUES (?, ?, ?)`;
+  const INSERT_COMMENT = `INSERT INTO showcase_comments (id, booking_id, user_id, user_full_name, body, created_at) VALUES (?, ?, ?, ?, ?, ?)`;
 
   const commentTemplates = [
     'Süper iş, denedik biz de — ekip çok beğendi!',
@@ -655,7 +646,7 @@ export async function seedShowcaseEngagement(): Promise<void> {
     // Her approved booking için 2-6 random like
     const likeUsers = users.sort(() => Math.random() - 0.5).slice(0, 2 + Math.floor(Math.random() * 5));
     for (const u of likeUsers) {
-      const r = likeInsert.run(nanoid(), booking.id, u.id);
+      const r = await dbRun(INSERT_LIKE, [nanoid(), booking.id, u.id]);
       if (r.changes > 0) likeCount++;
     }
     // Her approved booking için 1-3 random comment
@@ -664,7 +655,7 @@ export async function seedShowcaseEngagement(): Promise<void> {
       const body = commentTemplates[Math.floor(Math.random() * commentTemplates.length)];
       const daysAgo = Math.floor(Math.random() * 14);
       const createdAt = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
-      commentInsert.run(nanoid(), booking.id, u.id, u.full_name, body, createdAt);
+      await dbRun(INSERT_COMMENT, [nanoid(), booking.id, u.id, u.full_name, body, createdAt]);
       commentCount++;
     }
   }
@@ -980,14 +971,13 @@ function demoGateScore(key: GateKey): number | null {
   }
 }
 
-function seedLifecycle(
-  db: ReturnType<typeof getDb>,
+async function seedLifecycle(
   requestId: string,
   level: GovernanceLevel,
   targetStage: 'development' | 'stage' | 'production' | 'live',
   reviewerId: string | null,
   createdAtMs: number
-): void {
+): Promise<void> {
   const rank = STAGE_RANK[targetStage];
   const nowMs = Date.now();
   const span = Math.max(nowMs - createdAtMs, 4 * 86400_000);
@@ -1002,22 +992,16 @@ function seedLifecycle(
     'live',
   ];
 
-  const insertEvent = db.prepare(
-    `INSERT INTO project_stage_events
+  const INSERT_EVENT = `INSERT INTO project_stage_events
        (id, request_id, from_stage, to_stage, actor_id, actor_type, note, created_at)
-     VALUES (?, ?, ?, ?, ?, 'admin', ?, ?)`
-  );
-  const insertGate = db.prepare(
-    `INSERT OR IGNORE INTO quality_gates
+     VALUES (?, ?, ?, ?, ?, 'admin', ?, ?)`;
+  const INSERT_GATE = `INSERT OR IGNORE INTO quality_gates
        (id, request_id, gate_key, status, score, threshold, evaluated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
-  const insertApproval = db.prepare(
-    `INSERT INTO human_approvals
+     VALUES (?, ?, ?, ?, ?, ?, ?)`;
+  const INSERT_APPROVAL = `INSERT INTO human_approvals
        (id, request_id, approval_type, decision, approver_id,
         release_note, risk_assessment, decided_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
   // Aşama geçiş olayları (application → ... → targetStage)
   const notes: Record<string, string> = {
@@ -1027,40 +1011,41 @@ function seedLifecycle(
     live: 'Production onayı alındı — proje canlıya alındı.',
   };
   for (let i = 1; i <= rank; i++) {
-    insertEvent.run(
+    await dbRun(INSERT_EVENT, [
       nanoid(),
       requestId,
       stages[i - 1],
       stages[i],
       reviewerId,
       notes[stages[i]] ?? null,
-      at(i - 1)
-    );
+      at(i - 1),
+    ]);
   }
 
   // Kalite kapıları — development'ta karışık, stage+'da hepsi yeşil.
   const gates = applicableGates(level);
-  gates.forEach((key, idx) => {
+  for (let idx = 0; idx < gates.length; idx++) {
+    const key = gates[idx];
     let status: 'pending' | 'passed' | 'failed' = 'passed';
     if (rank === 1) {
       // Geliştirme aşaması: son kapı henüz beklemede (panel ilerleme gösterir).
       status = idx >= gates.length - 1 ? 'pending' : 'passed';
     }
-    insertGate.run(
+    await dbRun(INSERT_GATE, [
       nanoid(),
       requestId,
       key,
       status,
       status === 'passed' ? demoGateScore(key) : null,
       GATE_DEFINITIONS[key].threshold,
-      status === 'pending' ? null : at(0)
-    );
-  });
+      status === 'pending' ? null : at(0),
+    ]);
+  }
 
   // İnsan onayları
   if (rank >= STAGE_RANK.stage) {
     const decided = rank >= STAGE_RANK.production;
-    insertApproval.run(
+    await dbRun(INSERT_APPROVAL, [
       nanoid(),
       requestId,
       'stage',
@@ -1069,12 +1054,12 @@ function seedLifecycle(
       decided ? 'Stage ortamı incelendi, smoke testler yeşil.' : null,
       decided ? 'Düşük risk — geri alma planı hazır.' : null,
       decided ? at(1) : null,
-      at(1)
-    );
+      at(1),
+    ]);
   }
   if (rank >= STAGE_RANK.production) {
     const decided = rank >= STAGE_RANK.live;
-    insertApproval.run(
+    await dbRun(INSERT_APPROVAL, [
       nanoid(),
       requestId,
       'production',
@@ -1083,13 +1068,12 @@ function seedLifecycle(
       decided ? 'Release notu onaylandı, blue-green dağıtım planlandı.' : null,
       decided ? 'Risk değerlendirmesi tamamlandı.' : null,
       decided ? at(2) : null,
-      at(2)
-    );
+      at(2),
+    ]);
   }
 }
 
 export async function seedLicenseRequests(): Promise<void> {
-  const db = getDb();
   const existing = await dbOne('SELECT COUNT(*) as count FROM license_requests', []) as { count: number };
   if (existing.count > 0) {
     console.log(`[SEED] Lisans talepleri zaten yüklü (${existing.count}), atlanıyor.`);
@@ -1101,7 +1085,7 @@ export async function seedLicenseRequests(): Promise<void> {
   const reviewerId = admins[0]?.id ?? null;
   const userByEmail = new Map(users.map((u) => [u.email, u.id]));
 
-  const insert = db.prepare(`
+  const INSERT_LICENSE = `
     INSERT INTO license_requests (
       id, user_id, license_key, license_name, vendor, category,
       reason, duration_months,
@@ -1112,12 +1096,12 @@ export async function seedLicenseRequests(): Promise<void> {
       status, admin_feedback,
       reviewed_by, reviewed_at, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const insertItem = db.prepare(`
+  `;
+  const INSERT_LICENSE_ITEM = `
     INSERT INTO license_request_items
       (id, request_id, license_key, license_name, vendor, category, item_order)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
+  `;
 
   let count = 0;
   await dbTx(async () => {
@@ -1144,7 +1128,7 @@ export async function seedLicenseRequests(): Promise<void> {
       const stageEnteredAt = targetStage ? reviewedAt : null;
 
       const id = nanoid();
-      insert.run(
+      await dbRun(INSERT_LICENSE, [
         id,
         userId,
         r.licenseKey,
@@ -1171,8 +1155,8 @@ export async function seedLicenseRequests(): Promise<void> {
         isReviewed ? reviewerId : null,
         reviewedAt,
         createdAt,
-        reviewedAt ?? createdAt
-      );
+        reviewedAt ?? createdAt,
+      ]);
 
       // license_request_items — birincil araç (item_order 0) + ek araçlar.
       const tools: LicenseToolSeed[] = [
@@ -1184,21 +1168,22 @@ export async function seedLicenseRequests(): Promise<void> {
         },
         ...(r.extraTools ?? []),
       ];
-      tools.forEach((t, idx) => {
-        insertItem.run(
+      for (let idx = 0; idx < tools.length; idx++) {
+        const t = tools[idx];
+        await dbRun(INSERT_LICENSE_ITEM, [
           nanoid(),
           id,
           t.licenseKey,
           t.licenseName,
           t.vendor ?? null,
           t.category ?? null,
-          idx
-        );
-      });
+          idx,
+        ]);
+      }
 
       // Onaylı projeler için yaşam döngüsü (kapı/onay/olay).
       if (targetStage) {
-        seedLifecycle(db, id, level, targetStage, reviewerId, createdAtMs);
+        await seedLifecycle(id, level, targetStage, reviewerId, createdAtMs);
       }
 
       count++;
@@ -1233,7 +1218,6 @@ const WAITLIST_ENTRIES: WaitlistSeed[] = [
 ];
 
 export async function seedWaitlist(): Promise<void> {
-  const db = getDb();
   const existing = await dbOne('SELECT COUNT(*) as count FROM waitlist', []) as { count: number };
   if (existing.count > 0) {
     console.log(`[SEED] Bekleme listesi zaten yüklü (${existing.count}), atlanıyor.`);
@@ -1245,13 +1229,13 @@ export async function seedWaitlist(): Promise<void> {
   const userByEmail = new Map(users.map((u) => [u.email, u.id]));
   const roomByCode = new Map(rooms.map((r) => [r.code, r.id]));
 
-  const insert = db.prepare(`
+  const INSERT_WAITLIST = `
     INSERT INTO waitlist (
       id, user_id, room_id, period_months, desired_start_date,
       project_name, project_description, help_needed, technologies,
       position, status, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?)
-  `);
+  `;
 
   // Oda bazında position sayacı.
   const positionByRoom = new Map<string, number>();
@@ -1265,7 +1249,7 @@ export async function seedWaitlist(): Promise<void> {
       positionByRoom.set(roomId, pos);
       const createdAt = new Date(Date.now() - w.daysAgoJoined * 86400000).toISOString();
       const desiredStart = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-      insert.run(
+      await dbRun(INSERT_WAITLIST, [
         nanoid(),
         userId,
         roomId,
@@ -1277,8 +1261,8 @@ export async function seedWaitlist(): Promise<void> {
         JSON.stringify(['Python', 'FastAPI']),
         pos,
         createdAt,
-        createdAt
-      );
+        createdAt,
+      ]);
       count++;
     }
   });
@@ -1355,7 +1339,6 @@ const NOTIFICATIONS: NotificationSeed[] = [
 ];
 
 export async function seedNotifications(): Promise<void> {
-  const db = getDb();
   const existing = await dbOne('SELECT COUNT(*) as count FROM notifications', []) as {
     count: number;
   };
@@ -1377,11 +1360,11 @@ export async function seedNotifications(): Promise<void> {
     ...admins.map((a) => [a.email, a.id] as const),
   ]);
 
-  const insert = db.prepare(`
+  const INSERT_NOTIFICATION = `
     INSERT INTO notifications
       (id, recipient_id, recipient_type, category, title, body, link, read, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  `;
 
   let count = 0;
   for (const n of NOTIFICATIONS) {
@@ -1390,7 +1373,7 @@ export async function seedNotifications(): Promise<void> {
     const createdAt = new Date(
       Date.now() - (n.hoursAgo ?? 1) * 60 * 60 * 1000
     ).toISOString();
-    insert.run(
+    await dbRun(INSERT_NOTIFICATION, [
       nanoid(),
       recipientId,
       n.recipientType,
@@ -1399,8 +1382,8 @@ export async function seedNotifications(): Promise<void> {
       n.body,
       n.link ?? null,
       n.read ? 1 : 0,
-      createdAt
-    );
+      createdAt,
+    ]);
     count++;
   }
 

@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   console.log('==============================================\n');
 
   console.log('[DB] Schema oluşturuluyor...');
-  initSchema();
+  await initSchema();
   console.log('[DB] Schema hazır.\n');
 
   console.log('[DB] Seed data yükleniyor...');
@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   console.log('User : user@klab.test / Demo1234!Pass');
   console.log('Admin: admin@klab.test / Admin1234!Pass');
 
-  closeDb();
+  await closeDb();
 }
 
 main().catch((err) => {
