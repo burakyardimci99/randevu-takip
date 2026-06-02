@@ -5,13 +5,25 @@ import { api } from '../services/api';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import type { Visual } from '../types';
 
-const THEME_SUGGESTIONS = [
-  'corporate clean blue-white',
-  'cyberpunk neon',
-  'watercolor pastel',
-  'minimal monochrome',
-  'isometric 3D',
-  'Studio Ghibli warm',
+// Türkçe etiket (kullanıcıya görünen) + İngilizce prompt (flux/Pollinations
+// İngilizce'de çok daha kaliteli sonuç verir). Butona tıklayınca prompt tema'ya set.
+const THEME_SUGGESTIONS: Array<{ label: string; prompt: string }> = [
+  { label: 'Kurumsal Mavi-Beyaz', prompt: 'corporate clean blue and white, professional' },
+  { label: 'Siberpunk Neon', prompt: 'cyberpunk neon, vibrant glow' },
+  { label: 'Suluboya Pastel', prompt: 'soft watercolor, pastel colors' },
+  { label: 'Minimal Tek Renk', prompt: 'minimal monochrome, clean lines' },
+  { label: 'İzometrik 3B', prompt: 'isometric 3D render, soft shadows' },
+  { label: 'Sıcak Anime', prompt: 'Studio Ghibli style, warm anime illustration' },
+  { label: 'Fotogerçekçi', prompt: 'photorealistic, highly detailed, 8k' },
+  { label: 'Düz Vektör', prompt: 'flat vector illustration, simple shapes' },
+  { label: 'Retro 80’ler', prompt: 'retro 1980s synthwave aesthetic' },
+  { label: 'Sinematik Altın Saat', prompt: 'cinematic golden hour lighting, dramatic' },
+  { label: 'Karakalem Eskiz', prompt: 'detailed pencil sketch, hand drawn' },
+  { label: 'Neon Karanlık', prompt: 'dark moody background, neon accents' },
+  { label: 'Doğa Organik', prompt: 'organic nature, botanical, green tones' },
+  { label: 'Teknoloji Devre', prompt: 'futuristic circuit board, high tech' },
+  { label: 'Düşük Poli', prompt: 'low poly geometric art, colorful' },
+  { label: 'Altın Lüks', prompt: 'luxury gold and black, elegant' },
 ];
 
 export default function VisualGenerator() {
@@ -133,12 +145,13 @@ export default function VisualGenerator() {
             <div className="flex flex-wrap gap-1.5 mt-2">
               {THEME_SUGGESTIONS.map((t) => (
                 <button
-                  key={t}
+                  key={t.label}
                   type="button"
-                  onClick={() => setTema(t)}
+                  onClick={() => setTema(t.prompt)}
                   className="px-2.5 py-1 rounded-md text-xs font-semibold border bg-white text-kt-green-700 border-kt-gray-200 hover:border-kt-violet-300 transition-colors"
+                  title={t.prompt}
                 >
-                  {t}
+                  {t.label}
                 </button>
               ))}
             </div>
