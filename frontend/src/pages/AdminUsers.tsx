@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { useViewerKind } from '../hooks/useViewerKind';
 import { useToast } from '../components/Toast';

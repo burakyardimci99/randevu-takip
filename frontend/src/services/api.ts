@@ -59,6 +59,7 @@ import type {
   DuplicateMatch,
   Leaderboard,
   RoomHeatmap,
+  RoomApptHeatmap,
   KioskRoom,
   KioskData,
   StageEvent,
@@ -981,9 +982,11 @@ export const api = {
 
   /* ============ SHOWCASE LIKES & COMMENTS ============ */
 
-  async getLikeStatus(bookingId: string) {
-    return request<LikeStatus>(`/user/showcase/${encodeURIComponent(bookingId)}/likes`, {
-      kind: 'user',
+  // Okuma — rol-bağımsız (/api/showcase). Aktif oturumun kind'ı geçilir; admin
+  // dahil her rol beğeni/yorum GÖREBİLİR (envanterde "giriş yap" sorunu çözümü).
+  async getLikeStatus(bookingId: string, kind: SubjectKind = 'user') {
+    return request<LikeStatus>(`/showcase/${encodeURIComponent(bookingId)}/likes`, {
+      kind,
     });
   },
 
@@ -994,10 +997,10 @@ export const api = {
     });
   },
 
-  async listComments(bookingId: string) {
+  async listComments(bookingId: string, kind: SubjectKind = 'user') {
     return request<{ comments: ShowcaseComment[] }>(
-      `/user/showcase/${encodeURIComponent(bookingId)}/comments`,
-      { kind: 'user' }
+      `/showcase/${encodeURIComponent(bookingId)}/comments`,
+      { kind }
     );
   },
 
@@ -1037,6 +1040,15 @@ export const api = {
     if (params?.to) qs.set('to', params.to);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     return request<RoomHeatmap>(`/user/rooms/heatmap${suffix}`, { kind: 'user' });
+  },
+
+  /** Appointment (saatli) ısı-haritası — oda × gün, saat detaylı (#5). */
+  async roomAppointmentHeatmap(params?: { from?: string; to?: string }) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set('from', params.from);
+    if (params?.to) qs.set('to', params.to);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request<RoomApptHeatmap>(`/user/rooms/appointment-heatmap${suffix}`, { kind: 'user' });
   },
 
   /** Kiosk seçici — aktif odalar (public). */

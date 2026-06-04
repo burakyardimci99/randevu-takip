@@ -503,35 +503,6 @@ export default function AdminDashboard() {
 
         {/* SAĞ: SIDEBAR — son aktivite */}
         <aside className="space-y-6">
-          {/* Hızlı eylem */}
-          <div className="relative overflow-hidden rounded-2xl bg-white border border-kt-gray-100 p-5">
-            {/* Sol kenar amber accent */}
-            <span
-              aria-hidden="true"
-              className="absolute left-0 top-5 bottom-5 w-[3px] rounded-r-full bg-amber-500"
-            />
-            <div className="flex items-start gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.25" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                </svg>
-              </div>
-              <div>
-                <h3 className="font-bold text-kt-green-900">Hızlı Karar</h3>
-                <p className="text-xs text-kt-gray-500">Bekleyen talepler için hızlı erişim</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setFilter('pending')}
-              className="w-full text-left p-3 rounded-xl bg-kt-gray-50 hover:bg-kt-gray-100 transition-colors border border-kt-gray-100 hover:border-kt-gray-200 flex items-center justify-between"
-            >
-              <span className="text-sm font-semibold text-kt-green-900">{pendingCount} talep incele</span>
-              <svg className="w-4 h-4 text-kt-gray-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
-              </svg>
-            </button>
-          </div>
-
           {/* Son aktivite */}
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4">

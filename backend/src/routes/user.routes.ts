@@ -30,6 +30,7 @@ import {
 import {
   cancelAppointment,
   createAppointment,
+  getRoomAppointmentHeatmap,
   listBookingAppointments,
   listUserAppointments,
 } from '../services/appointment.service';
@@ -378,6 +379,18 @@ router.get('/rooms/heatmap', async (req: Request, res: Response, next: NextFunct
     const from = typeof req.query.from === 'string' ? req.query.from : undefined;
     const to = typeof req.query.to === 'string' ? req.query.to : undefined;
     res.json(await getRoomWeekdayHeatmap({ from, to }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ===== ODA × GÜN APPOINTMENT (SAATLİ) ISI-HARİTASI (#5) ===== */
+
+router.get('/rooms/appointment-heatmap', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const from = typeof req.query.from === 'string' ? req.query.from : undefined;
+    const to = typeof req.query.to === 'string' ? req.query.to : undefined;
+    res.json(await getRoomAppointmentHeatmap({ from, to }));
   } catch (err) {
     next(err);
   }

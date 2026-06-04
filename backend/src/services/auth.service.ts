@@ -219,8 +219,9 @@ export async function registerUser(input: RegisterInput): Promise<{ id: string; 
       passwordHash,
       input.fullName.trim()]);
   } catch (err) {
-    // UNIQUE constraint çakışması (yarış durumu) — yine generic mesaj
-    if ((err as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
+    // UNIQUE constraint çakışması (yarış durumu) — yine generic mesaj.
+    // PostgreSQL unique_violation SQLSTATE kodu: 23505 (#7 — pg-only).
+    if ((err as { code?: string }).code === '23505') {
       throw new HttpError(409, GENERIC_REGISTER_ERROR, 'EMAIL_TAKEN');
     }
     throw err;

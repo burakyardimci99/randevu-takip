@@ -52,7 +52,17 @@ function scrub(obj: unknown, depth = 0): unknown {
   return result;
 }
 
-const scrubFormat = winston.format((info) => scrub(info) as winston.Logform.TransformableInfo)();
+// info'nun kimliğini KORU: winston, log seviyesini/mesajını `info` üzerindeki
+// Symbol(level)/Symbol(message) anahtarlarında tutar. Yeni bir düz nesne döndürmek
+// (Object.entries Symbol'leri kopyalamaz) bu Symbol'leri düşürür ve transport TÜM
+// log satırlarını sessizce yutar. Bu yüzden yalnızca string-anahtarlı alanları
+// yerinde temizleyip aynı `info` referansını döndürüyoruz.
+const scrubFormat = winston.format((info) => {
+  for (const key of Object.keys(info)) {
+    info[key] = sanitizeKey(key) ? '[REDACTED]' : scrub(info[key]);
+  }
+  return info;
+})();
 
 export const logger = winston.createLogger({
   level: config.logLevel,

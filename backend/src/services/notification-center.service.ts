@@ -22,7 +22,11 @@ export type NotificationCategory =
   | 'message'
   | 'system';
 
-export type RecipientType = 'user' | 'admin';
+// Bildirim alıcı bağlamı. Rol-izolasyonu: her görüntüleme rolü YALNIZ kendi
+// recipient_type'ındaki bildirimleri görür (danışman/arge user'ın kişisel
+// bildirimlerini GÖRMEZ). NOT: şu an INSERT yalnız 'user'/'admin' için yapılır
+// (schema CHECK); 'danisman'/'arge' okuma-kapsamı olarak kullanılır (izolasyon).
+export type RecipientType = 'user' | 'admin' | 'danisman' | 'arge';
 
 export interface Notification {
   id: string;

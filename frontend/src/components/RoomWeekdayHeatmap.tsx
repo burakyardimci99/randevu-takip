@@ -1,67 +1,117 @@
 /**
- * Oda × haftanın günü müsaitlik ısı-haritası (#5c).
+ * Oda × gün doluluk ısı-haritası — APPOINTMENT (saatli randevu) tabanlı (#5/#6).
  *
- * Gün-bazlı booking modelinin (weekday_mask) doğal görselleştirmesi: hangi oda
- * hangi günler yoğun. Kendi tarih aralığı filtresi var (takvim filtresi üstüne).
- * Renk yoğunluğu = o gün o odayı kapsayan aktif booking sayısı / maxCount.
+ *  - Haftalık görünüm (Pzt–Paz); ‹ Bugün › butonlarıyla hafta ileri/geri (#6).
+ *  - Hücre = o gün o odadaki randevu sayısı; renk yoğunluğu sayı/maks oranı.
+ *  - Hücreye tıklayınca o odanın o gün HANGİ SAATLERDE dolu olduğu açılır (#5).
+ *  - Realtime: randevu eklenince/iptal olunca ısı haritası otomatik yenilenir (#5).
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../services/api';
-import type { RoomHeatmap } from '../types';
+import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
+import type { ApptHeatmapDay, ApptHeatmapRoom, RoomApptHeatmap, SubjectKind } from '../types';
 
 const DAY_LABELS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
 
-function todayYmd(): string {
-  return new Date().toISOString().slice(0, 10);
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-function plusDaysYmd(base: string, days: number): string {
-  return new Date(new Date(`${base}T00:00:00Z`).getTime() + days * 86400000)
-    .toISOString()
-    .slice(0, 10);
+/** Verilen tarihin içinde bulunduğu haftanın Pazartesi'si (yerel). */
+function mondayOf(d: Date): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const off = (x.getDay() + 6) % 7; // Pzt=0
+  x.setDate(x.getDate() - off);
+  return x;
+}
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+function fmtHM(iso: string): string {
+  return new Date(iso).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
 }
 
-/** count/max oranına göre hücre rengi (cyan/yeşil yoğunluk). */
+/** count/max oranına göre hücre rengi (cyan yoğunluk). */
 function cellStyle(count: number, max: number): { backgroundColor: string; color: string } {
   if (count === 0 || max === 0) {
-    return { backgroundColor: 'rgb(241 245 249)', color: 'rgb(148 163 184)' }; // slate-100 / slate-400
+    return { backgroundColor: 'rgb(241 245 249)', color: 'rgb(148 163 184)' };
   }
-  const t = count / max; // 0..1
-  // açık cyan → koyu cyan
+  const t = count / max;
   const alpha = 0.18 + t * 0.82;
   return {
-    backgroundColor: `rgba(8, 145, 178, ${alpha})`, // cyan-600 tabanlı
+    backgroundColor: `rgba(8, 145, 178, ${alpha})`,
     color: t > 0.5 ? 'white' : 'rgb(15 23 42)',
   };
 }
 
-export function RoomWeekdayHeatmap() {
-  const [from, setFrom] = useState<string>(() => todayYmd());
-  const [to, setTo] = useState<string>(() => plusDaysYmd(todayYmd(), 30));
-  const [data, setData] = useState<RoomHeatmap | null>(null);
-  const [loading, setLoading] = useState(true);
+interface SelectedCell {
+  room: ApptHeatmapRoom;
+  day: ApptHeatmapDay;
+}
 
-  useEffect(() => {
-    let cancelled = false;
+export function RoomWeekdayHeatmap({ kind = 'user' }: { kind?: SubjectKind }) {
+  const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
+  const [data, setData] = useState<RoomApptHeatmap | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<SelectedCell | null>(null);
+
+  const from = ymd(weekStart);
+  const to = ymd(addDays(weekStart, 6));
+
+  const load = useCallback(async () => {
     setLoading(true);
-    (async () => {
-      try {
-        const res = await api.roomHeatmap({ from, to });
-        if (!cancelled) setData(res);
-      } catch {
-        if (!cancelled) setData(null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const res = await api.roomAppointmentHeatmap({ from, to });
+      setData(res);
+    } catch {
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
   }, [from, to]);
 
-  const busiest = useMemo(() => {
-    if (!data) return null;
-    return [...data.rooms].sort((a, b) => b.total - a.total)[0] ?? null;
-  }, [data]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Randevu değişimlerinde otomatik yenile (#5).
+  useRealtimeEvents(kind, (type) => {
+    if (type.startsWith('appointment.') || type === 'booking.reviewed') void load();
+  });
+
+  // Açık detay paneli stale kalmasın: veri yenilenince seçili hücreyi tazele.
+  useEffect(() => {
+    if (!selected || !data) return;
+    const room = data.rooms.find((r) => r.roomId === selected.room.roomId);
+    const day = room?.days.find((d) => d.date === selected.day.date);
+    if (room && day) setSelected({ room, day });
+    else setSelected(null);
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Detay modalı Escape ile kapansın.
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelected(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected]);
+
+  const weekLabel = useMemo(() => {
+    const s = weekStart;
+    const e = addDays(weekStart, 6);
+    const f = (d: Date) => d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
+    return `${f(s)} – ${f(e)} ${e.getFullYear()}`;
+  }, [weekStart]);
+
+  const isThisWeek = ymd(weekStart) === ymd(mondayOf(new Date()));
+  const todayStr = ymd(new Date());
+  const weekDates = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => ymd(addDays(weekStart, i))),
+    [weekStart]
+  );
 
   return (
     <div className="card p-5">
@@ -69,36 +119,39 @@ export function RoomWeekdayHeatmap() {
         <div>
           <h2 className="text-lg font-bold text-kt-green-900">Oda Yoğunluk Isı-Haritası</h2>
           <p className="text-[11px] text-kt-gray-500">
-            Oda × haftanın günü — seçili aralıkta hangi gün ne kadar dolu.
-            {busiest && (
-              <>
-                {' '}
-                En yoğun: <span className="font-semibold text-kt-green-800">{busiest.name}</span>.
-              </>
-            )}
+            Oda × gün — seçili haftada hangi gün kaç randevu var. Bir hücreye tıklayıp
+            o odanın o gün hangi saatlerde dolu olduğunu gör.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs">
-          <label className="flex items-center gap-1">
-            <span className="text-kt-gray-500">Başlangıç</span>
-            <input
-              type="date"
-              value={from}
-              max={to}
-              onChange={(e) => setFrom(e.target.value)}
-              className="input py-1 px-2 text-xs w-[130px]"
-            />
-          </label>
-          <label className="flex items-center gap-1">
-            <span className="text-kt-gray-500">Bitiş</span>
-            <input
-              type="date"
-              value={to}
-              min={from}
-              onChange={(e) => setTo(e.target.value)}
-              className="input py-1 px-2 text-xs w-[130px]"
-            />
-          </label>
+        {/* Hafta gezinme (#6) */}
+        <div className="flex items-center gap-1.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setWeekStart((w) => addDays(w, -7))}
+            className="btn-ghost text-sm px-2 py-1"
+            aria-label="Önceki hafta"
+          >
+            ‹
+          </button>
+          <span className="font-semibold text-kt-green-800 tabular-nums whitespace-nowrap min-w-[150px] text-center">
+            {weekLabel}
+          </span>
+          <button
+            type="button"
+            onClick={() => setWeekStart((w) => addDays(w, 7))}
+            className="btn-ghost text-sm px-2 py-1"
+            aria-label="Sonraki hafta"
+          >
+            ›
+          </button>
+          <button
+            type="button"
+            onClick={() => setWeekStart(mondayOf(new Date()))}
+            disabled={isThisWeek}
+            className="btn-secondary text-xs px-2 py-1 disabled:opacity-40"
+          >
+            Bu hafta
+          </button>
         </div>
       </div>
 
@@ -114,16 +167,21 @@ export function RoomWeekdayHeatmap() {
                 <th className="text-left text-[11px] font-semibold text-kt-gray-500 px-2 sticky left-0 bg-white">
                   Oda
                 </th>
-                {DAY_LABELS.map((d, i) => (
-                  <th
-                    key={d}
-                    className={`text-center text-[11px] font-semibold px-1 ${
-                      i >= 5 ? 'text-kt-gray-400' : 'text-kt-gray-600'
-                    }`}
-                  >
-                    {d}
-                  </th>
-                ))}
+                {weekDates.map((d, i) => {
+                  const dayNum = d.slice(8, 10);
+                  const isToday = d === todayStr;
+                  return (
+                    <th
+                      key={d}
+                      className={`text-center text-[11px] font-semibold px-1 ${i >= 5 ? 'text-kt-gray-400' : 'text-kt-gray-600'}`}
+                    >
+                      <div>{DAY_LABELS[i]}</div>
+                      <div className={isToday ? 'text-cyan-700 font-bold' : 'text-kt-gray-400 font-normal'}>
+                        {dayNum}
+                      </div>
+                    </th>
+                  );
+                })}
                 <th className="text-center text-[11px] font-semibold text-kt-gray-500 px-1">Σ</th>
               </tr>
             </thead>
@@ -135,15 +193,27 @@ export function RoomWeekdayHeatmap() {
                   </td>
                   {room.days.map((cell) => {
                     const st = cellStyle(cell.count, data.maxCount);
+                    const active = cell.count > 0;
+                    const isSel =
+                      selected?.room.roomId === room.roomId && selected?.day.date === cell.date;
                     return (
-                      <td key={cell.weekday} className="p-0">
-                        <div
-                          className="w-9 h-9 rounded-md flex items-center justify-center text-[11px] font-bold tabular-nums mx-auto"
+                      <td key={cell.date} className="p-0">
+                        <button
+                          type="button"
+                          disabled={!active}
+                          onClick={() => setSelected({ room, day: cell })}
                           style={st}
-                          title={`${room.name} · ${DAY_LABELS[cell.weekday - 1]}: ${cell.count} aktif booking`}
+                          className={`w-9 h-9 rounded-md flex items-center justify-center text-[11px] font-bold tabular-nums mx-auto transition ${
+                            active ? 'cursor-pointer hover:ring-2 hover:ring-cyan-400' : 'cursor-default'
+                          } ${isSel ? 'ring-2 ring-cyan-600' : ''}`}
+                          title={
+                            active
+                              ? `${room.name} · ${cell.date}: ${cell.count} randevu — saatleri görmek için tıkla`
+                              : `${room.name} · ${cell.date}: randevu yok`
+                          }
                         >
-                          {cell.count > 0 ? cell.count : ''}
-                        </div>
+                          {active ? cell.count : ''}
+                        </button>
                       </td>
                     );
                   })}
@@ -163,14 +233,64 @@ export function RoomWeekdayHeatmap() {
           <span>Az</span>
           <div className="flex gap-1">
             {[0, 0.25, 0.5, 0.75, 1].map((t) => (
-              <div
-                key={t}
-                className="w-5 h-5 rounded"
-                style={cellStyle(Math.round(t * data.maxCount), data.maxCount)}
-              />
+              <div key={t} className="w-5 h-5 rounded" style={cellStyle(Math.round(t * data.maxCount), data.maxCount)} />
             ))}
           </div>
           <span>Yoğun (maks {data.maxCount})</span>
+        </div>
+      )}
+
+      {/* Hücre detayı — o oda/gün hangi saatlerde dolu (#5) */}
+      {selected && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/60 backdrop-blur-sm animate-fade-in"
+          onClick={() => setSelected(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-kt-card max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-kt-gray-100 bg-gradient-to-r from-cyan-600 to-cyan-700 text-white flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-wider opacity-90">Dolu saatler</div>
+                <h3 className="text-lg font-bold">
+                  <span className="font-mono opacity-90">{selected.room.code}</span> {selected.room.name}
+                </h3>
+                <div className="text-xs opacity-90 mt-0.5">
+                  {new Date(`${selected.day.date}T00:00:00`).toLocaleDateString('tr-TR', {
+                    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
+                  })}{' '}· {selected.day.count} randevu
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelected(null)}
+                className="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 flex items-center justify-center shrink-0"
+                aria-label="Kapat"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto scrollbar-thin p-4 space-y-2">
+              {selected.day.slots.length === 0 ? (
+                <div className="text-sm text-kt-gray-500 italic py-2">Bu gün için randevu yok.</div>
+              ) : (
+                [...selected.day.slots]
+                  .sort((a, b) => a.start.localeCompare(b.start))
+                  .map((s, i) => (
+                    <div key={i} className="flex items-center gap-3 border border-cyan-200 bg-cyan-50/50 rounded-lg p-2.5">
+                      <div className="text-sm font-bold text-cyan-800 tabular-nums whitespace-nowrap">
+                        {fmtHM(s.start)}–{fmtHM(s.end)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-kt-green-900 truncate">{s.title}</div>
+                        {s.user && <div className="text-[11px] text-kt-gray-500 truncate">{s.user}</div>}
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { ProfilePhotoUpload } from '../components/ProfilePhotoUpload';
 import { useToast } from '../components/Toast';
@@ -8,9 +7,6 @@ import type { ProfileUpdatePayload, UserProfile } from '../types';
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
-}
-function initials(name: string): string {
-  return name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
 }
 
 export default function Profile() {

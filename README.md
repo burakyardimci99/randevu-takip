@@ -1,6 +1,6 @@
 # Kuveyt Türk AI Lab · Oda Kiralama Sistemi
 
-Bankacılık güvenlik standartlarına uygun (app_security.md & data_security.md) demo amaçlı bir oda kiralama / randevu uygulaması.
+Bankacılık güvenlik standartlarına uygun (docs/security/app_security.md & docs/security/data_security.md) demo amaçlı bir oda kiralama / randevu uygulaması.
 
 İstanbul'un 25 farklı ilçesindeki AI Lab odalarını kullanıcıların 1, 2 veya 3 aylık periyotlarla kiralayabildiği, **vibe coding** proje fikirlerini sunduğu; admin'in onayladığı / reddettiği / düzeltme istediği bir sistem.
 
@@ -11,7 +11,7 @@ Bankacılık güvenlik standartlarına uygun (app_security.md & data_security.md
 │  Frontend        │         │  Backend                     │
 │  React + Vite    │  HTTPS  │  Express + TypeScript        │
 │  Tailwind CSS    │ ───────►│  RS256 JWT (User/Admin AYRI) │
-│  React Router    │         │  better-sqlite3              │
+│  React Router    │         │  PostgreSQL (pg)             │
 └──────────────────┘         │  Helmet · Rate Limit · CORS  │
                              │  Argon2id · Audit Log        │
                              └──────────────────────────────┘
@@ -137,7 +137,7 @@ Claude Code projeyi açtığında `.mcp.json`'u otomatik yükler. Onay penceresi
 Aşağıdaki kalemler **mutlaka** production'a geçmeden tamamlanmalı:
 
 - [ ] Keyleri **HashiCorp Vault / AWS KMS / Azure Key Vault**'tan al (data_security §1).
-- [ ] SQLite yerine PostgreSQL + connection pooling.
+- [x] PostgreSQL + connection pooling (pg Pool, #7 — SQLite kaldırıldı).
 - [ ] Token saklamayı `HttpOnly + Secure + SameSite=Strict` cookie'ye taşı; XSS yüzeyini küçült (app_security §6).
 - [ ] CSP'yi sıkılaştır, `'unsafe-inline'` kaldırılsın; nonce kullan.
 - [ ] HTTPS terminasyonu + HSTS preload.

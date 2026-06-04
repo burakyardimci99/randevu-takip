@@ -21,7 +21,7 @@ interface MaintenanceConfig {
   auditRetentionDays: number;
   /** audit_logs hacim sınırı — en yeni N kayıt tutulur (yaştan bağımsız şişme koruması). 0 = sınırsız. */
   auditMaxRows: number;
-  /** Silme sonrası VACUUM çalıştır (DELETE tek başına dosyayı küçültmez). */
+  /** Silme sonrası VACUUM çalıştır (ölü tuple alanını geri kazanır). */
   vacuumOnPrune: boolean;
   /** Cron periyodu (ms). */
   intervalMs: number;
@@ -38,7 +38,7 @@ const DEFAULT_CONFIG: MaintenanceConfig = {
   refreshTokenGraceDays: 30,
   // data_security §11 — bankacılık tipik 1 yıl; ortamına göre AUDIT_RETENTION_DAYS ile kısalt.
   auditRetentionDays: envInt('AUDIT_RETENTION_DAYS', 365),
-  // Hacim güvenliği: yüksek log üretiminde SQLite'ın şişmesini önler.
+  // Hacim güvenliği: yüksek log üretiminde audit_logs tablosunun şişmesini önler.
   auditMaxRows: envInt('AUDIT_MAX_ROWS', 200_000),
   vacuumOnPrune: process.env.AUDIT_VACUUM !== 'false',
   intervalMs: 6 * 60 * 60 * 1000, // 6 saat
@@ -80,7 +80,7 @@ export async function runMaintenanceOnce(config: Partial<MaintenanceConfig> = {}
     }
   }
 
-  // 4) VACUUM — silinen alanı diske geri ver (DELETE tek başına dosyayı küçültmez).
+  // 4) VACUUM — silme sonrası ölü tuple'ların alanını geri kazan (PostgreSQL).
   //    Sadece gerçek silme olduğunda; VACUUM transaction içinde çalışamaz.
   const totalDeleted = tokenRes.changes + auditDeleted;
   let vacuumed = false;

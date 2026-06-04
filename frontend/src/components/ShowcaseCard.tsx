@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useViewerKind } from '../hooks/useViewerKind';
 import { useToast } from './Toast';
 import { api } from '../services/api';
 import type { ShowcaseComment, ShowcaseItem, Visual } from '../types';
@@ -38,9 +39,16 @@ interface Props {
 }
 
 export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
-  const { user } = useAuth();
+  const { user, admin, danisman, arge } = useAuth();
+  const viewerKind = useViewerKind();
   const navigate = useNavigate();
   const toast = useToast();
+
+  // Herhangi bir oturum açık mı? (admin dahil — envanterde beğeni/yorum GÖRSÜN.)
+  const isLoggedIn = !!(user || admin || danisman || arge);
+  // Beğeni/yorum YAZMA yalnız gerçek kullanıcıda mümkün (user slotu: normal +
+  // governance kullanıcılar var; admin ayrı tablo → FK kabul etmez → salt-okunur).
+  const canInteract = !!user;
 
   const [likeCount, setLikeCount] = useState(likes);
   const [commentCount, setCommentCount] = useState(comments);
@@ -62,9 +70,9 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
   const [showDetail, setShowDetail] = useState(false);
 
   async function ensureLikeStatus() {
-    if (likeStatusLoaded || !user) return;
+    if (likeStatusLoaded || !isLoggedIn) return;
     try {
-      const s = await api.getLikeStatus(item.id);
+      const s = await api.getLikeStatus(item.id, viewerKind);
       setLiked(s.liked);
       setLikeCount(s.count);
       setLikeStatusLoaded(true);
@@ -74,8 +82,12 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
   }
 
   async function handleLike() {
-    if (!user) {
+    if (!isLoggedIn) {
       navigate('/login');
+      return;
+    }
+    if (!canInteract) {
+      toast.push('info', 'Beğeni yalnızca kullanıcı hesaplarına açık.');
       return;
     }
     // Optimistic
@@ -100,7 +112,7 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
     if (next && commentsList.length === 0) {
       setCommentsLoading(true);
       try {
-        const res = await api.listComments(item.id);
+        const res = await api.listComments(item.id, viewerKind);
         setCommentsList(res.comments);
       } catch (err) {
         toast.push('error', (err as Error).message || 'Yorumlar yüklenemedi.');
@@ -170,8 +182,8 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
     }
   }
 
-  // Mount sonrası like status fetch (sadece auth varsa)
-  if (user && !likeStatusLoaded) {
+  // Mount sonrası like status fetch (herhangi bir oturum varsa — admin dahil)
+  if (isLoggedIn && !likeStatusLoaded) {
     void ensureLikeStatus();
   }
 
@@ -326,6 +338,7 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
 
         <button
           onClick={toggleComments}
+          aria-label="Yorumlar"
           className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border transition-all ${
             showComments
               ? 'bg-kt-gold-50 border-kt-gold-300 text-kt-gold-700'
@@ -342,7 +355,7 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
       {/* Comments panel */}
       {showComments && (
         <div className="mt-3 border-t border-kt-gray-100 pt-3 space-y-2 animate-fade-in">
-          {user && (
+          {canInteract && (
             <form onSubmit={handlePostComment} className="flex gap-1.5">
               <input
                 type="text"
@@ -362,12 +375,17 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
               </button>
             </form>
           )}
-          {!user && (
+          {!isLoggedIn && (
             <p className="text-[11px] text-kt-gray-500 italic text-center py-1">
               <Link to="/login" className="text-kt-gold-700 font-semibold underline">
                 Giriş yap
               </Link>{' '}
               ve yorum gönder.
+            </p>
+          )}
+          {isLoggedIn && !canInteract && (
+            <p className="text-[11px] text-kt-gray-500 italic text-center py-1">
+              Yorumları görüntülüyorsunuz (salt-okunur). Yorum yapma yalnızca kullanıcı hesaplarına açık.
             </p>
           )}
 

@@ -78,9 +78,8 @@ jobs:
       - name: Tip kontrolü + production build (tsc -b && vite build)
         run: npm run build
 
-      - name: Lint (eslint)
+      - name: Lint (eslint — hata bloklar, uyarı bloklamaz)
         run: npm run lint
-        continue-on-error: true
 
       - name: Bağımlılık CVE taraması
         run: npm audit --omit=dev --audit-level=high

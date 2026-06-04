@@ -180,7 +180,7 @@ export async function getAnalytics(): Promise<AnalyticsResponse> {
        LEFT JOIN bookings b ON b.user_id = u.id
        WHERE u.status != 3
        GROUP BY u.id
-       HAVING total > 0
+       HAVING COUNT(b.id) > 0
        ORDER BY total DESC, approved DESC
        LIMIT 8`, []) as Array<{
       id: string;

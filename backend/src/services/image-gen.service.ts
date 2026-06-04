@@ -13,6 +13,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { logger } from '../utils/logger';
 
 export interface GenerateImageOptions {
   prompt: string;
@@ -149,10 +150,10 @@ export function getImageProvider(): ImageProvider {
       _provider = new GeminiProvider();
       break;
     default:
-      console.warn(`[image-gen] Bilinmeyen provider '${choice}', Pollinations'a düşülüyor.`);
+      logger.warn('image_gen_unknown_provider', { choice, fallback: 'pollinations' });
       _provider = new PollinationsProvider();
   }
-  console.log(`[image-gen] Active provider: ${_provider.name}`);
+  logger.info('image_gen_provider_active', { provider: _provider.name });
   return _provider;
 }
 

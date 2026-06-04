@@ -205,6 +205,12 @@ interface BookingSeed {
   adminFeedback?: string;
   /** Highlighted (envanterde öne çıkar). */
   highlight?: boolean;
+  /**
+   * Onaylı booking'in proje yaşam döngüsü aşaması. Verilmezse approved booking'ler
+   * 'development' (ilk onay sonrası aşama) ile başlar — application aşamasında
+   * TAKILMAZLAR. application yalnız onay bekleyen (pending/feedback) talepler içindir.
+   */
+  lifecycleStage?: 'application' | 'development' | 'stage' | 'production' | 'live';
 }
 
 /**
@@ -555,10 +561,14 @@ export async function seedBookings(): Promise<void> {
       id, user_id, room_id, period_months, start_date, end_date,
       project_name, project_description, help_needed, technologies,
       status, admin_feedback, reviewed_by, reviewed_at,
-      showcase_visible, showcase_highlight,
+      showcase_visible, showcase_highlight, lifecycle_stage, stage_entered_at,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
+
+  // Onaylı booking'lere demo amaçlı aşama dağıt (pipeline'ın her sütunu dolsun).
+  const APPROVED_STAGE_CYCLE = ['development', 'stage', 'production', 'live'] as const;
+  let approvedIdx = 0;
 
   let inserted = 0;
   for (const b of BOOKINGS) {
@@ -586,6 +596,16 @@ export async function seedBookings(): Promise<void> {
     const showcaseVisible = b.status === 'approved' ? 1 : 0;
     const highlight = b.highlight && b.status === 'approved' ? 1 : 0;
 
+    // Yaşam döngüsü aşaması: onaylılar application'da TAKILMAZ → development+ (veya
+    // açıkça verilen aşama / demo için dağıtılmış). Diğerleri application.
+    let lifecycleStage = 'application';
+    let stageEnteredAt = '';
+    if (b.status === 'approved') {
+      lifecycleStage = b.lifecycleStage ?? APPROVED_STAGE_CYCLE[approvedIdx % APPROVED_STAGE_CYCLE.length];
+      approvedIdx++;
+      stageEnteredAt = reviewedAt ?? new Date(start.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    }
+
     await dbRun(INSERT_BOOKING, [
       nanoid(),
       userId,
@@ -603,6 +623,8 @@ export async function seedBookings(): Promise<void> {
       reviewedAt,
       showcaseVisible,
       highlight,
+      lifecycleStage,
+      stageEnteredAt,
       // created_at = start_date - 3 gün (talep oluşturulma zamanı)
       new Date(start.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
       reviewedAt ?? new Date(start.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),

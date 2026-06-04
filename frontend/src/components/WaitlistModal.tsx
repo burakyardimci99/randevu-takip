@@ -5,10 +5,8 @@
  *  - Tarih = "istenen başlangıç tarihi" (oda boşalınca otomatik booking'in başlangıcı)
  *  - Endpoint farklı (/user/waitlist)
  */
-import { useEffect, useRef, useState } from 'react';
-import { api } from '../services/api';
-import type { JoinWaitlistPayload, Room, SimilarBooking } from '../types';
-import { SimilarProjectsPanel } from './SimilarProjectsPanel';
+import { useEffect, useState } from 'react';
+import type { JoinWaitlistPayload, Room } from '../types';
 
 const TECH_OPTIONS = [
   'Claude', 'GPT', 'Gemini', 'OpenAI', 'LangChain', 'LlamaIndex',
@@ -34,9 +32,6 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
   const [helpNeeded, setHelpNeeded] = useState('');
   const [technologies, setTechnologies] = useState<string[]>([]);
   const [customTech, setCustomTech] = useState('');
-  const [similar, setSimilar] = useState<SimilarBooking[]>([]);
-  const [similarLoading, setSimilarLoading] = useState(false);
-  const similarTimer = useRef<number | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -47,40 +42,8 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
       setHelpNeeded('');
       setTechnologies([]);
       setCustomTech('');
-      setSimilar([]);
     }
   }, [open]);
-
-  // Semantic search — debounced
-  useEffect(() => {
-    if (!open) return;
-    if (similarTimer.current) window.clearTimeout(similarTimer.current);
-    const text = projectDescription.trim();
-    if (text.length < 30) {
-      setSimilar([]);
-      return;
-    }
-    similarTimer.current = window.setTimeout(async () => {
-      try {
-        setSimilarLoading(true);
-        const r = await api.userFindSimilar({
-          projectName: projectName.trim() || 'Proje',
-          projectDescription: text,
-          technologies: technologies.length > 0 ? technologies : undefined,
-          limit: 4,
-          minSimilarity: 0.25,
-        });
-        setSimilar(r.results);
-      } catch {
-        setSimilar([]);
-      } finally {
-        setSimilarLoading(false);
-      }
-    }, 500);
-    return () => {
-      if (similarTimer.current) window.clearTimeout(similarTimer.current);
-    };
-  }, [open, projectName, projectDescription, technologies]);
 
   if (!open || !room) return null;
 
@@ -209,10 +172,6 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
               {projectDescription.length} / 2000
             </div>
           </div>
-
-          {projectDescription.trim().length >= 30 && (similar.length > 0 || similarLoading) && (
-            <SimilarProjectsPanel results={similar} loading={similarLoading} />
-          )}
 
           <div>
             <label className="label">Hangi konuda destek istiyorsun?</label>

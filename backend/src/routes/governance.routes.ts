@@ -229,9 +229,11 @@ for (const { prefix, guard } of GOVERNANCE_ROLES) {
           '../services/notification-center.service'
         );
         const uid = req.auth!.subjectId;
+        // Rol-izolasyonu: danışman/arge KENDİ recipient_type'ını görür, user'ın
+        // kişisel bildirimlerini DEĞİL (önceki 'user' kapsamı sızıntıydı).
         res.json({
-          items: await listNotifications(uid, 'user'),
-          unread: await countUnreadNotifications(uid, 'user'),
+          items: await listNotifications(uid, prefix),
+          unread: await countUnreadNotifications(uid, prefix),
         });
       } catch (err) {
         next(err);
@@ -252,7 +254,7 @@ for (const { prefix, guard } of GOVERNANCE_ROLES) {
         const { markNotificationRead } = await import(
           '../services/notification-center.service'
         );
-        markNotificationRead(req.auth!.subjectId, 'user', id);
+        markNotificationRead(req.auth!.subjectId, prefix, id);
         res.status(204).end();
       } catch (err) {
         next(err);
@@ -268,7 +270,7 @@ for (const { prefix, guard } of GOVERNANCE_ROLES) {
         const { markAllNotificationsRead } = await import(
           '../services/notification-center.service'
         );
-        const marked = await markAllNotificationsRead(req.auth!.subjectId, 'user');
+        const marked = await markAllNotificationsRead(req.auth!.subjectId, prefix);
         res.json({ marked });
       } catch (err) {
         next(err);

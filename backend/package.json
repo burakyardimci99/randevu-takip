@@ -11,8 +11,11 @@
     "keys:generate": "tsx scripts/generate-keys.ts",
     "db:init": "tsx scripts/init-db.ts",
     "setup": "npm run keys:generate && npm run db:init",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:perf": "vitest run tests/perf-queries.test.ts",
+    "test:bench": "vitest bench --run"
   },
   "dependencies": {
     "@types/pg": "^8.20.0",

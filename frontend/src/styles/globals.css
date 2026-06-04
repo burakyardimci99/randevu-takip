@@ -3,12 +3,21 @@
 @tailwind utilities;
 
 @layer base {
-  html, body, #root {
+  /* Scroll modeli: DOKÜMAN (html/window) scroll'lanır. body/#root height:100%
+     YAPILMAZ — aksi halde overflow-x:hidden ile birlikte body bir scroll
+     konteynerine dönüşüp window.scrollY'yi 0'a kilitliyor ve fixed arka planla
+     en altta istemsiz "yukarı zıplama" yaratıyordu. min-height ile içerik kadar
+     büyürler, kaydırma html üzerinde olur (window.scrollTo da düzgün çalışır). */
+  html {
     height: 100%;
   }
+  body, #root {
+    min-height: 100%;
+  }
   /* Yatay overflow'a karşı global güvenlik ağı — ken-burns animasyonu,
-     sığmayan nav vs. yan-scroll beyaz boşluk yaratmasın. */
-  html, body {
+     sığmayan nav vs. yan-scroll beyaz boşluk yaratmasın. Yalnız html'e
+     uygulanır; body'ye verirsek body'yi tekrar scroll konteyneri yapar. */
+  html {
     overflow-x: hidden;
   }
   body {

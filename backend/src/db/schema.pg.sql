@@ -456,6 +456,10 @@ CREATE INDEX IF NOT EXISTS idx_appointments_user
           ON appointments(user_id, start_at);
 CREATE INDEX IF NOT EXISTS idx_appointments_room
           ON appointments(room_id, start_at, end_at);
+-- Appointment ısı-haritası + oda/admin takvimi: status + tarih aralığı taraması
+-- (oda filtresiz). getRoomAppointmentHeatmap / listAllAppointments için.
+CREATE INDEX IF NOT EXISTS idx_appointments_schedule
+          ON appointments(status, start_at, end_at);
 CREATE INDEX IF NOT EXISTS idx_appointments_booking
           ON appointments(booking_id, status);
 CREATE INDEX IF NOT EXISTS idx_users_governance_role

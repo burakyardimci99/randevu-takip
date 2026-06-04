@@ -827,3 +827,30 @@ export interface CreateVisualPayload {
   tema?: string;
   roomId?: string;
 }
+
+/* ===== Appointment (saatli) ısı-haritası (#5) ===== */
+export interface ApptHeatmapSlot {
+  start: string; // ISO datetime
+  end: string;   // ISO datetime
+  title: string;
+  user: string;
+}
+export interface ApptHeatmapDay {
+  date: string;    // YYYY-MM-DD
+  weekday: number; // 1=Pzt .. 7=Paz
+  count: number;
+  slots: ApptHeatmapSlot[];
+}
+export interface ApptHeatmapRoom {
+  roomId: string;
+  code: string;
+  name: string;
+  days: ApptHeatmapDay[];
+  total: number;
+}
+export interface RoomApptHeatmap {
+  from: string;
+  to: string;
+  maxCount: number;
+  rooms: ApptHeatmapRoom[];
+}

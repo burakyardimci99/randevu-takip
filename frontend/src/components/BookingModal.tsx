@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import { api } from '../services/api';
-import type { Booking, CreateBookingPayload, Room, SimilarBooking } from '../types';
-import { SimilarProjectsPanel } from './SimilarProjectsPanel';
+import { useEffect, useState } from 'react';
+import type { Booking, CreateBookingPayload, Room } from '../types';
+import { MovableModalShell } from './MovableModalShell';
 
 interface BookingModalProps {
   room: Room | null;
@@ -70,8 +69,6 @@ const TECH_GROUPS: { label: string; items: string[] }[] = [
   },
 ];
 
-const TECH_OPTIONS = TECH_GROUPS.flatMap((g) => g.items);
-
 function todayPlus(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -89,9 +86,6 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
   const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]); // varsayılan: hafta içi
   const [customTech, setCustomTech] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [similar, setSimilar] = useState<SimilarBooking[]>([]);
-  const [similarLoading, setSimilarLoading] = useState(false);
-  const similarTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -118,43 +112,8 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
       }
       setCustomTech('');
       setErrors({});
-      setSimilar([]);
     }
   }, [open, editingBooking]);
-
-  // Debounced semantic search — proje detayı 30+ karakter olunca tetiklenir.
-  useEffect(() => {
-    if (!open) return;
-    if (similarTimerRef.current) window.clearTimeout(similarTimerRef.current);
-
-    const projectText = projectDescription.trim();
-    if (projectText.length < 30) {
-      setSimilar([]);
-      return;
-    }
-
-    similarTimerRef.current = window.setTimeout(async () => {
-      try {
-        setSimilarLoading(true);
-        const res = await api.userFindSimilar({
-          projectName: projectName.trim() || 'Proje',
-          projectDescription: projectText,
-          technologies: technologies.length > 0 ? technologies : undefined,
-          limit: 4,
-          minSimilarity: 0.25,
-        });
-        setSimilar(res.results);
-      } catch {
-        setSimilar([]);
-      } finally {
-        setSimilarLoading(false);
-      }
-    }, 500);
-
-    return () => {
-      if (similarTimerRef.current) window.clearTimeout(similarTimerRef.current);
-    };
-  }, [open, projectName, projectDescription, technologies]);
 
   function toggleTech(t: string) {
     setTechnologies((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
@@ -205,14 +164,7 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
   if (!open || !room) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-kt-card max-w-2xl w-full max-h-[92vh] overflow-hidden flex flex-col animate-slide-up"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <MovableModalShell open={open} onClose={onClose} maxWidthClass="max-w-2xl">
         <div className="p-6 border-b border-kt-gray-100 bg-gradient-to-r from-kt-gold-500 to-kt-gold-600 text-white">
           <div className="flex items-start justify-between">
             <div>
@@ -338,31 +290,6 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
             </div>
           </div>
 
-          {/* Otomatik duplicate-tespiti (#4) — çok benzer (>=%80) bir proje varsa uyar. */}
-          {(() => {
-            const dup = similar.find((s) => s.similarity >= 0.8);
-            if (!dup) return null;
-            return (
-              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 flex items-start gap-2">
-                <svg className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.33 16a2 2 0 001.74 3z" />
-                </svg>
-                <div className="text-xs text-amber-800 leading-relaxed">
-                  <span className="font-bold">Çok benzer bir proje zaten var</span> —{' '}
-                  <span className="font-semibold">{dup.projectName}</span>
-                  {dup.isOwn ? ' (sizin projeniz)' : ` · ${dup.userFullName}`} ·{' '}
-                  <span className="tabular-nums">%{(dup.similarity * 100).toFixed(0)} benzer</span>.
-                  Mükerrer kayıt yerine mevcut projeyi gözden geçirmek isteyebilirsiniz.
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Semantic search — projeyi yazarken benzerleri göster */}
-          {projectDescription.trim().length >= 30 && (similar.length > 0 || similarLoading) && (
-            <SimilarProjectsPanel results={similar} loading={similarLoading} />
-          )}
-
           <div>
             <label htmlFor="help-needed" className="label">Hangi Konularda Yardım İstiyorsun?</label>
             <textarea
@@ -467,7 +394,6 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
             {loading ? (isEditing ? 'Güncelleniyor...' : 'Gönderiliyor...') : (isEditing ? 'Değişiklikleri Kaydet' : 'Talebi Gönder')}
           </button>
         </div>
-      </div>
-    </div>
+    </MovableModalShell>
   );
 }

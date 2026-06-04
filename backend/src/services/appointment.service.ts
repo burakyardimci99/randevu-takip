@@ -15,7 +15,7 @@
  *  4. Kullanıcı kendi başka bir randevusu ile çakışamaz (aynı kullanıcı eş zamanlı
  *     iki yerde olamaz — UX guard).
  *  5. Oda kapasitesi: aynı zaman diliminde scheduled appointment sayısı
- *     `rooms.capacity`'i aşamaz. Race condition'a karşı SQLite txn içinde kontrol.
+ *     `rooms.capacity`'i aşamaz. Race condition'a karşı transaction içinde kontrol.
  *
  * Güvenlik:
  *  - SQL prepared statements (data_security.md §1).
@@ -114,7 +114,7 @@ interface CreateAppointmentInput {
 }
 
 /**
- * Yeni randevu oluştur. Tüm doğrulamalar SQLite transaction içinde yapılır,
+ * Yeni randevu oluştur. Tüm doğrulamalar transaction içinde yapılır,
  * race condition'a karşı kapasite + çakışma kontrolleri atomik.
  */
 export async function createAppointment(
@@ -431,4 +431,116 @@ export async function listAllAppointments(
        ${whereSql}
        ORDER BY a.start_at ASC`, [...params]) as AppointmentRow[];
   return rows.map(rowToDto);
+}
+
+/* ============================================================
+ * APPOINTMENT (SAATLİ) ISI-HARİTASI — oda × gün, saat detaylı (#5)
+ * ============================================================ */
+
+export interface ApptHeatmapSlot {
+  start: string; // ISO datetime
+  end: string;   // ISO datetime
+  title: string;
+  user: string;
+}
+export interface ApptHeatmapDay {
+  date: string;    // YYYY-MM-DD
+  weekday: number; // 1=Pzt .. 7=Paz
+  count: number;   // o gün o odadaki scheduled randevu sayısı
+  slots: ApptHeatmapSlot[]; // saatli detay (tıklayınca gösterilir)
+}
+export interface ApptHeatmapRoom {
+  roomId: string;
+  code: string;
+  name: string;
+  days: ApptHeatmapDay[];
+  total: number;
+}
+export interface RoomApptHeatmap {
+  from: string;
+  to: string;
+  maxCount: number;
+  rooms: ApptHeatmapRoom[];
+}
+
+/** YYYY-MM-DD → Pzt=1..Paz=7. */
+function weekdayMon(dateStr: string): number {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  return ((d.getUTCDay() + 6) % 7) + 1;
+}
+
+/** [from,to] aralığındaki günleri (YYYY-MM-DD) sırayla üretir (maks 31 gün). */
+function enumerateDates(from: string, to: string): string[] {
+  const out: string[] = [];
+  const start = new Date(`${from}T00:00:00Z`).getTime();
+  const end = new Date(`${to}T00:00:00Z`).getTime();
+  for (let t = start, i = 0; t <= end && i < 31; t += 86400000, i++) {
+    out.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/**
+ * Oda × gün doluluk ısı-haritası — scheduled APPOINTMENT'lara dayanır (booking
+ * weekday_mask'ine değil). Her hücre o gün o odadaki randevu sayısını ve saatli
+ * detayını (slots) içerir → frontend hücreye tıklayınca "hangi saatlerde dolu"
+ * gösterir. Varsayılan aralık: içinde bulunulan hafta (Pzt–Paz).
+ */
+export async function getRoomAppointmentHeatmap(opts: { from?: string; to?: string }): Promise<RoomApptHeatmap> {
+  const valid = (d?: string): d is string => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d);
+
+  // Varsayılan: bu haftanın Pazartesi'si .. +6 gün.
+  const today = new Date();
+  const todayUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const mondayOffset = (todayUtc.getUTCDay() + 6) % 7;
+  const defaultFrom = new Date(todayUtc.getTime() - mondayOffset * 86400000).toISOString().slice(0, 10);
+  const defaultTo = new Date(todayUtc.getTime() + (6 - mondayOffset) * 86400000).toISOString().slice(0, 10);
+
+  const from = valid(opts.from) ? opts.from : defaultFrom;
+  const to = valid(opts.to) ? opts.to : defaultTo;
+
+  const rooms = await dbAll(`SELECT id, code, name FROM rooms WHERE is_active = 1 ORDER BY code`, []) as Array<{ id: string; code: string; name: string }>;
+
+  // Aralıkla örtüşen scheduled randevular. start_at/end_at ISO string → leksik
+  // karşılaştırma güvenli (to günün sonuna kadar dahil edilir).
+  const appts = await dbAll(`SELECT a.id, a.room_id, a.start_at, a.end_at, a.title, u.full_name AS user_full_name
+       FROM appointments a
+       INNER JOIN users u ON u.id = a.user_id
+       WHERE a.status = 'scheduled'
+         AND a.end_at >= ?
+         AND a.start_at <= ?
+       ORDER BY a.start_at ASC`, [from, `${to}T23:59:59.999`]) as Array<{
+      id: string; room_id: string; start_at: string; end_at: string; title: string; user_full_name: string;
+    }>;
+
+  // room_id → (date → slots)
+  const byRoomDate = new Map<string, Map<string, ApptHeatmapSlot[]>>();
+  for (const a of appts) {
+    const date = a.start_at.slice(0, 10);
+    let dm = byRoomDate.get(a.room_id);
+    if (!dm) {
+      dm = new Map();
+      byRoomDate.set(a.room_id, dm);
+    }
+    const list = dm.get(date) ?? [];
+    list.push({ start: a.start_at, end: a.end_at, title: a.title, user: a.user_full_name });
+    dm.set(date, list);
+  }
+
+  const dates = enumerateDates(from, to);
+  let maxCount = 0;
+
+  const resultRooms: ApptHeatmapRoom[] = rooms.map((r) => {
+    const dm = byRoomDate.get(r.id);
+    let total = 0;
+    const days: ApptHeatmapDay[] = dates.map((date) => {
+      const slots = dm?.get(date) ?? [];
+      if (slots.length > maxCount) maxCount = slots.length;
+      total += slots.length;
+      return { date, weekday: weekdayMon(date), count: slots.length, slots };
+    });
+    return { roomId: r.id, code: r.code, name: r.name, days, total };
+  });
+
+  return { from, to, maxCount, rooms: resultRooms };
 }

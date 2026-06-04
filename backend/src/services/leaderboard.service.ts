@@ -45,7 +45,7 @@ interface ProjectRow {
 
 async function getUserRanking(limit: number): Promise<LeaderboardUser[]> {
   // Beğeni/yorum: kullanıcının SAHİP olduğu booking'lere gelenler.
-  // util_days: onaylı booking'lerin gün sayısı (SQLite julianday; #2'de Postgres'e uyarlanacak).
+  // util_days: onaylı booking'lerin gün sayısı (PostgreSQL date aritmetiği — DAY_DIFF).
   const rows = await dbAll(`SELECT u.id, u.full_name, u.department,
               COUNT(DISTINCT CASE WHEN b.status = 'approved' THEN b.id END) AS approved_bookings,
               COALESCE(SUM(CASE WHEN b.status = 'approved'

@@ -8,7 +8,7 @@
  *
  * Auto-instrumentation:
  *  - HTTP server (Express)
- *  - Better-sqlite3 (custom — gerekirse manual span'larla)
+ *  - pg / PostgreSQL (custom — gerekirse manual span'larla)
  *
  * Manual span örnekleri için: traced() helper.
  *

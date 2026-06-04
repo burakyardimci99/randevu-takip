@@ -1,5 +1,4 @@
 import { Link } from 'react-router-dom';
-import { Logo } from '../components/Logo';
 import { AnimatedCounter } from '../components/AnimatedCounter';
 
 export default function Landing() {

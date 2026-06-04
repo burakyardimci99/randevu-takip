@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../services/api';
-import type { Booking, LifecycleStage, ReviewBookingPayload, SimilarBooking, StageEvent } from '../types';
+import type { Booking, LifecycleStage, ReviewBookingPayload, StageEvent } from '../types';
+import { MovableModalShell } from './MovableModalShell';
 import { ProjectLifecycleBar } from './governance/ProjectLifecycleBar';
-import { SimilarProjectsPanel } from './SimilarProjectsPanel';
 import { StatusBadge } from './StatusBadge';
 import { ModernTimeline } from './ModernTimeline';
 
@@ -62,8 +62,6 @@ export function BookingDetailModal({
   const [mode, setMode] = useState<'idle' | 'feedback' | 'reject' | 'reject_advance'>('idle');
   const [feedback, setFeedback] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [similar, setSimilar] = useState<SimilarBooking[]>([]);
-  const [similarLoading, setSimilarLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'history'>('overview');
   const [stageEvents, setStageEvents] = useState<StageEvent[]>([]);
   const [stageEventsLoading, setStageEventsLoading] = useState(false);
@@ -90,35 +88,6 @@ export function BookingDetailModal({
         if (!cancelled) setStageEvents([]);
       } finally {
         if (!cancelled) setStageEventsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [open, booking, viewerRole]);
-
-  // Modal açılınca benzer/iş birliği projelerini çek.
-  //  - admin: bu projeye benzer geçmiş projeler (admin-gated semantic search).
-  //  - user (kendi booking'i): İŞ BİRLİĞİ önerisi — benzer iş yapan başka ekipler (#4).
-  // Danışman/Ar-Ge ileride kendi endpoint'iyle entegre edilecek.
-  useEffect(() => {
-    if (!open || !booking || (viewerRole !== 'admin' && viewerRole !== 'user')) {
-      setSimilar([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        setSimilarLoading(true);
-        const res =
-          viewerRole === 'admin'
-            ? await api.adminFindSimilar({ bookingId: booking.id, limit: 4, minSimilarity: 0.25 })
-            : await api.userCollaborations({ bookingId: booking.id, limit: 6, minSimilarity: 0.3 });
-        if (!cancelled) setSimilar(res.results);
-      } catch {
-        if (!cancelled) setSimilar([]);
-      } finally {
-        if (!cancelled) setSimilarLoading(false);
       }
     })();
     return () => {
@@ -194,14 +163,7 @@ export function BookingDetailModal({
     viewerRole === 'arge' && !!booking.stageAdvanceRequestedAt && !!onRejectAdvanceRequest;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
-      onClick={() => !loading && onClose()}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-kt-card max-w-3xl w-full max-h-[92vh] overflow-hidden flex flex-col animate-slide-up"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <MovableModalShell open={open} onClose={() => !loading && onClose()} maxWidthClass="max-w-3xl">
         <div className="p-6 border-b border-kt-gray-100 bg-gradient-to-r from-kt-green-800 to-kt-green-900 text-white">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -348,18 +310,6 @@ export function BookingDetailModal({
               ))}
             </div>
           </section>
-
-          {/* Benzer projeler (admin) / İş birliği önerisi (kullanıcı, #4). */}
-          {(viewerRole === 'admin' || viewerRole === 'user') &&
-            (similar.length > 0 || similarLoading) && (
-              <section>
-                <SimilarProjectsPanel
-                  results={similar}
-                  loading={similarLoading}
-                  variant={viewerRole === 'user' ? 'collaboration' : 'similar'}
-                />
-              </section>
-            )}
 
           {/* Yaşam döngüsü — onaylı booking için (Danışman görmez, çünkü onlar approve öncesi inceler). */}
           {showLifecycle && (
@@ -566,7 +516,6 @@ export function BookingDetailModal({
           </>
           )}
         </div>
-      </div>
-    </div>
+    </MovableModalShell>
   );
 }

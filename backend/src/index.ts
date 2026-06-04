@@ -36,6 +36,7 @@ import userRoutes from './routes/user.routes';
 import adminRoutes from './routes/admin.routes';
 import governanceRoutes from './routes/governance.routes';
 import chatRoutes from './routes/chat.routes';
+import showcaseRoutes from './routes/showcase.routes';
 import publicRoutes from './routes/public.routes';
 import { openApiDocument } from './openapi';
 
@@ -78,6 +79,7 @@ function buildApp(): express.Express {
   app.use('/api/admin', adminRoutes);
   app.use('/api/governance', governanceRoutes);
   app.use('/api/chat', chatRoutes);                 // Rol-bağımsız genel sohbet
+  app.use('/api/showcase', showcaseRoutes);         // Rol-bağımsız envanter okuma (beğeni/yorum görüntüleme)
 
   app.use(notFoundHandler);
   app.use(errorHandler);

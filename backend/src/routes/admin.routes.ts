@@ -950,8 +950,10 @@ router.put(
  * ============================================================ */
 
 router.get(
+  // Salt-okunur LİSTE: admin + danışman + arge görebilir (global GET→requireStaff
+  // politikası geçerli). Önceki fazladan `requireAdmin`, arge/danışman'ı reddedip
+  // "kimlik doğrulama başarısız" veriyordu. Mutasyonlar hâlâ requireAdmin.
   '/licenses/requests',
-  requireAdmin,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { status } = adminLicenseRequestsFilterSchema.parse(req.query);
@@ -965,8 +967,8 @@ router.get(
 );
 
 router.get(
+  // Salt-okunur bütçe raporu — staff (admin/danışman/arge) görebilir.
   '/licenses/budget',
-  requireAdmin,
   async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const { getLicenseBudgetReport } = await import('../services/license-request.service');

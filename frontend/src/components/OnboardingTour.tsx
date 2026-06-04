@@ -30,11 +30,6 @@ const USER_STEPS: Step[] = [
     cta: { label: 'Odaları gör', to: '/rooms' },
   },
   {
-    emoji: '🤖',
-    title: 'AI destekli benzerlik araması',
-    body: 'Talep formu doldururken proje açıklamanı yaz; geçmişte yapılan benzer projeleri otomatik gösteririz. Hem ilham hem ekip eşleştirme için.',
-  },
-  {
     emoji: '💳',
     title: 'Yazılım Lisansları',
     body: 'Cursor, Claude, Copilot gibi yapay zeka araçları için lisans talep edebilirsin. Listede olmayan araçlar için "Diğer" seçeneği var. Admin onayından sonra IT ekibi sana lisansı atar.',
