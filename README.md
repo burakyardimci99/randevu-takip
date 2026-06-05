@@ -40,8 +40,27 @@ Bankacılık güvenlik standartlarına uygun (docs/security/app_security.md & do
 
 ## Kurulum
 
-### 1. Backend
+### Docker ile (önerilen)
 
+Tüm stack (PostgreSQL + backend + frontend) tek komutla:
+
+```bash
+docker compose up -d --build
+# frontend: http://localhost:5173 · backend: http://localhost:4000
+```
+
+Dev stack kaynak değişikliklerini hot-reload eder (backend `tsx watch`, frontend Vite HMR). İlk açılışta şema + demo seed otomatik yüklenir.
+
+Görsel üretimi (opsiyonel) için Pollinations API anahtarı — [enter.pollinations.ai](https://enter.pollinations.ai)'den ücretsiz alınır:
+
+```bash
+export POLLINATIONS_TOKEN=sk_...
+docker compose up -d --force-recreate backend
+```
+
+### Manuel kurulum (Docker'sız)
+
+Backend:
 ```bash
 cd backend
 npm install
@@ -51,8 +70,7 @@ cp .env.example .env
 npm run dev         # http://127.0.0.1:4000
 ```
 
-### 2. Frontend
-
+Frontend:
 ```bash
 cd frontend
 npm install
@@ -60,6 +78,18 @@ npm run dev         # http://127.0.0.1:5173
 ```
 
 Vite, `/api` isteklerini backend'e proxy eder.
+
+### Production dağıtımı
+
+Üretim için ayrı, sertleştirilmiş stack (multi-stage image, non-root kullanıcı, dışa kapalı DB/backend portları, env'den zorunlu secret):
+
+```bash
+cp .env.prod.example .env.prod    # değerleri doldur: güçlü parolalar, CSRF_SECRET, POLLINATIONS_TOKEN
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+# nginx :80 → statik frontend + /api reverse proxy → backend
+```
+
+JWT anahtarları image'e gömülmez; `backend/keys/*.pem` salt-okunur volume ile mount edilir (`cd backend && npm run keys:generate` ile üretilir). HTTPS için önüne TLS terminasyonu yapan bir reverse-proxy/LB konmalı (`X-Forwarded-Proto` başlığını iletmeli — backend `trust proxy` ile okur ve secure cookie üretir).
 
 ## Demo Hesaplar
 
@@ -115,38 +145,6 @@ Vite, `/api` isteklerini backend'e proxy eder.
 - `bookings` — Kiralama istekleri (user_id, room_id, period, dates, project, status)
 - `refresh_tokens` — Rotation için SHA-256 hash ile saklı
 - `audit_logs` — Auth, authz, rate-limit, booking, feedback olayları
-
-## Geliştirme Araçları
-
-### 21st.dev Magic MCP (frontend component üretimi)
-
-Proje köküne `.mcp.json.example` örnek olarak commit edilmiştir. Gerçek API anahtarını içeren `.mcp.json` `.gitignore`'a alınmıştır (data_security §1).
-
-Kurulum:
-```bash
-cp .mcp.json.example .mcp.json
-# .mcp.json içindeki "YOUR_21ST_DEV_API_KEY_HERE" değerini gerçek anahtarınızla değiştirin
-```
-
-Claude Code projeyi açtığında `.mcp.json`'u otomatik yükler. Onay penceresi çıkarsa "Yes, use this server" seçin.
-
-> **Güvenlik notu (data_security §8)**: 21st.dev üçüncü taraf bir AI servisi; demo ortam için kullanılabilir, production'da kurumsal allowlist + DPA + PII scrubber gateway zorunludur.
-
-## Production'a Geçiş Notları
-
-Aşağıdaki kalemler **mutlaka** production'a geçmeden tamamlanmalı:
-
-- [ ] Keyleri **HashiCorp Vault / AWS KMS / Azure Key Vault**'tan al (data_security §1).
-- [x] PostgreSQL + connection pooling (pg Pool, #7 — SQLite kaldırıldı).
-- [ ] Token saklamayı `HttpOnly + Secure + SameSite=Strict` cookie'ye taşı; XSS yüzeyini küçült (app_security §6).
-- [ ] CSP'yi sıkılaştır, `'unsafe-inline'` kaldırılsın; nonce kullan.
-- [ ] HTTPS terminasyonu + HSTS preload.
-- [ ] Reverse proxy (nginx/Cloudflare) ile WAF.
-- [ ] Admin endpoint'lerini iç ağ / IP allowlist arkasına al (app_security §5).
-- [ ] Şifre sıfırlama akışı + MFA (özellikle admin için zorunlu) (app_security §4).
-- [ ] SBOM üretimi + bağımlılık CVE taraması CI/CD'ye (data_security §11).
-- [ ] Log gönderimini merkezi SIEM'e + retention sürelerine uyum (data_security §4).
-- [ ] Yük testi + DoS senaryosu.
 
 ## Lisans
 

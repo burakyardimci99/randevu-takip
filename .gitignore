@@ -18,10 +18,6 @@ backend/keys/*.pem
 backend/keys/*.key
 !backend/keys/.gitkeep
 
-# MCP server config contains API keys — do not commit (data_security.md §1, §8)
-.mcp.json
-!.mcp.json.example
-
 # Database
 *.db
 *.sqlite
