@@ -140,7 +140,7 @@ async function persistVariant(
 /** Pollinations anonim erişim 402 verdiğinde gösterilecek net kullanıcı mesajı. */
 const PROVIDER_AUTH_ERROR =
   'Görsel sağlayıcı kimlik doğrulama/ödeme gerektiriyor. Yöneticinin POLLINATIONS_TOKEN ' +
-  'ayarlaması gerekiyor (auth.pollinations.ai üzerinden ücretsiz token alınır).';
+  'ayarlaması gerekiyor (enter.pollinations.ai üzerinden sk_ API anahtarı alınır).';
 
 /** Arkaplan boru hattı: prompt → generate → diske sakla → DB güncelle → SSE push. */
 async function runVisualPipeline(

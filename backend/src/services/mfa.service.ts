@@ -4,11 +4,14 @@
  * Güvenlik:
  * - speakeasy: TOTP generate + verify (RFC 6238, SHA-1, 30s window, 6 digit).
  * - Secret base32 string olarak DB'de saklanır.
- * - Backup code: 8 adet tek-kullanımlık kod (argon2 hash'lenir, kullanıldıkça silinir).
- *   Demo'da basitlik için plain JSON'da tutulur — production'da hash zorunlu.
+ * - Backup code: 8 adet tek-kullanımlık kod. Kullanıcıya bir kez düz gösterilir,
+ *   DB'de yalnız argon2 HASH'leri saklanır (plain saklanmaz). Doğrulamada her
+ *   hash'e karşı argon2.verify denenir; eşleşen hash diziden silinir (tek-kullanım).
  * - Time skew tolerance: ±1 window (30s).
  * - app_security.md §4: Admin için MFA önerilir (henüz zorunlu değil — opt-in).
  */
+import { randomInt } from 'node:crypto';
+import argon2 from 'argon2';
 import speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
 import { dbOne, dbRun } from '../db/schema';
@@ -28,6 +31,15 @@ export interface MfaStatus {
 }
 
 const ISSUER = 'KLAB-Randevu';
+
+// Backup code segmenti: 4 karakterlik, karışıklık yaratan harfler (I/O/0/1) hariç
+// büyük harf+rakam alfabesinden kriptografik rastgele seçim.
+const BACKUP_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function backupCodeSegment(): string {
+  let s = '';
+  for (let i = 0; i < 4; i++) s += BACKUP_ALPHABET[randomInt(BACKUP_ALPHABET.length)];
+  return s;
+}
 
 async function getAdminRow(
   adminId: string
@@ -57,19 +69,21 @@ export async function enrollMfa(adminId: string): Promise<MfaEnrollResult> {
     length: 20,
   });
 
-  // Backup code'lar (8 adet 8-haneli kod)
+  // Backup code'lar (8 adet 8-haneli kod). Bunlar MFA bypass için kullanılan
+  // kimlik doğrulama sırlarıdır → kriptografik olarak güvenli üreteç şart
+  // (Math.random öngörülebilir — CWE-338). crypto.randomInt ile uniform seçim.
   const backupCodes: string[] = [];
   for (let i = 0; i < 8; i++) {
-    backupCodes.push(
-      Math.random().toString(36).slice(2, 6).toUpperCase() +
-        '-' +
-        Math.random().toString(36).slice(2, 6).toUpperCase()
-    );
+    backupCodes.push(`${backupCodeSegment()}-${backupCodeSegment()}`);
   }
 
-  // Secret + backup codes DB'ye yazılır — ancak totp_enabled hâlâ 0
+  // Backup code'lar DB'ye YALNIZ argon2 hash olarak yazılır (plain saklanmaz).
+  // Kullanıcı plain kodları yalnız bu yanıtta bir kez görür.
+  const hashedCodes = await Promise.all(backupCodes.map((c) => argon2.hash(c)));
+
+  // Secret + backup code hash'leri DB'ye yazılır — ancak totp_enabled hâlâ 0
   // (kullanıcı 6-digit ile verify edene kadar aktif değil)
-  await dbRun('UPDATE admins SET totp_secret = ?, totp_backup_codes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [secret.base32, JSON.stringify(backupCodes), adminId]);
+  await dbRun('UPDATE admins SET totp_secret = ?, totp_backup_codes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [secret.base32, JSON.stringify(hashedCodes), adminId]);
 
   const qrCodeDataUrl = await qrcode.toDataURL(secret.otpauth_url ?? '');
 
@@ -111,19 +125,23 @@ export async function verifyMfaCode(
     return { valid: true, usedBackupCode: false };
   }
 
-  // Backup code denemesi
+  // Backup code denemesi — saklananlar argon2 HASH'leri; gelen kodu her hash'e
+  // karşı argon2.verify ile dene. Eşleşen hash silinir (tek-kullanımlık).
   if (row.totp_backup_codes) {
-    let codes: string[] = [];
+    let hashes: string[] = [];
     try {
-      codes = JSON.parse(row.totp_backup_codes) as string[];
+      hashes = JSON.parse(row.totp_backup_codes) as string[];
     } catch {
-      codes = [];
+      hashes = [];
     }
-    const idx = codes.findIndex((c) => c === code.toUpperCase().trim());
-    if (idx >= 0) {
-      codes.splice(idx, 1);
-      await dbRun('UPDATE admins SET totp_backup_codes = ?, totp_enabled = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [JSON.stringify(codes), adminId]);
-      return { valid: true, usedBackupCode: true };
+    const candidate = code.toUpperCase().trim();
+    for (let i = 0; i < hashes.length; i++) {
+      const match = await argon2.verify(hashes[i]!, candidate).catch(() => false);
+      if (match) {
+        hashes.splice(i, 1);
+        await dbRun('UPDATE admins SET totp_backup_codes = ?, totp_enabled = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [JSON.stringify(hashes), adminId]);
+        return { valid: true, usedBackupCode: true };
+      }
     }
   }
 

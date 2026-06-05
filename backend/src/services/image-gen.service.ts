@@ -45,7 +45,11 @@ const GENERATED_DIR = path.join(process.cwd(), 'public', 'generated');
 // Pollinations — anahtarsız, URL-bazlı
 // ============================================================================
 
-const POLLINATIONS_IMAGE_BASE = 'https://image.pollinations.ai/prompt';
+// Yeni Pollinations API (gen.pollinations.ai). Eski image.pollinations.ai/prompt
+// legacy oldu ve anonim erişimde 402 (x402 ödeme) veriyor. Yeni endpoint API key
+// ister → key SUNUCU TARAFINDA `Authorization: Bearer` ile gönderilir
+// (visual-store.service downloadAndStore), client URL'ine sızmaz.
+const POLLINATIONS_IMAGE_BASE = 'https://gen.pollinations.ai/image';
 
 class PollinationsProvider implements ImageProvider {
   readonly name = 'pollinations';
@@ -59,10 +63,8 @@ class PollinationsProvider implements ImageProvider {
       width: String(width),
       height: String(height),
       seed: String(seed),
-      nologo: 'true',
-      enhance: 'false',
       model: 'flux',
-      referrer: 'kuveytturk-ai-lab',
+      enhance: 'false',
     });
 
     const url = `${POLLINATIONS_IMAGE_BASE}/${encodeURIComponent(opts.prompt)}?${params.toString()}`;

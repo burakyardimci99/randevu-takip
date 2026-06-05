@@ -19,6 +19,11 @@ RUN npm install
 # Kaynak (dev'de bind-mount ile gölgelenir; image yine de çalışır halde).
 COPY . .
 
+# NOT: Non-root sertleştirme (USER node) yalnız PRODUCTION image'inde (Dockerfile.prod)
+# uygulanır. Dev image'de bind-mount edilen `./backend:/app` host-sahipli (0700 data/)
+# olduğundan `node` kullanıcısı Linux'ta data/ dizinine yazamaz (EACCES) → dev'de
+# root kalır (yalnız yerel geliştirme; internet-facing değil).
+
 EXPOSE 4000
 
 # tsx watch — kod değişince otomatik reload.

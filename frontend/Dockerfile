@@ -9,6 +9,10 @@ RUN npm install
 
 COPY . .
 
+# NOT: Non-root sertleştirme yalnız PRODUCTION image'inde (Dockerfile.prod → nginx)
+# uygulanır. Dev image bind-mount edilen host kaynağıyla çalışır; root kalır
+# (yalnız yerel geliştirme).
+
 EXPOSE 5173
 
 # Vite dev — tüm arayüzlere bind (container dışından erişim için).

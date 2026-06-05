@@ -47,10 +47,14 @@ async function loadExtractor(): Promise<boolean> {
       // Dinamik import — `@xenova/transformers` ESM'dir, CJS TS'de problem çıkarmasın.
       const mod = (await import('@xenova/transformers')) as unknown as {
         pipeline: (task: string, model: string) => Promise<typeof extractor>;
-        env: { allowLocalModels: boolean; allowRemoteModels: boolean };
+        env: { allowLocalModels: boolean; allowRemoteModels: boolean; cacheDir?: string };
       };
       // Model uzaktan indirme izni (dev için açık). Production'da local proxy kullan.
       mod.env.allowRemoteModels = true;
+      // Model cache'i node_modules'a DEĞİL, yazılabilir data dizinine yazılır.
+      // Prod image'de node_modules root-sahipli + ayrıcalıksız 'node' kullanıcısı
+      // oraya yazamaz (EACCES) → cache'i MODEL_CACHE_DIR'e (volume) yönlendir.
+      if (process.env.MODEL_CACHE_DIR) mod.env.cacheDir = process.env.MODEL_CACHE_DIR;
       const pipeline = await mod.pipeline('feature-extraction', MODEL_ID);
       // pipeline runtime callable: (text, opts) => tensor
       extractor = pipeline as unknown as (text: string, opts?: unknown) => Promise<unknown>;

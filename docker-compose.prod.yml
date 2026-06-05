@@ -1,0 +1,85 @@
+# Kuveyt Türk AI Lab — Randevu Sistemi · PRODUCTION stack.
+# Dev stack'ten (docker-compose.yml) tamamen AYRI. Çalıştırma:
+#   cp .env.prod.example .env.prod && <değerleri doldur>
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+#
+# Dev'den farklar:
+#  - Multi-stage prod image'ler (derlenmiş JS / nginx static), dev watch YOK.
+#  - Secret'lar zorunlu env'den (${VAR:?...}) — hardcode YOK, eksikse fail-fast.
+#  - postgres portu DIŞA AÇILMAZ (yalnız iç ağ). Sadece frontend :80 dışarı.
+#  - JWT anahtarları image'e gömülmez; salt-okunur volume ile mount edilir.
+#
+# DB şema/seed: ilk kurulumda bir kez migration gerekir (schema.pg.sql).
+# Bkz. docs/ — bu compose uygulamayı çalıştırır, migration ayrı operasyonel adımdır.
+
+# Ayrı proje adı — dev stack (docker-compose.yml, proje adı 'randevu-takip') ile
+# container/volume/network ÇAKIŞMASIN. Aksi halde `prod down` dev'i de söker.
+name: klab-randevu-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: klab-postgres-prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER gerekli}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD gerekli}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB gerekli}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    # Port DIŞA AÇILMAZ — yalnız compose iç ağından erişilir.
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.prod
+    image: klab-backend:prod
+    container_name: klab-backend-prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: '4000'
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?FRONTEND_ORIGIN gerekli (örn https://randevu.klab.example)}
+      CSRF_SECRET: ${CSRF_SECRET:?CSRF_SECRET gerekli (min 32 karakter)}
+      USER_JWT_PRIVATE_KEY_PATH: ./keys/user_private.pem
+      USER_JWT_PUBLIC_KEY_PATH: ./keys/user_public.pem
+      ADMIN_JWT_PRIVATE_KEY_PATH: ./keys/admin_private.pem
+      ADMIN_JWT_PUBLIC_KEY_PATH: ./keys/admin_public.pem
+      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-pollinations}
+      # Pollinations sk_ API anahtarı (enter.pollinations.ai) — yalnız server-side kullanılır.
+      POLLINATIONS_TOKEN: ${POLLINATIONS_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Embedding modeli cache'i node_modules yerine yazılabilir data volume'una.
+      MODEL_CACHE_DIR: /app/data/models
+    volumes:
+      # JWT anahtarları — image'e gömülmez, salt-okunur mount (secret yönetimi).
+      - ./backend/keys:/app/keys:ro
+      # Üretilen görseller + model cache kalıcı (node-yazılabilir data dizini).
+      - appdata:/app/data
+    restart: unless-stopped
+    # Port DIŞA AÇILMAZ — nginx (frontend) /api'yi iç ağdan proxy'ler.
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+    image: klab-frontend:prod
+    container_name: klab-frontend-prod
+    depends_on:
+      - backend
+    ports:
+      - '${HTTP_PORT:-80}:80'
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  appdata:
