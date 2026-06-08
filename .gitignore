@@ -64,3 +64,7 @@ A2/
 # Claude Code local settings + worktrees
 .claude/settings.local.json
 .claude/worktrees/
+
+# QA üretilen çıktılar (her koşuda yeniden üretilir — versiyonlanmaz)
+qa/zap-report.html
+qa/k6-summary.json

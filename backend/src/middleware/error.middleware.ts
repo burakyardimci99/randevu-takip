@@ -49,6 +49,20 @@ export function errorHandler(
     return;
   }
 
+  // Body-parser (express.json) hataları — generic 500 yerine doğru 4xx.
+  // app_security §8: istemci hatası 5xx olarak loglanıp yanlış alarm üretmemeli.
+  const be = err as Error & { status?: number; statusCode?: number; type?: string };
+  if (be.type === 'entity.too.large') {
+    logger.warn('payload_too_large', { path: req.path });
+    res.status(413).json({ error: 'İstek gövdesi çok büyük.' });
+    return;
+  }
+  if (be.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+    logger.warn('malformed_json', { path: req.path });
+    res.status(400).json({ error: 'Geçersiz JSON gövdesi.' });
+    return;
+  }
+
   logger.error('unhandled_error', {
     name: err.name,
     message: err.message,
