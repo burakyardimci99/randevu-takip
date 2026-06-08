@@ -1,0 +1,3 @@
+App Sec flaw tetiklenecek, çıktılarında bulgu bulunmazsa geçiş yapılması uygun olacak. 
+
+Bulgu tespit edilirse yapay zekanın çözebilmesi için json çıktısı paylaşılacak.
