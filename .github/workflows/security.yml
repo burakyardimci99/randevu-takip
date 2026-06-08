@@ -1,0 +1,13 @@
+name: Security
+ 
+on:
+  push:
+ 
+permissions:
+  contents: read
+  statuses: write
+  actions: read
+ 
+jobs:
+  appsec:
+    uses: ahmtcnn/appsec-workflows/.github/workflows/security-reusable.yml@main
