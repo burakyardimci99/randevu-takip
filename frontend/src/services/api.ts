@@ -478,9 +478,30 @@ export const api = {
     });
   },
 
+  async deleteVisual(id: string) {
+    return request<{ deleted: true }>(`/user/visuals/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      kind: 'user',
+    });
+  },
+
   async setShowcaseImage(bookingId: string, visualId: string | null) {
     return request<{ showcaseImageUrl: string | null }>(
       `/user/bookings/${bookingId}/showcase-image`,
+      { method: 'PUT', body: { visualId }, kind: 'user' }
+    );
+  },
+
+  async setProfileBackground(visualId: string | null) {
+    return request<{ profileBackgroundUrl: string | null }>(
+      '/user/profile/background',
+      { method: 'PUT', body: { visualId }, kind: 'user' }
+    );
+  },
+
+  async setChatBackground(visualId: string | null) {
+    return request<{ chatBackgroundUrl: string | null }>(
+      '/user/chat/background',
       { method: 'PUT', body: { visualId }, kind: 'user' }
     );
   },
@@ -571,6 +592,13 @@ export const api = {
     return request<{ entry: WaitlistEntry }>('/user/waitlist', {
       method: 'POST',
       body: payload,
+      kind: 'user',
+    });
+  },
+
+  async removeWaitlistEntry(id: string) {
+    return request<{ removed: boolean }>(`/user/waitlist/${encodeURIComponent(id)}/remove`, {
+      method: 'DELETE',
       kind: 'user',
     });
   },

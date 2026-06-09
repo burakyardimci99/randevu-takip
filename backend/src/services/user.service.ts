@@ -29,6 +29,10 @@ export interface UserProfileDto {
   bio: string | null;
   projectIdea: string | null;
   profilePhoto: string | null;
+  /** Kullanıcının kendi seçtiği görsel — leaderboard kartı + public profil arka planı. */
+  profileBackgroundUrl: string | null;
+  /** Sohbet ekranı arka plan teması (kullanıcının seçtiği görsel). */
+  chatBackgroundUrl: string | null;
   status: number;
   createdAt: string;
   updatedAt: string;
@@ -54,6 +58,8 @@ interface UserRow {
   bio: string | null;
   project_idea: string | null;
   profile_photo: string | null;
+  profile_background_url: string | null;
+  chat_background_url: string | null;
   status: number;
   created_at: string;
   updated_at: string;
@@ -73,6 +79,8 @@ function toDto(r: UserRow): UserProfileDto {
     bio: r.bio,
     projectIdea: r.project_idea,
     profilePhoto: r.profile_photo,
+    profileBackgroundUrl: r.profile_background_url,
+    chatBackgroundUrl: r.chat_background_url,
     status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -80,7 +88,7 @@ function toDto(r: UserRow): UserProfileDto {
 }
 
 const PROFILE_COLUMNS =
-  'id, email, full_name, role, governance_role, department, title, manager, phone, bio, project_idea, profile_photo, status, created_at, updated_at';
+  'id, email, full_name, role, governance_role, department, title, manager, phone, bio, project_idea, profile_photo, profile_background_url, chat_background_url, status, created_at, updated_at';
 
 export async function getUserProfile(userId: string): Promise<UserProfileDto> {
   const row = await dbOne(`SELECT ${PROFILE_COLUMNS} FROM users WHERE id = ? AND status != 3 LIMIT 1`, [userId]) as UserRow | undefined;

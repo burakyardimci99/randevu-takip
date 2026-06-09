@@ -9,12 +9,14 @@
  * paletimiz, role-badge ve btn-pill diliyle yeniden çizildi — yeni bağımlılık yok.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
-import type { ChatContact, ChatMessage, SubjectKind } from '../types';
+import type { ChatContact, ChatMessage, SubjectKind, Visual } from '../types';
 
 /* Rol etiketine göre avatar tonu — sade, paletten. */
 const ROLE_TONE: Record<string, { bg: string; text: string; ring: string }> = {
@@ -71,6 +73,13 @@ export default function Chat() {
   const [loadingThread, setLoadingThread] = useState(false);
   const [sending, setSending] = useState(false);
 
+  // Sohbet arka plan teması (kullanıcının seçtiği görsel) — yalnız 'user' kind.
+  const [chatBg, setChatBg] = useState<string | null>(null);
+  const [showThemePicker, setShowThemePicker] = useState(false);
+  const [myVisuals, setMyVisuals] = useState<Visual[]>([]);
+  const [visualsLoading, setVisualsLoading] = useState(false);
+  const [savingBg, setSavingBg] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeId;
@@ -94,6 +103,50 @@ export default function Chat() {
   useEffect(() => {
     void loadContacts();
   }, [loadContacts]);
+
+  // Sohbet temasını yükle (yalnız 'user' kind — /user/profile erişimi).
+  useEffect(() => {
+    if (kind !== 'user') return;
+    let active = true;
+    api
+      .getProfile()
+      .then((r) => {
+        if (active) setChatBg(r.profile.chatBackgroundUrl);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [kind]);
+
+  async function openThemePicker() {
+    setShowThemePicker(true);
+    if (myVisuals.length === 0) {
+      setVisualsLoading(true);
+      try {
+        const res = await api.listMyVisuals();
+        setMyVisuals(res.visuals.filter((v) => v.imageUrl));
+      } catch (err) {
+        toast.push('error', (err as Error).message || 'Görseller yüklenemedi.');
+      } finally {
+        setVisualsLoading(false);
+      }
+    }
+  }
+
+  async function applyChatBg(visualId: string | null) {
+    setSavingBg(true);
+    try {
+      const res = await api.setChatBackground(visualId);
+      setChatBg(res.chatBackgroundUrl);
+      setShowThemePicker(false);
+      toast.push('success', visualId ? 'Sohbet teması ayarlandı.' : 'Tema kaldırıldı.');
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Tema ayarlanamadı.');
+    } finally {
+      setSavingBg(false);
+    }
+  }
 
   // Aktif konuşmayı yükle + okundu işaretle.
   const openConversation = useCallback(
@@ -168,20 +221,27 @@ export default function Chat() {
 
   return (
     <AppShell kind={kind}>
-      <div className="mb-5">
-        <div className="role-badge-cyan">
-          <span className="role-badge-dot bg-cyan-400" />
-          Sohbet
+      <div className="mb-5 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div className="role-badge-cyan">
+            <span className="role-badge-dot bg-cyan-400" />
+            Sohbet
+          </div>
+          <h1 className="text-3xl font-extrabold text-kt-green-900">Mesajlar</h1>
+          <p className="text-kt-gray-500 text-sm mt-1">
+            Ekipteki herkesle doğrudan yazışın — yönetici, danışman, Ar-Ge ve kullanıcılar.
+            {totalUnread > 0 && (
+              <span className="ml-1 font-semibold text-cyan-700">
+                {totalUnread} okunmamış mesaj.
+              </span>
+            )}
+          </p>
         </div>
-        <h1 className="text-3xl font-extrabold text-kt-green-900">Mesajlar</h1>
-        <p className="text-kt-gray-500 text-sm mt-1">
-          Ekipteki herkesle doğrudan yazışın — yönetici, danışman, Ar-Ge ve kullanıcılar.
-          {totalUnread > 0 && (
-            <span className="ml-1 font-semibold text-cyan-700">
-              {totalUnread} okunmamış mesaj.
-            </span>
-          )}
-        </p>
+        {kind === 'user' && (
+          <button type="button" onClick={openThemePicker} className="btn-secondary text-sm shrink-0">
+            🎨 Sohbet teması
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-4 h-[calc(100vh-15rem)] min-h-[460px]">
@@ -226,9 +286,15 @@ export default function Chat() {
                     }`}
                   >
                     <div
-                      className={`w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-xs font-bold ${tone.bg} ${tone.text}`}
+                      className={`w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-xs font-bold overflow-hidden ${tone.bg} ${tone.text}`}
                     >
-                      {initials(c.fullName)}
+                      {c.kind === 'admin' ? (
+                        <img src="/admin-pp.png" alt="" className="w-full h-full object-cover" />
+                      ) : c.profilePhoto ? (
+                        <img src={c.profilePhoto} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        initials(c.fullName)
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
@@ -278,11 +344,17 @@ export default function Chat() {
               {/* Header */}
               <div className="px-4 py-3 border-b border-kt-gray-100 flex items-center gap-3">
                 <div
-                  className={`w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-xs font-bold ${
+                  className={`w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-xs font-bold overflow-hidden ${
                     toneFor(activeContact.roleLabel).bg
                   } ${toneFor(activeContact.roleLabel).text}`}
                 >
-                  {initials(activeContact.fullName)}
+                  {activeContact.kind === 'admin' ? (
+                    <img src="/admin-pp.png" alt="" className="w-full h-full object-cover" />
+                  ) : activeContact.profilePhoto ? (
+                    <img src={activeContact.profilePhoto} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    initials(activeContact.fullName)
+                  )}
                 </div>
                 <div className="min-w-0">
                   <div className="font-bold text-kt-green-900 truncate">
@@ -295,7 +367,18 @@ export default function Chat() {
               {/* Mesajlar */}
               <div
                 ref={scrollRef}
-                className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-2 bg-kt-gray-50/40"
+                className={`flex-1 overflow-y-auto scrollbar-thin p-4 space-y-2 ${chatBg ? '' : 'bg-kt-gray-50/40'}`}
+                style={
+                  chatBg
+                    ? {
+                        // Hafif beyaz veil → görsel belirgin kalır, baloncuklar yine okunur
+                        // (baloncuklar zaten opak; bu yüzden düşük veil yeterli).
+                        backgroundImage: `linear-gradient(rgba(255,255,255,0.38), rgba(255,255,255,0.38)), url("${chatBg}")`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                      }
+                    : undefined
+                }
               >
                 {loadingThread ? (
                   <div className="text-center text-sm text-kt-gray-400 py-6">Yükleniyor…</div>
@@ -364,6 +447,78 @@ export default function Chat() {
           )}
         </section>
       </div>
+
+      {showThemePicker && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => setShowThemePicker(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-kt-card max-w-lg w-full max-h-[85vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-extrabold text-kt-green-900">Sohbet teması seç</h3>
+              <button
+                onClick={() => setShowThemePicker(false)}
+                className="p-2 rounded-lg hover:bg-kt-gray-100 text-kt-gray-500"
+                aria-label="Kapat"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {visualsLoading ? (
+              <p className="text-sm text-kt-gray-400 text-center py-8 animate-pulse">Görseller yükleniyor…</p>
+            ) : myVisuals.length === 0 ? (
+              <div className="text-center py-8 text-sm text-kt-gray-500">
+                Henüz görselin yok.{' '}
+                <Link to="/gorsel" className="text-kt-violet-700 font-semibold underline">
+                  Görsel Üret
+                </Link>{' '}
+                sayfasından oluştur.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {chatBg && (
+                  <button
+                    onClick={() => applyChatBg(null)}
+                    disabled={savingBg}
+                    className="aspect-square rounded-lg border-2 border-dashed border-kt-gray-300 text-xs font-semibold text-kt-gray-500 hover:border-rose-300 hover:text-rose-600 flex items-center justify-center disabled:opacity-50"
+                  >
+                    Kaldır
+                  </button>
+                )}
+                {myVisuals.map((v) => (
+                  <button
+                    key={v.id}
+                    onClick={() => applyChatBg(v.id)}
+                    disabled={savingBg}
+                    title={v.fikir}
+                    className={`aspect-square rounded-lg overflow-hidden border-2 transition-colors disabled:opacity-50 ${
+                      chatBg === v.imageUrl ? 'border-kt-violet-500' : 'border-transparent hover:border-kt-violet-300'
+                    }`}
+                  >
+                    {v.imageUrl && (
+                      <img
+                        src={v.imageUrl}
+                        alt={v.fikir}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.opacity = '0.2';
+                        }}
+                      />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
     </AppShell>
   );
 }

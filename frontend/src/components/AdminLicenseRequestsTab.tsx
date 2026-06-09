@@ -6,6 +6,7 @@
  * - Onaylı projeler için yaşam döngüsü yönetişim paneli (kapı/onay/aşama)
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from './Toast';
@@ -389,7 +390,7 @@ export function AdminLicenseRequestsTab({ readOnly = false }: AdminLicenseReques
       )}
 
       {/* Review modal */}
-      {modalReq && modalAction && (
+      {modalReq && modalAction && createPortal(
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
           onClick={closeModal}
@@ -443,7 +444,8 @@ export function AdminLicenseRequestsTab({ readOnly = false }: AdminLicenseReques
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

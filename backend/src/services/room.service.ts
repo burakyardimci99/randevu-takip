@@ -62,7 +62,7 @@ function isoWeekday(dateStr: string): number {
  */
 export async function listRooms(date?: string): Promise<RoomDto[]> {
   const rooms = await dbAll(`SELECT id, code, name, district, neighborhood, capacity, description, theme, equipment,
-              room_type AS roomType, specs
+              room_type AS "roomType", specs
        FROM rooms WHERE is_active = 1 ORDER BY code`, []) as RoomRow[];
 
   const today = new Date().toISOString().slice(0, 10);
@@ -116,7 +116,7 @@ export async function listRooms(date?: string): Promise<RoomDto[]> {
 
 export async function getRoomById(id: string): Promise<RoomRow | undefined> {
   return await dbOne(`SELECT id, code, name, district, neighborhood, capacity, description, theme, equipment,
-              room_type AS roomType, specs
+              room_type AS "roomType", specs
        FROM rooms WHERE id = ? AND is_active = 1 LIMIT 1`, [id]) as RoomRow | undefined;
 }
 
@@ -220,7 +220,7 @@ export async function getRoomWeekdayHeatmap(opts: { from?: string; to?: string }
     ? opts.to
     : new Date(new Date(`${from}T00:00:00Z`).getTime() + 30 * 86400000).toISOString().slice(0, 10);
 
-  const rooms = await dbAll(`SELECT id, code, name, theme, room_type AS roomType
+  const rooms = await dbAll(`SELECT id, code, name, theme, room_type AS "roomType"
        FROM rooms WHERE is_active = 1 ORDER BY code`, []) as Array<{ id: string; code: string; name: string; theme: string; roomType: HeatmapRoom['roomType'] }>;
 
   // [from,to] ile örtüşen aktif booking'ler (NOT (end < from OR start > to)).

@@ -16,13 +16,13 @@ export type { KioskRoom, KioskData };
 
 /** Kiosk seçici için aktif odaların minimal listesi (PII yok). */
 export async function listKioskRooms(): Promise<KioskRoom[]> {
-  return await dbAll(`SELECT id, code, name, theme, equipment, room_type AS roomType
+  return await dbAll(`SELECT id, code, name, theme, equipment, room_type AS "roomType"
        FROM rooms WHERE is_active = 1 ORDER BY code`, []) as KioskRoom[];
 }
 
 /** Bir odanın kiosk verisi: oda + son hazır görsel (yoksa null → idle screen). */
 export async function getRoomKiosk(roomId: string): Promise<KioskData | null> {
-  const room = await dbOne(`SELECT id, code, name, theme, equipment, room_type AS roomType
+  const room = await dbOne(`SELECT id, code, name, theme, equipment, room_type AS "roomType"
        FROM rooms WHERE id = ? AND is_active = 1 LIMIT 1`, [roomId]) as KioskRoom | undefined;
   if (!room) return null;
 

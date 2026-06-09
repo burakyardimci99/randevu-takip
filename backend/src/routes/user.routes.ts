@@ -37,6 +37,7 @@ import {
 import { getUserProfile, updateUserProfile } from '../services/user.service';
 import {
   cancelWaitlist,
+  removeWaitlistEntry,
   joinWaitlist,
   listUserWaitlist,
 } from '../services/waitlist.service';
@@ -60,6 +61,9 @@ import {
   listMyVisuals,
   regenerateVisual,
   setBookingShowcaseImage,
+  setProfileBackgroundImage,
+  setChatBackgroundImage,
+  deleteVisual,
 } from '../services/visual.service';
 import {
   clearUserProfilePhoto,
@@ -279,6 +283,20 @@ router.delete('/waitlist/:id', (req: Request, res: Response, next: NextFunction)
     }
     cancelWaitlist(req.auth!.subjectId, id);
     res.json({ cancelled: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Geçmiş kaydı (iptal/süresi geçmiş) kalıcı kaldır.
+router.delete('/waitlist/:id/remove', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rawId = req.params.id;
+    const id = typeof rawId === 'string' ? rawId : '';
+    if (!id || id.length < 8 || id.length > 40) {
+      throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
+    }
+    res.json(await removeWaitlistEntry(req.auth!.subjectId, id));
   } catch (err) {
     next(err);
   }
@@ -996,6 +1014,18 @@ router.post('/visuals/:id/regenerate', async (req: Request, res: Response, next:
   }
 });
 
+router.delete('/visuals/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = typeof req.params.id === 'string' ? req.params.id : '';
+    if (id.length < 8 || id.length > 40) {
+      throw new HttpError(400, 'Geçersiz görsel id.', 'INVALID_ID');
+    }
+    res.json(await deleteVisual(req.auth!.subjectId, id));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Proje (booking) kartına görsel arkaplan ata / kaldır.
 router.put('/bookings/:id/showcase-image', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -1005,6 +1035,28 @@ router.put('/bookings/:id/showcase-image', async (req: Request, res: Response, n
     }
     const input = setShowcaseImageSchema.parse(req.body);
     const result = await setBookingShowcaseImage(req.auth!.subjectId, id, input.visualId);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Kullanıcının kişisel profil arka planı görselini ata / kaldır (leaderboard + public profil).
+router.put('/profile/background', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = setShowcaseImageSchema.parse(req.body);
+    const result = await setProfileBackgroundImage(req.auth!.subjectId, input.visualId);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Sohbet ekranı arka plan temasını ata / kaldır.
+router.put('/chat/background', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = setShowcaseImageSchema.parse(req.body);
+    const result = await setChatBackgroundImage(req.auth!.subjectId, input.visualId);
     res.json(result);
   } catch (err) {
     next(err);

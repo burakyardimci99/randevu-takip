@@ -2,6 +2,7 @@
  * Oda detay modalı — "devamını göster" / karta tıklayınca açılır.
  * Cihaz, açıklama ve teknik özellikleri (specs JSON'undan) gösterir. Görsel yok.
  */
+import { createPortal } from 'react-dom';
 import type { Room } from '../types';
 
 interface SpecItem {
@@ -41,7 +42,7 @@ export function RoomDetailModal({ room, open, onClose, onBook }: Props) {
   if (!open || !room) return null;
   const specs = parseSpecs(room.specs);
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -127,6 +128,7 @@ export function RoomDetailModal({ room, open, onClose, onBook }: Props) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

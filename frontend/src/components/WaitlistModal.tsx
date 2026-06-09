@@ -6,6 +6,7 @@
  *  - Endpoint farklı (/user/waitlist)
  */
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { JoinWaitlistPayload, Room } from '../types';
 
 const TECH_OPTIONS = [
@@ -74,7 +75,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
     });
   }
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -248,6 +249,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

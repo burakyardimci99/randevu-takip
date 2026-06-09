@@ -63,6 +63,10 @@ export interface UserProfile {
   bio: string | null;
   projectIdea: string | null;
   profilePhoto: string | null;
+  /** Kullanıcının seçtiği profil arka plan görseli (leaderboard kartı + public profil). */
+  profileBackgroundUrl: string | null;
+  /** Sohbet ekranı arka plan teması (kullanıcının seçtiği görsel). */
+  chatBackgroundUrl: string | null;
   status: number;
   createdAt: string;
   updatedAt: string;
@@ -171,6 +175,8 @@ export interface Booking {
   stageAdvanceRequestedAt: string | null;
   /** Kullanıcının talep notu (opsiyonel). */
   stageAdvanceNote: string | null;
+  /** Kullanıcının projeye (envanter kartına) atadığı görsel — admin de görür. */
+  showcaseImageUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -454,6 +460,8 @@ export interface ChatContact {
   fullName: string;
   /** "Yönetici" | "Analitik Danışman" | "YZ / Ar-Ge" | "Kullanıcı" */
   roleLabel: string;
+  /** Kullanıcı profil fotoğrafı (base64 data URL). admin'lerde null. */
+  profilePhoto: string | null;
   lastMessage: string | null;
   lastMessageAt: string | null;
   unread: number;
@@ -492,6 +500,7 @@ export interface PublicProfile {
   bio: string | null;
   projectIdea: string | null;
   profilePhoto: string | null;
+  profileBackgroundUrl: string | null;
   joinedAt: string;
   projects: Array<{
     id: string;
@@ -506,6 +515,7 @@ export interface PublicProfile {
     likeCount: number;
     commentCount: number;
     approvedAt: string | null;
+    showcaseImageUrl: string | null;
   }>;
   stats: {
     projectCount: number;

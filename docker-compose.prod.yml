@@ -50,13 +50,18 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?FRONTEND_ORIGIN gerekli (örn https://randevu.klab.example)}
       CSRF_SECRET: ${CSRF_SECRET:?CSRF_SECRET gerekli (min 32 karakter)}
+      # At-rest şifreleme (admin TOTP secret) — boşsa CSRF_SECRET'tan türetilir.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       USER_JWT_PRIVATE_KEY_PATH: ./keys/user_private.pem
       USER_JWT_PUBLIC_KEY_PATH: ./keys/user_public.pem
       ADMIN_JWT_PRIVATE_KEY_PATH: ./keys/admin_private.pem
       ADMIN_JWT_PUBLIC_KEY_PATH: ./keys/admin_public.pem
-      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-pollinations}
-      # Pollinations sk_ API anahtarı (enter.pollinations.ai) — yalnız server-side kullanılır.
+      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-huggingface}
+      # Hugging Face ücretsiz token (huggingface.co/settings/tokens) — yalnız server-side.
+      HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY:-}
+      # Alternatif sağlayıcılar:
       POLLINATIONS_TOKEN: ${POLLINATIONS_TOKEN:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # Embedding modeli cache'i node_modules yerine yazılabilir data volume'una.
       MODEL_CACHE_DIR: /app/data/models
@@ -65,6 +70,15 @@ services:
       - ./backend/keys:/app/keys:ro
       # Üretilen görseller + model cache kalıcı (node-yazılabilir data dizini).
       - appdata:/app/data
+    healthcheck:
+      # Node 22 yerleşik fetch ile DB-bağımlı readiness probe (ek araç gerekmez).
+      test:
+        - CMD-SHELL
+        - node -e "fetch('http://127.0.0.1:4000/api/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     restart: unless-stopped
     # Port DIŞA AÇILMAZ — nginx (frontend) /api'yi iç ağdan proxy'ler.
 
@@ -75,9 +89,17 @@ services:
     image: klab-frontend:prod
     container_name: klab-frontend-prod
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - '${HTTP_PORT:-80}:80'
+    healthcheck:
+      # busybox wget (nginx:alpine) ile statik index erişimi.
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
 volumes:

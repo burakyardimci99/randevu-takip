@@ -8,6 +8,7 @@
  *   - Tamamen silebilir (kullanıcıyı odadan çıkar)
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AppShell } from '../components/AppShell';
 import { useViewerKind } from '../hooks/useViewerKind';
 import { EmptyState } from '../components/EmptyState';
@@ -407,7 +408,7 @@ export default function AdminRooms() {
       )}
 
       {/* Oda değiştirme modalı */}
-      {reassign && (
+      {reassign && createPortal(
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
           onClick={() => !submitting && setReassign(null)}
@@ -462,11 +463,12 @@ export default function AdminRooms() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Kullanıcı değiştirme modalı */}
-      {reassignUser && (
+      {reassignUser && createPortal(
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
           onClick={() => !submitting && setReassignUser(null)}
@@ -569,11 +571,12 @@ export default function AdminRooms() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Silme onay modalı */}
-      {del && (
+      {del && createPortal(
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
           onClick={() => !submitting && setDel(null)}
@@ -630,7 +633,8 @@ export default function AdminRooms() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </AppShell>
   );

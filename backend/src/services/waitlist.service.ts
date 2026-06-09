@@ -298,6 +298,25 @@ export async function cancelWaitlist(userId: string, waitlistId: string): Promis
   return { cancelled: true };
 }
 
+/**
+ * Geçmiş kaydı (iptal edilmiş / süresi geçmiş) listeden kalıcı kaldırır.
+ * Yalnız 'cancelled' veya 'expired' kayıtlar silinebilir (aktif sırayı bozmaz).
+ * IDOR: kayıt giriş yapan kullanıcıya ait olmalı.
+ */
+export async function removeWaitlistEntry(userId: string, waitlistId: string): Promise<{ removed: boolean }> {
+  const row = await dbOne(`SELECT id, user_id, status FROM waitlist WHERE id = ?`, [waitlistId]) as
+    | { id: string; user_id: string; status: string }
+    | undefined;
+  if (!row || row.user_id !== userId) {
+    throw new HttpError(404, 'Kayıt bulunamadı.', 'WAITLIST_ENTRY_NOT_FOUND');
+  }
+  if (row.status !== 'cancelled' && row.status !== 'expired') {
+    throw new HttpError(409, 'Yalnız iptal edilmiş veya süresi geçmiş kayıtlar kaldırılabilir.', 'WAITLIST_NOT_REMOVABLE');
+  }
+  await dbRun(`DELETE FROM waitlist WHERE id = ?`, [waitlistId]);
+  return { removed: true };
+}
+
 async function recomputePositions(roomId: string): Promise<void> {
   const rows = await dbAll(`SELECT id FROM waitlist
        WHERE room_id = ? AND status = 'waiting'

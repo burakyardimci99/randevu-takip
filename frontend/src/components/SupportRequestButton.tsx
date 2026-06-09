@@ -3,6 +3,7 @@
  * Tıklanınca açıklama modal'ı açılır; gönderilince admin'e bildirim düşer.
  */
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useToast } from './Toast';
 import { api } from '../services/api';
 import type { SubjectKind } from '../types';
@@ -54,7 +55,7 @@ export function SupportRequestButton({ kind = 'user' }: SupportRequestButtonProp
         <span className="text-sm font-semibold">Destek</span>
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
           role="dialog"
           aria-modal="true"
@@ -125,7 +126,8 @@ export function SupportRequestButton({ kind = 'user' }: SupportRequestButtonProp
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

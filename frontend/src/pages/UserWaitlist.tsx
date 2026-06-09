@@ -74,6 +74,20 @@ export default function UserWaitlist() {
     }
   }
 
+  // Geçmiş (iptal/süresi geçmiş) kaydı listeden kalıcı kaldır.
+  async function handleRemove(id: string) {
+    setCancelling(id);
+    try {
+      await api.removeWaitlistEntry(id);
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+      toast.push('success', 'Kayıt kaldırıldı.');
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Kaldırılamadı.');
+    } finally {
+      setCancelling(null);
+    }
+  }
+
   const grouped = useMemo(() => {
     return {
       waiting: entries.filter((e) => e.status === 'waiting'),
@@ -204,6 +218,15 @@ export default function UserWaitlist() {
                         </div>
                         <h3 className="font-semibold text-kt-gray-700 truncate">{e.projectName}</h3>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemove(e.id)}
+                        disabled={cancelling === e.id}
+                        className="btn-ghost text-rose-600 text-xs shrink-0"
+                        title="Bu kaydı listeden kaldır"
+                      >
+                        {cancelling === e.id ? 'Kaldırılıyor…' : 'Kaldır'}
+                      </button>
                     </div>
                   </article>
                 ))}

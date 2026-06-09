@@ -9,6 +9,7 @@
  * `requireUserGovernanceRole('analitik_danisman')` ile backend'de korunur.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AppShell } from '../components/AppShell';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
@@ -459,7 +460,7 @@ export default function DanismanDashboard() {
       )}
 
       {/* Aksiyon modal */}
-      {actionModal && (
+      {actionModal && createPortal(
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
           onClick={() => !submitting && setActionModal(null)}
@@ -523,7 +524,8 @@ export default function DanismanDashboard() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Tam booking detayı — projenin tüm context'i + onay/red/feedback aksiyonları. */}

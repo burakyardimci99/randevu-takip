@@ -25,6 +25,7 @@ interface UserRow {
   id: string;
   full_name: string;
   department: string | null;
+  profile_background_url: string | null;
   approved_bookings: number;
   util_days: number;
   likes: number;
@@ -46,7 +47,7 @@ interface ProjectRow {
 async function getUserRanking(limit: number): Promise<LeaderboardUser[]> {
   // Beğeni/yorum: kullanıcının SAHİP olduğu booking'lere gelenler.
   // util_days: onaylı booking'lerin gün sayısı (PostgreSQL date aritmetiği — DAY_DIFF).
-  const rows = await dbAll(`SELECT u.id, u.full_name, u.department,
+  const rows = await dbAll(`SELECT u.id, u.full_name, u.department, u.profile_background_url,
               COUNT(DISTINCT CASE WHEN b.status = 'approved' THEN b.id END) AS approved_bookings,
               COALESCE(SUM(CASE WHEN b.status = 'approved'
                                 THEN ${DAY_DIFF}
@@ -58,7 +59,7 @@ async function getUserRanking(limit: number): Promise<LeaderboardUser[]> {
        FROM users u
        LEFT JOIN bookings b ON b.user_id = u.id
        WHERE u.status = 1
-       GROUP BY u.id, u.full_name, u.department`, []) as UserRow[];
+       GROUP BY u.id, u.full_name, u.department, u.profile_background_url`, []) as UserRow[];
 
   return rows
     .map((r) => {
@@ -72,6 +73,7 @@ async function getUserRanking(limit: number): Promise<LeaderboardUser[]> {
         userId: r.id,
         fullName: r.full_name,
         department: r.department,
+        profileBackgroundUrl: r.profile_background_url,
         approvedBookings: r.approved_bookings ?? 0,
         utilizationDays,
         likes: r.likes ?? 0,

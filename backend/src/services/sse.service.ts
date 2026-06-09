@@ -186,3 +186,19 @@ export function initSseRoutes(app: Express): void {
 export function activeClientCount(): number {
   return clients.size;
 }
+
+/**
+ * Graceful shutdown: tüm açık SSE bağlantılarını kapatır. Uzun-ömürlü SSE
+ * stream'leri server.close()'u sonsuza dek bloklayabildiğinden, SIGTERM'de
+ * bunlar elle sonlandırılmalı.
+ */
+export function closeAllSse(): void {
+  for (const client of clients.values()) {
+    try {
+      client.res.end();
+    } catch {
+      /* zaten kapanmış olabilir */
+    }
+  }
+  clients.clear();
+}

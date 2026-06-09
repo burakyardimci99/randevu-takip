@@ -11,7 +11,7 @@ void initOtel();
 import express, { type Request, type Response } from 'express';
 import cookieParser from 'cookie-parser';
 import { config } from './config/env';
-import { initSchema } from './db/schema';
+import { initSchema, dbOne, closeDb } from './db/schema';
 import { logger } from './utils/logger';
 import {
   corsMiddleware,
@@ -22,9 +22,11 @@ import {
 } from './middleware/security.middleware';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import { csrfProtection, csrfTokenHandler } from './middleware/cookie-auth';
-import { initSseRoutes } from './services/sse.service';
+import { initSseRoutes, closeAllSse } from './services/sse.service';
+import { getQueue } from './services/queue.service';
 import { startWaitlistMaintenance } from './services/waitlist.service';
 import { warmupEmbeddings, backfillEmbeddings } from './services/embedding.service';
+import { warmupTranslation } from './services/image-gen.service';
 import { startMaintenance } from './services/maintenance.service';
 import { startBackupCron } from './services/backup.service';
 import { registerEmailHandler } from './services/notification.service';
@@ -54,8 +56,21 @@ function buildApp(): express.Express {
   app.use(requestLogger);
   app.use(globalRateLimit);
 
+  // Liveness — process ayakta mı (bağımlılık kontrolü yok, her zaman hızlı).
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({ status: 'ok', service: 'klab-randevu', time: new Date().toISOString() });
+  });
+
+  // Readiness — DB'ye gerçekten bağlanabiliyor mu? Orchestrator/LB bu yeşil
+  // olmadan trafik yönlendirmemeli (DB hazır değilken 500 dönmesin).
+  app.get('/api/readiness', async (_req: Request, res: Response) => {
+    try {
+      await dbOne('SELECT 1 AS ok');
+      res.json({ status: 'ready' });
+    } catch (err) {
+      logger.warn('readiness_check_failed', { err: (err as Error).message });
+      res.status(503).json({ status: 'not_ready' });
+    }
   });
 
   // CSRF token endpoint (GET — CSRF korumalı değil, token üretir)
@@ -116,6 +131,10 @@ async function start(): Promise<void> {
       logger.warn('embedding_warmup_or_backfill_failed', { err: (err as Error).message })
     );
 
+  // Görsel prompt çeviri modelini (HF opus-mt-tr-en) arka planda ısıt — ilk
+  // görsel üretiminde soğuk-başlangıç çevirisi zaman aşımına düşmesin. Non-blocking.
+  void warmupTranslation();
+
   // E-posta job handler (queue üzerinden async send)
   registerEmailHandler();
 
@@ -139,11 +158,40 @@ async function start(): Promise<void> {
     console.log(`\n[KLAB] Backend hazır → http://${config.host}:${config.port}\n`);
   });
 
+  let shuttingDown = false;
   const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info('shutdown_signal', { signal });
+
+    // Force-exit guard: uzun-ömürlü bağlantılar/asılı job'lar shutdown'ı sonsuza
+    // kadar bloklamasın (timeout sonunda non-zero ile çık → orchestrator restart).
+    const forceTimer = setTimeout(() => {
+      logger.error('shutdown_forced_timeout');
+      process.exit(1);
+    }, 15_000);
+    forceTimer.unref();
+
+    // 1) Açık SSE stream'lerini kapat (yoksa server.close() asılı kalır).
+    closeAllSse();
+
     server.close(() => {
-      logger.info('server_closed');
-      process.exit(0);
+      // 2) Kuyruğu boşalt (e-posta/embedding job'ları kaybolmasın) + DB pool'u kapat.
+      void (async () => {
+        try {
+          await getQueue().shutdown();
+        } catch (err) {
+          logger.warn('queue_shutdown_failed', { err: (err as Error).message });
+        }
+        try {
+          await closeDb();
+        } catch (err) {
+          logger.warn('db_close_failed', { err: (err as Error).message });
+        }
+        clearTimeout(forceTimer);
+        logger.info('server_closed');
+        process.exit(0);
+      })();
     });
   };
 

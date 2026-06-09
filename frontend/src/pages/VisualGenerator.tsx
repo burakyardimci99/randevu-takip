@@ -3,7 +3,7 @@ import { AppShell } from '../components/AppShell';
 import { useToast } from '../components/Toast';
 import { api } from '../services/api';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
-import type { Visual } from '../types';
+import type { Visual, Booking } from '../types';
 
 // Türkçe etiket (kullanıcıya görünen) + İngilizce prompt (flux/Pollinations
 // İngilizce'de çok daha kaliteli sonuç verir). Butona tıklayınca prompt tema'ya set.
@@ -35,6 +35,11 @@ export default function VisualGenerator() {
   const [imgLoading, setImgLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [gallery, setGallery] = useState<Visual[]>([]);
+  // Projeye atama + silme için kullanıcının projeleri (booking) ve durum state'i.
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [assignTarget, setAssignTarget] = useState<string>('');
+  const [assigning, setAssigning] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadGallery = useCallback(async () => {
     try {
@@ -47,6 +52,11 @@ export default function VisualGenerator() {
 
   useEffect(() => {
     loadGallery();
+    // Projeye atama için kullanıcının projelerini yükle (sessizce).
+    api
+      .listUserBookings()
+      .then((res) => setBookings(res.bookings))
+      .catch(() => {});
   }, [loadGallery]);
 
   function showVisual(v: Visual) {
@@ -106,6 +116,42 @@ export default function VisualGenerator() {
       toast.push('error', (err as Error).message || 'Yeniden üretilemedi.');
     } finally {
       setGenerating(false);
+    }
+  }
+
+  // Seçili görseli bir projenin (booking) envanter kartına arkaplan olarak atar.
+  async function handleAssign() {
+    if (!current || !assignTarget) return;
+    setAssigning(true);
+    try {
+      await api.setShowcaseImage(assignTarget, current.id);
+      const proj = bookings.find((b) => b.id === assignTarget);
+      toast.push(
+        'success',
+        `Görsel "${proj?.projectName ?? 'projen'}" projesinin envanter kartına atandı.`
+      );
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Görsel projeye atanamadı.');
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  // Görseli kalıcı siler (sahibi). Bir projeye atanmışsa backend arkaplanı kaldırır.
+  async function handleDelete(id: string) {
+    if (!window.confirm('Bu görsel kalıcı olarak silinsin mi? Bir projeye atanmışsa kart arkaplanı kaldırılır.')) {
+      return;
+    }
+    setDeletingId(id);
+    try {
+      await api.deleteVisual(id);
+      setGallery((g) => g.filter((v) => v.id !== id));
+      setCurrent((cur) => (cur && cur.id === id ? null : cur));
+      toast.push('success', 'Görsel silindi.');
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Görsel silinemedi.');
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -239,6 +285,47 @@ export default function VisualGenerator() {
               {current.variants.length > 1 && (
                 <div className="text-[11px] text-kt-gray-400">{current.variants.length} varyant üretildi</div>
               )}
+
+              {/* Projeye ata + sil — yalnız hazır görselde */}
+              {current.status === 'ready' && current.imageUrl && (
+                <div className="space-y-2 pt-3 border-t border-kt-gray-100">
+                  <label className="label">Bu görseli bir projene ata (envanter kartında görünür)</label>
+                  <div className="flex gap-2">
+                    <select
+                      className="input flex-1"
+                      value={assignTarget}
+                      onChange={(e) => setAssignTarget(e.target.value)}
+                    >
+                      <option value="">Proje seç…</option>
+                      {bookings.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.projectName}
+                          {b.status !== 'approved' ? ' (onay bekliyor)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={handleAssign}
+                      disabled={!assignTarget || assigning}
+                      className="btn-primary shrink-0"
+                    >
+                      {assigning ? '…' : 'Ata'}
+                    </button>
+                  </div>
+                  {bookings.length === 0 && (
+                    <p className="text-[11px] text-kt-gray-400">
+                      Henüz projen yok. Önce bir oda/proje talebi oluştur.
+                    </p>
+                  )}
+                  <button
+                    onClick={() => handleDelete(current.id)}
+                    disabled={deletingId === current.id}
+                    className="btn-ghost text-rose-600 text-sm"
+                  >
+                    {deletingId === current.id ? 'Siliniyor…' : '🗑 Bu görseli sil'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -250,25 +337,34 @@ export default function VisualGenerator() {
           <h2 className="text-lg font-bold text-kt-green-900 mb-3">Görsellerim</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
             {gallery.map((v) => (
-              <button
-                key={v.id}
-                onClick={() => showVisual(v)}
-                className="aspect-square rounded-lg overflow-hidden bg-kt-gray-100 border border-kt-gray-100 hover:border-kt-violet-300 transition-colors group"
-                title={v.fikir}
-              >
-                {v.imageUrl ? (
-                  <img
-                    src={v.imageUrl}
-                    alt={v.fikir}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-2xl">🎨</div>
-                )}
-              </button>
+              <div key={v.id} className="relative group aspect-square">
+                <button
+                  onClick={() => showVisual(v)}
+                  className="w-full h-full rounded-lg overflow-hidden bg-kt-gray-100 border border-kt-gray-100 hover:border-kt-violet-300 transition-colors block"
+                  title={v.fikir}
+                >
+                  {v.imageUrl ? (
+                    <img
+                      src={v.imageUrl}
+                      alt={v.fikir}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-2xl">🎨</div>
+                  )}
+                </button>
+                <button
+                  onClick={() => handleDelete(v.id)}
+                  disabled={deletingId === v.id}
+                  className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white text-sm leading-none opacity-0 group-hover:opacity-100 hover:bg-rose-600 transition-opacity flex items-center justify-center"
+                  title="Görseli sil"
+                >
+                  {deletingId === v.id ? '·' : '×'}
+                </button>
+              </div>
             ))}
           </div>
         </div>

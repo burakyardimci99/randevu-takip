@@ -91,35 +91,49 @@ export default function Leaderboard() {
           {data.users.length === 0 && (
             <div className="text-kt-gray-500 italic">Henüz sıralama için yeterli aktivite yok.</div>
           )}
-          {data.users.map((u, i) => (
+          {data.users.map((u, i) => {
+            const hasBg = !!u.profileBackgroundUrl;
+            return (
             <div
               key={u.userId}
-              className={`flex items-center gap-4 rounded-xl border p-3 ${rankCls(i)}`}
+              className={`relative overflow-hidden flex items-center gap-4 rounded-xl border p-3 ${rankCls(i)}`}
+              style={
+                hasBg
+                  ? {
+                      backgroundImage: `url("${u.profileBackgroundUrl}")`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    }
+                  : undefined
+              }
             >
-              <div className="w-9 text-center text-xl font-extrabold text-kt-green-900 shrink-0">
+              {hasBg && (
+                <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/55 to-black/35 pointer-events-none" />
+              )}
+              <div className={`relative z-10 w-9 text-center text-xl font-extrabold shrink-0 ${hasBg ? 'text-white' : 'text-kt-green-900'}`}>
                 {medal(i)}
               </div>
               <Link
                 to={`/u/${u.userId}`}
-                className="flex-1 min-w-0 hover:text-kt-gold-700"
+                className={`relative z-10 flex-1 min-w-0 ${hasBg ? 'hover:text-kt-gold-300' : 'hover:text-kt-gold-700'}`}
                 title="Profili gör"
               >
-                <div className="font-bold text-kt-green-900 truncate">{u.fullName}</div>
-                <div className="text-[11px] text-kt-gray-500">
+                <div className={`font-bold truncate ${hasBg ? 'text-white' : 'text-kt-green-900'}`}>{u.fullName}</div>
+                <div className={`text-[11px] ${hasBg ? 'text-white/75' : 'text-kt-gray-500'}`}>
                   {u.department || 'Departman belirtilmemiş'}
                 </div>
               </Link>
-              <div className="hidden sm:flex items-center gap-3 text-[11px] text-kt-gray-600 shrink-0">
+              <div className={`relative z-10 hidden sm:flex items-center gap-3 text-[11px] shrink-0 ${hasBg ? 'text-white/85' : 'text-kt-gray-600'}`}>
                 <span title="Onaylı randevu">📋 {u.approvedBookings}</span>
                 <span title="Kullanım günü">📆 {u.utilizationDays}</span>
                 <span title="Beğeni">❤️ {u.likes}</span>
                 <span title="Yorum">💬 {u.comments}</span>
               </div>
-              <div className="w-28 shrink-0">
-                <div className="text-right text-sm font-extrabold text-kt-green-800 tabular-nums">
+              <div className="relative z-10 w-28 shrink-0">
+                <div className={`text-right text-sm font-extrabold tabular-nums ${hasBg ? 'text-white' : 'text-kt-green-800'}`}>
                   {u.score.toFixed(0)}
                 </div>
-                <div className="h-1.5 bg-kt-gray-100 rounded-full overflow-hidden mt-1">
+                <div className={`h-1.5 rounded-full overflow-hidden mt-1 ${hasBg ? 'bg-white/25' : 'bg-kt-gray-100'}`}>
                   <div
                     className="h-full bg-gradient-to-r from-kt-green-500 to-kt-gold-500"
                     style={{ width: `${Math.max(4, (u.score / maxUserScore) * 100)}%` }}
@@ -127,7 +141,8 @@ export default function Leaderboard() {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="space-y-2">

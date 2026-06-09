@@ -14,8 +14,8 @@ interface LogoProps {
 }
 
 const HEIGHT_MAP = {
-  sm: 'h-10',
-  md: 'h-14',
+  sm: 'h-12',
+  md: 'h-16',
   lg: 'h-20',
   xl: 'h-44',
 } as const;
@@ -36,8 +36,9 @@ export function Logo({
   const heightClass = HEIGHT_MAP[size];
   const taglineSize = TAGLINE_SIZE[size];
 
-  // Tek logo (her variant'ta aynı JPEG kullanır — logoyla birlikte dark glow background)
-  const logoSrc = '/ai-lab-logo.jpg';
+  // Yüksek kaliteli PNG (1200×905) — JPEG'in sıkıştırma bozulması/sert kenarları
+  // yerine net görsel. Giriş/landing sayfaları da bu PNG'yi kullanıyor (tutarlılık).
+  const logoSrc = '/ai-lab-logo.png';
 
   const taglinePrimary =
     variant === 'light' ? 'text-kt-gold-300' : 'text-kt-gold-600';
@@ -50,7 +51,9 @@ export function Logo({
     <img
       src={logoSrc}
       alt="Kuveyt Türk AI Lab"
-      className={`${heightClass} w-auto object-contain shrink-0`}
+      className={`${heightClass} w-auto object-contain shrink-0 rounded-xl
+        ring-1 ring-white/10 shadow-lg shadow-black/30
+        transition-transform duration-300 ease-out hover:scale-[1.04]`}
       loading="eager"
       decoding="async"
     />

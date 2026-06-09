@@ -1413,6 +1413,15 @@ export async function seedNotifications(): Promise<void> {
 }
 
 export async function runSeed(): Promise<void> {
+  // PROD GUARD: Demo seed bilinen sabit parolalı hesaplar (admin@klab.test vb.)
+  // üretir. Üretim DB'sine yanlışlıkla yüklenmesini engelle — bilinçli açmak için
+  // ALLOW_PROD_SEED=true gerekir (app_security.md: demo veri prod'a sızmamalı).
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_PROD_SEED !== 'true') {
+    throw new Error(
+      'Demo seed production ortamında engellendi. Bilinçli olarak yüklemek için ' +
+        'ALLOW_PROD_SEED=true ayarlayın (ve demo hesap parolalarını derhal değiştirin).'
+    );
+  }
   await seedRooms();
   await seedUsers();
   await seedAdmins();

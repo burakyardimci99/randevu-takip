@@ -102,6 +102,11 @@ export default function UserLicenses() {
   const [requests, setRequests] = useState<LicenseRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  // Eksik-alan uyarıları yalnızca kullanıcı bir kez "Gönder"e bastıktan sonra
+  // görünür. Aksi halde form ilk açıldığında veya başarılı gönderim sonrası
+  // resetForm() formu boşalttığında tüm "en az X karakter" uyarıları haksız
+  // yere çıkıyordu ("talep gitse bile uyarı çıkıyor").
+  const [triedSubmit, setTriedSubmit] = useState(false);
 
   // Form state — Başvuru Formu
   const [requestTitle, setRequestTitle] = useState('');
@@ -237,6 +242,7 @@ export default function UserLicenses() {
 
   function resetForm() {
     setEditingId(null);
+    setTriedSubmit(false);
     setRequestTitle('');
     setReason('');
     setExpectedBenefit('');
@@ -295,6 +301,7 @@ export default function UserLicenses() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
+    setTriedSubmit(true);
     if (!canSubmit) {
       toast.push('error', `Eksik alan: ${missingFields.join(' · ')}`);
       return;
@@ -796,8 +803,10 @@ export default function UserLicenses() {
               </div>
             </fieldset>
 
-            {/* Eksik alanlar — gönderimi engelleyen zorunlu alanları açıkça listeler. */}
-            {!canSubmit && (
+            {/* Eksik alanlar — yalnızca bir gönderim denemesinden sonra ve hâlâ
+                eksik alan varken gösterilir (boş formda / başarılı gönderim
+                sonrası haksız uyarı çıkmasın). */}
+            {triedSubmit && !canSubmit && (
               <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
                 <p className="text-sm font-semibold text-amber-900 mb-1.5 flex items-center gap-1.5">
                   <span aria-hidden>⚠️</span> Göndermeden önce şu alanları tamamla:

@@ -80,8 +80,24 @@ function pgPoolHandle(): any {
   // (id/sayım değerleri küçük; precision kaybı yok. int4 zaten number döner.)
   pg.types.setTypeParser(20, (v: string) => parseInt(v, 10));
   const { Pool } = pg;
-  pgPool = new Pool({ connectionString: url, max: 10 });
+  const isProduction = (process.env.NODE_ENV ?? 'development') === 'production';
+  // Prod'da TLS zorunlu (managed/uzak Postgres). PGSSL=disable ile bilinçli
+  // kapatılabilir (örn. iç ağda sidecar-TLS). sslmode connection string'de de
+  // verilebilir; buradaki ayar pg sürücüsüne sertifika doğrulamasını söyler.
+  const sslDisabled = process.env.PGSSL === 'disable' || /sslmode=disable/.test(url);
+  const ssl = isProduction && !sslDisabled ? { rejectUnauthorized: true } : false;
+  pgPool = new Pool({
+    connectionString: url,
+    max: parseInt(process.env.DB_POOL_MAX ?? '10', 10) || 10,
+    // Kaçak/asılı sorgular pool'u kilitlemesin (banka SLA + DoS sertleştirme).
+    statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT_MS ?? '15000', 10) || 15000,
+    query_timeout: parseInt(process.env.DB_QUERY_TIMEOUT_MS ?? '15000', 10) || 15000,
+    connectionTimeoutMillis: parseInt(process.env.DB_CONNECT_TIMEOUT_MS ?? '5000', 10) || 5000,
+    idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT_MS ?? '30000', 10) || 30000,
+    ssl,
+  });
   pgPool.on('error', (err: Error) => logger.error('pg_pool_error', { err: err.message }));
+  logger.info('pg_pool_initialized', { ssl: ssl !== false, max: pgPool.options?.max ?? 10 });
   return pgPool;
 }
 

@@ -5,6 +5,7 @@
  * saat aralığını seçer. Kapasite + çakışma kontrolü backend'de yapılır.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Booking } from '../types';
 
 interface Props {
@@ -92,7 +93,7 @@ export function AppointmentModal({ booking, onClose, onSubmit, submitting, initi
     }
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
       onClick={() => !submitting && onClose()}
@@ -189,6 +190,7 @@ export function AppointmentModal({ booking, onClose, onSubmit, submitting, initi
           </button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body
   );
 }

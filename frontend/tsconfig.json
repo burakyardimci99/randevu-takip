@@ -17,10 +17,9 @@
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": "./src",
     "paths": {
-      "@/*": ["*"],
-      "@klab/shared": ["../../shared/index.d.ts"]
+      "@/*": ["./src/*"],
+      "@klab/shared": ["../shared/index.d.ts"]
     }
   },
   "include": ["src", "../shared/index.d.ts"]

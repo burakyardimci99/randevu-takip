@@ -7,6 +7,7 @@
  *  - Realtime: randevu eklenince/iptal olunca ısı haritası otomatik yenilenir (#5).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import type { ApptHeatmapDay, ApptHeatmapRoom, RoomApptHeatmap, SubjectKind } from '../types';
@@ -241,7 +242,7 @@ export function RoomWeekdayHeatmap({ kind = 'user' }: { kind?: SubjectKind }) {
       )}
 
       {/* Hücre detayı — o oda/gün hangi saatlerde dolu (#5) */}
-      {selected && (
+      {selected && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/60 backdrop-blur-sm animate-fade-in"
           onClick={() => setSelected(null)}
@@ -291,7 +292,8 @@ export function RoomWeekdayHeatmap({ kind = 'user' }: { kind?: SubjectKind }) {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import type { LucideIcon } from 'lucide-react';
-import { Eye, EyeOff, Mail, Lock, User, BrainCircuit, FlaskConical } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/Toast';
 import { clearCsrfCache } from '../services/api';
@@ -13,9 +12,12 @@ import { clearCsrfCache } from '../services/api';
  *  - Merkezde glass dark card (bg-black/55 backdrop-blur)
  *
  * Backend §4 parola politikasını uygular (min 12 + karmaşıklık).
+ *
+ * Rol seçimi YOKTUR: tüm kayıtlar normal "kullanıcı" olarak oluşturulur.
+ * Yönetişim rolleri (analitik danışman / YZ-Ar-Ge) yalnızca admin tarafından
+ * "Kullanıcılar" ekranından atanır (privilege escalation'a karşı, backend
+ * registerSchema rolü zaten kabul etmiyor).
  */
-type AccountType = 'user' | 'analitik_danisman' | 'yz_arge';
-
 export default function Register() {
   const { register } = useAuth();
   const toast = useToast();
@@ -24,7 +26,6 @@ export default function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [accountType, setAccountType] = useState<AccountType>('user');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -62,25 +63,17 @@ export default function Register() {
 
     setLoading(true);
     try {
-      // SECURITY (C2): governanceRole REGISTRATION'da atanmaz. Backend her
-      // yeni kullanıcıyı governance_role=NULL olarak kaydeder. Hesap tipi
-      // seçimi UI'da gösterilir ama 'user' dışındaki seçimler admin onayı
-      // gerektirir (admin sonradan PATCH /admin/users/:id/governance-role
-      // ile atayabilir). Burada sadece user oluşturuyoruz.
+      // SECURITY (C2): Kayıt her zaman normal "kullanıcı" oluşturur. Yönetişim
+      // rolü (analitik danışman / YZ-Ar-Ge) burada atanamaz — backend
+      // registerSchema rolü kabul etmez ve governance_role=NULL kaydedilir.
+      // Rol atamasını yalnızca admin "Kullanıcılar" ekranından yapar.
       const { subject } = await register({
         email,
         password,
         passwordConfirm,
         fullName,
       });
-      if (accountType !== 'user') {
-        toast.push(
-          'info',
-          'Hesabınız oluşturuldu. Yönetişim rolü için admin onayı gerekir; başlangıçta normal kullanıcı erişiminiz var.'
-        );
-      } else {
-        toast.push('success', `Hoş geldiniz ${subject.fullName}! Hesabınız oluşturuldu.`);
-      }
+      toast.push('success', `Hoş geldiniz ${subject.fullName}! Hesabınız oluşturuldu.`);
       navigate('/rooms', { replace: true });
     } catch (err) {
       const e = err as { message?: string; issues?: Array<{ path: string; message: string }> };
@@ -95,12 +88,6 @@ export default function Register() {
       setLoading(false);
     }
   }
-
-  const TYPE_OPTIONS: Array<{ v: AccountType; label: string; desc: string; Icon: LucideIcon }> = [
-    { v: 'user', label: 'Kullanıcı', desc: 'Oda + randevu', Icon: User },
-    { v: 'analitik_danisman', label: 'Danışman', desc: 'Başvuru değerlendir', Icon: BrainCircuit },
-    { v: 'yz_arge', label: 'Ar-Ge', desc: 'Stage / Production', Icon: FlaskConical },
-  ];
 
   return (
     <div className="relative min-h-screen w-full flex items-center justify-center px-4 py-12 overflow-hidden bg-kt-green-950">
@@ -171,42 +158,6 @@ export default function Register() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
-              {/* Hesap Tipi */}
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-[0.18em] text-white/60 mb-2">
-                  Hesap Tipi
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {TYPE_OPTIONS.map(({ v, label, desc, Icon }) => {
-                    const selected = accountType === v;
-                    return (
-                      <button
-                        key={v}
-                        type="button"
-                        onClick={() => setAccountType(v)}
-                        disabled={loading}
-                        className={`p-2.5 rounded-xl text-left border transition-all ${
-                          selected
-                            ? 'border-kt-gold-400/70 bg-kt-gold-400/15 ring-2 ring-kt-gold-400/30'
-                            : 'border-white/15 hover:border-white/30 bg-white/5'
-                        }`}
-                      >
-                        <Icon size={16} />
-                        <div className={`text-xs font-bold mt-1.5 ${selected ? 'text-kt-gold-200' : 'text-white'}`}>
-                          {label}
-                        </div>
-                        <div className="text-[10px] text-white/60 mt-0.5">{desc}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-                {accountType !== 'user' && (
-                  <p className="text-[11px] text-kt-gold-200 bg-kt-gold-400/10 border border-kt-gold-400/30 rounded-md px-2 py-1.5 mt-2">
-                    Demo ortam — prod'da yönetişim rolü atamasını yalnızca admin yapar.
-                  </p>
-                )}
-              </div>
-
               {/* Ad Soyad */}
               <div>
                 <label htmlFor="fullName" className="block text-xs font-bold uppercase tracking-[0.18em] text-white/60 mb-1.5">

@@ -16,6 +16,7 @@
  *  - Kamera akışı modal kapanınca / unmount'ta durdurulur (track.stop)
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useToast } from './Toast';
 import { api } from '../services/api';
 
@@ -230,7 +231,7 @@ function CameraCaptureModal({
     setShot({ canvas, url: canvas.toDataURL('image/jpeg', 0.9) });
   }
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -349,7 +350,8 @@ function CameraCaptureModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

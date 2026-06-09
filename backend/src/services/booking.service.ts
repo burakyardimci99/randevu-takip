@@ -73,6 +73,8 @@ export interface BookingDto {
   stageAdvanceRequestedAt: string | null;
   /** Talep gerekçesi/notu (opsiyonel). */
   stageAdvanceNote: string | null;
+  /** Kullanıcının projeye (envanter kartına) atadığı görsel — admin de görebilsin. */
+  showcaseImageUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -103,6 +105,7 @@ interface BookingRow {
   review_track: 'standard' | 'swat';
   stage_advance_requested_at: string | null;
   stage_advance_note: string | null;
+  showcase_image_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -141,6 +144,7 @@ function rowToDto(r: BookingRow): BookingDto {
     reviewTrack: r.review_track,
     stageAdvanceRequestedAt: r.stage_advance_requested_at,
     stageAdvanceNote: r.stage_advance_note,
+    showcaseImageUrl: r.showcase_image_url ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -181,6 +185,17 @@ function isValidStartDate(dateStr: string): boolean {
   return start.getTime() >= today.getTime();
 }
 
+/**
+ * Oda-bazlı transaction advisory lock. Aynı oda için eşzamanlı rezervasyon
+ * işlemlerini (oluştur / düzenle / onayla / yeniden ata) serialize eder; böylece
+ * iki istek aynı anda boş görüp ikisi de yazamaz (çift rezervasyon race'i).
+ * Lock transaction sonunda (COMMIT/ROLLBACK) otomatik bırakılır → dbTx içinde,
+ * çakışma SELECT'inden ÖNCE çağrılmalı (app_security §10).
+ */
+async function lockRoomForBooking(roomId: string): Promise<void> {
+  await dbRun('SELECT pg_advisory_xact_lock(hashtext(?))', [`room:${roomId}`]);
+}
+
 export async function createBooking(userId: string, input: CreateBookingInput): Promise<BookingDto> {
   if (!isValidStartDate(input.startDate)) {
     throw new HttpError(400, 'Başlangıç tarihi bugünden önce olamaz.', 'INVALID_START_DATE');
@@ -196,6 +211,9 @@ export async function createBooking(userId: string, input: CreateBookingInput): 
     }
 
     const weekdayMask = weekdaysToMask(input.weekdays);
+
+    // Çakışma kontrolü + INSERT'i aynı oda için serialize et (çift rezervasyon race'i).
+    await lockRoomForBooking(input.roomId);
 
     const conflict = await dbOne(`SELECT id FROM bookings
          WHERE room_id = ?
@@ -305,6 +323,7 @@ export async function updateBooking(
 
     // 3) Gün-bazlı çakışma — kendi booking'i hariç, aynı gün + tarih örtüşmesi
     const weekdayMask = weekdaysToMask(input.weekdays);
+    await lockRoomForBooking(input.roomId);
     const conflict = await dbOne(`SELECT id FROM bookings
          WHERE room_id = ?
            AND id != ?
@@ -498,6 +517,7 @@ export async function reviewBooking(
     if (!existing) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
 
     if (newStatus === 'approved') {
+      await lockRoomForBooking(existing.room_id);
       const conflict = await dbOne(`SELECT id FROM bookings
            WHERE room_id = ? AND id != ? AND status = 'approved'
              AND NOT (end_date < ? OR start_date > ?)
@@ -700,6 +720,7 @@ export async function reassignBookingRoom(
 
     // Onaylı booking için hedef odada tarih çakışması kontrolü.
     if (existing.status === 'approved') {
+      await lockRoomForBooking(newRoomId);
       const conflict = await dbOne(`SELECT id FROM bookings
            WHERE room_id = ? AND id != ? AND status = 'approved'
              AND NOT (end_date < ? OR start_date > ?)

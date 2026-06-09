@@ -1,7 +1,8 @@
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Logo } from './Logo';
+import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from './Toast';
 import { NotificationCenter } from './NotificationCenter';
@@ -296,6 +297,15 @@ export const STAFF_VIEW_NAV: NavItem[] = [
       </svg>
     ),
   },
+  {
+    to: '/showcase',
+    label: 'Envanter',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
+      </svg>
+    ),
+  },
 ];
 
 /** Analitik Danışman nav — kendi inbox'ı + read-only admin görünümleri. */
@@ -334,6 +344,11 @@ function navForKind(kind: SubjectKind): NavItem[] {
   return USER_NAV;
 }
 
+// Kullanıcının profil fotoğrafı — auth subject'i taşımadığından profilden çekilir.
+// Modül seviyesi cache: her sayfa gezinmesinde AppShell remount olsa da tekrar
+// tekrar fetch atılmasın (ilk yüklemede gelir, sonraki render'larda anında gösterilir).
+let cachedUserPhoto: string | null = null;
+
 export function AppShell({
   kind,
   children,
@@ -354,6 +369,24 @@ export function AppShell({
         : kind === 'arge'
           ? auth.arge
           : auth.user;
+
+  // Kullanıcı profil fotoğrafını header avatarında göster (yalnız 'user' kind).
+  const [userPhoto, setUserPhoto] = useState<string | null>(cachedUserPhoto);
+  useEffect(() => {
+    if (kind !== 'user') return;
+    let active = true;
+    api
+      .getProfile()
+      .then((r) => {
+        if (!active) return;
+        cachedUserPhoto = r.profile.profilePhoto;
+        setUserPhoto(r.profile.profilePhoto);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [kind]);
 
   // Bildirim verisi — zil + menü rozetleri için tek kaynak.
   const location = useLocation();
@@ -459,8 +492,14 @@ export function AppShell({
               className="hidden 2xl:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-kt-gold-400/30 transition-all"
               title={effectiveRoleLabel}
             >
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-kt-gold-400 to-kt-gold-600 text-kt-green-950 flex items-center justify-center font-bold text-xs shadow-glow-cyan">
-                {me?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('') ?? '??'}
+              <div className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-kt-gold-400 to-kt-gold-600 text-kt-green-950 flex items-center justify-center font-bold text-xs shadow-glow-cyan">
+                {kind === 'admin' ? (
+                  <img src="/admin-pp.png" alt="" className="w-full h-full object-cover" />
+                ) : userPhoto ? (
+                  <img src={userPhoto} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  me?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('') ?? '??'
+                )}
               </div>
               <div className="text-xs">
                 <div className="font-semibold text-white leading-tight">{me?.fullName}</div>

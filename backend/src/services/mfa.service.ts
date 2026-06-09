@@ -3,7 +3,8 @@
  *
  * Güvenlik:
  * - speakeasy: TOTP generate + verify (RFC 6238, SHA-1, 30s window, 6 digit).
- * - Secret base32 string olarak DB'de saklanır.
+ * - Secret base32 → DB'ye AES-256-GCM ŞİFRELİ yazılır (utils/crypto); düz metin
+ *   saklanmaz. Doğrulamada çözülür. Eski düz-metin kayıtlar geriye dönük okunur.
  * - Backup code: 8 adet tek-kullanımlık kod. Kullanıcıya bir kez düz gösterilir,
  *   DB'de yalnız argon2 HASH'leri saklanır (plain saklanmaz). Doğrulamada her
  *   hash'e karşı argon2.verify denenir; eşleşen hash diziden silinir (tek-kullanım).
@@ -16,7 +17,7 @@ import speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
 import { dbOne, dbRun } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
-import { config } from '../config/env';
+import { encryptSecret, decryptSecret } from '../utils/crypto';
 
 export interface MfaEnrollResult {
   secret: string;
@@ -82,8 +83,9 @@ export async function enrollMfa(adminId: string): Promise<MfaEnrollResult> {
   const hashedCodes = await Promise.all(backupCodes.map((c) => argon2.hash(c)));
 
   // Secret + backup code hash'leri DB'ye yazılır — ancak totp_enabled hâlâ 0
-  // (kullanıcı 6-digit ile verify edene kadar aktif değil)
-  await dbRun('UPDATE admins SET totp_secret = ?, totp_backup_codes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [secret.base32, JSON.stringify(hashedCodes), adminId]);
+  // (kullanıcı 6-digit ile verify edene kadar aktif değil). TOTP secret at-rest
+  // AES-256-GCM ile şifrelenir (DB sızıntısında MFA taklit edilemesin, CWE-312).
+  await dbRun('UPDATE admins SET totp_secret = ?, totp_backup_codes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [encryptSecret(secret.base32), JSON.stringify(hashedCodes), adminId]);
 
   const qrCodeDataUrl = await qrcode.toDataURL(secret.otpauth_url ?? '');
 
@@ -109,9 +111,10 @@ export async function verifyMfaCode(
     throw new HttpError(409, 'MFA henüz başlatılmadı.', 'MFA_NOT_ENABLED');
   }
 
-  // Önce TOTP
+  // Önce TOTP — secret at-rest şifreli; doğrulama için çöz (eski düz-metin
+  // kayıtlar decryptSecret tarafından aynen döndürülür → geriye dönük uyumlu).
   const ok = speakeasy.totp.verify({
-    secret: row.totp_secret,
+    secret: decryptSecret(row.totp_secret),
     encoding: 'base32',
     token: code,
     window: 1, // ±30s tolerans
@@ -177,6 +180,3 @@ export async function isMfaRequired(adminId: string): Promise<boolean> {
   const row = await dbOne('SELECT totp_enabled FROM admins WHERE id = ? AND status = 1', [adminId]) as { totp_enabled: number } | undefined;
   return !!row && row.totp_enabled === 1;
 }
-
-// Production hardening note (config.isProduction reference for unused import lint)
-void config;

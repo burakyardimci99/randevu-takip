@@ -38,6 +38,8 @@ export interface ChatContact {
   fullName: string;
   /** "Yönetici" | "Analitik Danışman" | "YZ / Ar-Ge" | "Kullanıcı" */
   roleLabel: string;
+  /** Kullanıcı profil fotoğrafı (base64 data URL). admin'lerde null. */
+  profilePhoto: string | null;
   lastMessage: string | null;
   lastMessageAt: string | null;
   unread: number;
@@ -89,7 +91,7 @@ export async function resolveActor(id: string, kind: ChatKind): Promise<ChatActo
  */
 export async function listContacts(me: ChatActor): Promise<ChatContact[]> {
 
-  const users = await dbAll(`SELECT id, full_name, governance_role FROM users WHERE status != 3`, []) as Array<{ id: string; full_name: string; governance_role: string | null }>;
+  const users = await dbAll(`SELECT id, full_name, governance_role, profile_photo FROM users WHERE status != 3`, []) as Array<{ id: string; full_name: string; governance_role: string | null; profile_photo: string | null }>;
   const admins = await dbAll(`SELECT id, full_name FROM admins WHERE status != 3`, []) as Array<{ id: string; full_name: string }>;
 
   const contacts: ChatContact[] = [
@@ -98,6 +100,7 @@ export async function listContacts(me: ChatActor): Promise<ChatContact[]> {
       kind: 'user' as ChatKind,
       fullName: u.full_name,
       roleLabel: roleLabelForUser(u.governance_role),
+      profilePhoto: u.profile_photo,
       lastMessage: null as string | null,
       lastMessageAt: null as string | null,
       unread: 0,
@@ -107,6 +110,7 @@ export async function listContacts(me: ChatActor): Promise<ChatContact[]> {
       kind: 'admin' as ChatKind,
       fullName: a.full_name,
       roleLabel: 'Yönetici',
+      profilePhoto: null,
       lastMessage: null as string | null,
       lastMessageAt: null as string | null,
       unread: 0,

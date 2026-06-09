@@ -264,22 +264,25 @@ export default function AdminDashboard() {
       <section className="mb-6">
         <div className="rounded-2xl bg-white border border-kt-gray-100 overflow-hidden">
           <div className="grid md:grid-cols-[1fr_auto] gap-0">
-            {/* Sol — kullanıcı bilgisi + selam */}
-            <div className="p-5 md:p-6 flex items-center gap-4 min-w-0">
-              <div className="relative shrink-0">
-                <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-kt-green-900 text-white flex items-center justify-center font-extrabold text-lg">
-                  {admin?.fullName
-                    ?.split(' ')
-                    .map((p) => p[0])
-                    .slice(0, 2)
-                    .join('') ?? 'AD'}
+            {/* Sol — kullanıcı bilgisi + selam (AI banner görseli arka planda) */}
+            <div className="relative p-5 md:p-6 flex items-center gap-4 min-w-0 overflow-hidden">
+              {/* Arka plan görseli + okunabilirlik için sola beyazlaşan degrade */}
+              <div
+                className="absolute inset-0 bg-cover bg-center"
+                style={{ backgroundImage: 'url("/admin-hero.png")' }}
+                aria-hidden="true"
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-white/95 via-white/82 to-white/40 pointer-events-none" />
+              <div className="relative z-10 shrink-0">
+                <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl overflow-hidden bg-kt-green-900 text-white flex items-center justify-center font-extrabold text-lg">
+                  <img src="/admin-pp.png" alt="Admin" className="w-full h-full object-cover" />
                 </div>
                 <span
                   className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"
                   title="Çevrimiçi"
                 />
               </div>
-              <div className="min-w-0 flex-1">
+              <div className="relative z-10 min-w-0 flex-1">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-kt-gray-500">
                     Yönetim Paneli
@@ -462,8 +465,14 @@ export default function AdminDashboard() {
                   className="w-full text-left rounded-xl border border-kt-gray-100 hover:border-kt-gray-200 p-4 transition-shadow duration-200 hover:shadow-sm group focus:outline-none focus:ring-2 focus:ring-kt-gold-400 focus:ring-offset-2"
                 >
                   <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-full bg-kt-green-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
-                      {b.userFullName ? initials(b.userFullName) : '??'}
+                    <div className="w-10 h-10 rounded-full overflow-hidden bg-kt-green-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                      {b.userPhoto ? (
+                        <img src={b.userPhoto} alt="" className="w-full h-full object-cover" />
+                      ) : b.userFullName ? (
+                        initials(b.userFullName)
+                      ) : (
+                        '??'
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap mb-1">

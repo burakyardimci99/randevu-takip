@@ -501,3 +501,21 @@ CREATE INDEX IF NOT EXISTS idx_support_requests_user
           ON support_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_visuals_user ON visuals(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_visuals_room ON visuals(room_id, created_at DESC);
+
+-- ============================================================
+-- ARTIMLI MİGRASYONLAR (idempotent)
+-- ============================================================
+-- CREATE TABLE IF NOT EXISTS yalnız YENİ kurulumda kolon ekler; halihazırda
+-- deploy edilmiş bir DB'de mevcut tabloya kolon EKLEMEZ. Şemaya sonradan kolon
+-- eklendiğinde, ileride var olan prod DB'lerinin de güncellenmesi için buraya
+-- "ALTER TABLE ... ADD COLUMN IF NOT EXISTS" satırı eklenmeli. Bu blok her
+-- başlangıçta çalışır ve idempotenttir (yeni kurulumda no-op).
+ALTER TABLE users  ADD COLUMN IF NOT EXISTS profile_photo TEXT;
+ALTER TABLE users  ADD COLUMN IF NOT EXISTS governance_role TEXT;
+ALTER TABLE users  ADD COLUMN IF NOT EXISTS profile_background_url TEXT;
+ALTER TABLE users  ADD COLUMN IF NOT EXISTS chat_background_url TEXT;
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS totp_secret TEXT;
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS totp_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS totp_backup_codes TEXT;
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS governance_role TEXT;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS showcase_image_url TEXT;

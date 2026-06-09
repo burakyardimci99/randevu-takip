@@ -20,11 +20,13 @@
     "noUnusedParameters": false,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "moduleResolution": "node",
-    "baseUrl": "./src",
+    // CommonJS + uzantısız relative import'lar → moduleResolution 'node10' (eski
+    // adı 'node') zorunlu (node16/nodenext tüm import'lara .js uzantısı ister).
+    // baseUrl kaldırıldı; paths tsconfig'e göre relative (deprecation azaltma).
+    "moduleResolution": "node10",
     "paths": {
-      "@/*": ["*"],
-      "@klab/shared": ["../../shared/index.d.ts"]
+      "@/*": ["./src/*"],
+      "@klab/shared": ["../shared/index.d.ts"]
     }
   },
   "include": ["src/**/*"],

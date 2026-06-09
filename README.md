@@ -51,12 +51,14 @@ docker compose up -d --build
 
 Dev stack kaynak değişikliklerini hot-reload eder (backend `tsx watch`, frontend Vite HMR). İlk açılışta şema + demo seed otomatik yüklenir.
 
-Görsel üretimi (opsiyonel) için Pollinations API anahtarı — [enter.pollinations.ai](https://enter.pollinations.ai)'den ücretsiz alınır:
+Görsel üretimi (opsiyonel) için **ücretsiz Hugging Face token** — [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)'den "Read" rolünde alınır (FLUX.1-schnell, API key maliyeti yok):
 
 ```bash
-export POLLINATIONS_TOKEN=sk_...
+export HUGGINGFACE_API_KEY=hf_...
 docker compose up -d --force-recreate backend
 ```
+
+> Alternatif sağlayıcılar `IMAGE_PROVIDER=pollinations` (`POLLINATIONS_TOKEN`) veya `IMAGE_PROVIDER=gemini` (`GEMINI_API_KEY`) ile seçilebilir.
 
 ### Manuel kurulum (Docker'sız)
 

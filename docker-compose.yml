@@ -42,11 +42,17 @@ services:
     # atlar) → fresh pg volume'da demo verisi otomatik gelir, dolu volume'da güvenle
     # atlanır. Böylece tek `docker compose up` sonrası demoda veri hazır olur.
     command: sh -c "npm run db:init && npm run dev"
+    # Görsel sağlayıcı anahtarları (IMAGE_PROVIDER / HUGGINGFACE_API_KEY /
+    # POLLINATIONS_TOKEN / GEMINI_API_KEY) backend/.env'den okunur. env_file,
+    # aşağıdaki `environment` bloğundan ÖNCE yüklenir; kritik dev override'ları
+    # (DATABASE_URL→@postgres, CSRF_SECRET) environment'ta kaldığından onlar kazanır.
+    env_file:
+      - ./backend/.env
     environment:
       NODE_ENV: development
       HOST: 0.0.0.0
       PORT: '4000'
-      # PostgreSQL bağlantısı — bu set olunca backend pg sürücüsünü kullanır (yoksa SQLite).
+      # PostgreSQL bağlantısı — container içinde host 'postgres' (localhost değil).
       DATABASE_URL: postgres://klab:klab_dev_password@postgres:5432/klab
       FRONTEND_ORIGIN: http://localhost:5173
       CSRF_SECRET: docker_dev_csrf_secret_min_32_chars_change_in_prod
@@ -55,10 +61,8 @@ services:
       USER_JWT_PUBLIC_KEY_PATH: ./keys/user_public.pem
       ADMIN_JWT_PRIVATE_KEY_PATH: ./keys/admin_private.pem
       ADMIN_JWT_PUBLIC_KEY_PATH: ./keys/admin_public.pem
-      IMAGE_PROVIDER: pollinations
-      # Pollinations ücretsiz token (auth.pollinations.ai) — host ortamından geçirilir.
-      # `export POLLINATIONS_TOKEN=...` ile çalıştır; yoksa görsel üretimi 402 alır.
-      POLLINATIONS_TOKEN: ${POLLINATIONS_TOKEN:-}
+      # IMAGE_PROVIDER ayarlanmamışsa huggingface'e düş (env_file boşsa).
+      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-huggingface}
     ports:
       - '4000:4000'
     volumes:

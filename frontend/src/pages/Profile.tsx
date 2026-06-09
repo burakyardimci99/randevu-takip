@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { ProfilePhotoUpload } from '../components/ProfilePhotoUpload';
 import { useToast } from '../components/Toast';
 import { api } from '../services/api';
-import type { ProfileUpdatePayload, UserProfile } from '../types';
+import type { ProfileUpdatePayload, UserProfile, Visual } from '../types';
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
@@ -16,6 +18,11 @@ export default function Profile() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<ProfileUpdatePayload>({});
   const [dirty, setDirty] = useState(false);
+  // Profil arka planı seçici (kullanıcının kendi görselleri).
+  const [showBgPicker, setShowBgPicker] = useState(false);
+  const [myVisuals, setMyVisuals] = useState<Visual[]>([]);
+  const [visualsLoading, setVisualsLoading] = useState(false);
+  const [savingBg, setSavingBg] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,6 +53,35 @@ export default function Profile() {
   function setField<K extends keyof ProfileUpdatePayload>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
     setDirty(true);
+  }
+
+  async function openBgPicker() {
+    setShowBgPicker(true);
+    if (myVisuals.length === 0) {
+      setVisualsLoading(true);
+      try {
+        const res = await api.listMyVisuals();
+        setMyVisuals(res.visuals.filter((v) => v.imageUrl));
+      } catch (err) {
+        toast.push('error', (err as Error).message || 'Görseller yüklenemedi.');
+      } finally {
+        setVisualsLoading(false);
+      }
+    }
+  }
+
+  async function applyBg(visualId: string | null) {
+    setSavingBg(true);
+    try {
+      const res = await api.setProfileBackground(visualId);
+      setProfile((prev) => (prev ? { ...prev, profileBackgroundUrl: res.profileBackgroundUrl } : prev));
+      setShowBgPicker(false);
+      toast.push('success', visualId ? 'Profil arka planın ayarlandı.' : 'Arka plan kaldırıldı.');
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Arka plan ayarlanamadı.');
+    } finally {
+      setSavingBg(false);
+    }
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -301,6 +337,37 @@ export default function Profile() {
               </div>
             </fieldset>
 
+            <fieldset className="space-y-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-kt-gold-700">Profil Arka Planı</div>
+              <p className="text-sm text-kt-gray-500 -mt-1">
+                Kendi ürettiğin bir görseli liderlik tablosu kartında ve public profilinde arka plan olarak göster.
+              </p>
+              <div className="flex items-center gap-4">
+                <div className="w-28 h-20 rounded-lg overflow-hidden bg-kt-gray-100 border border-kt-gray-200 shrink-0 flex items-center justify-center">
+                  {profile.profileBackgroundUrl ? (
+                    <img src={profile.profileBackgroundUrl} alt="Profil arka planı" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-2xl text-kt-gray-300">🎨</span>
+                  )}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <button type="button" onClick={openBgPicker} className="btn-secondary text-sm">
+                    {profile.profileBackgroundUrl ? 'Arka planı değiştir' : 'Arka plan seç'}
+                  </button>
+                  {profile.profileBackgroundUrl && (
+                    <button
+                      type="button"
+                      onClick={() => applyBg(null)}
+                      disabled={savingBg}
+                      className="btn-ghost text-rose-600 text-sm"
+                    >
+                      Kaldır
+                    </button>
+                  )}
+                </div>
+              </div>
+            </fieldset>
+
             <div className="flex items-center justify-between pt-4 border-t border-kt-gray-100">
               <p className="text-xs text-kt-gray-400">
                 Son güncelleme: {fmtDate(profile.updatedAt)}
@@ -316,6 +383,80 @@ export default function Profile() {
             </div>
           </form>
         </div>
+      )}
+
+      {showBgPicker && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => setShowBgPicker(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-kt-card max-w-lg w-full max-h-[85vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-extrabold text-kt-green-900">Profil arka planı seç</h3>
+              <button
+                onClick={() => setShowBgPicker(false)}
+                className="p-2 rounded-lg hover:bg-kt-gray-100 text-kt-gray-500"
+                aria-label="Kapat"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {visualsLoading ? (
+              <p className="text-sm text-kt-gray-400 text-center py-8 animate-pulse">Görseller yükleniyor…</p>
+            ) : myVisuals.length === 0 ? (
+              <div className="text-center py-8 text-sm text-kt-gray-500">
+                Henüz görselin yok.{' '}
+                <Link to="/gorsel" className="text-kt-violet-700 font-semibold underline">
+                  Görsel Üret
+                </Link>{' '}
+                sayfasından oluştur.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {profile?.profileBackgroundUrl && (
+                  <button
+                    onClick={() => applyBg(null)}
+                    disabled={savingBg}
+                    className="aspect-square rounded-lg border-2 border-dashed border-kt-gray-300 text-xs font-semibold text-kt-gray-500 hover:border-rose-300 hover:text-rose-600 flex items-center justify-center disabled:opacity-50"
+                  >
+                    Kaldır
+                  </button>
+                )}
+                {myVisuals.map((v) => (
+                  <button
+                    key={v.id}
+                    onClick={() => applyBg(v.id)}
+                    disabled={savingBg}
+                    title={v.fikir}
+                    className={`aspect-square rounded-lg overflow-hidden border-2 transition-colors disabled:opacity-50 ${
+                      profile?.profileBackgroundUrl === v.imageUrl
+                        ? 'border-kt-violet-500'
+                        : 'border-transparent hover:border-kt-violet-300'
+                    }`}
+                  >
+                    {v.imageUrl && (
+                      <img
+                        src={v.imageUrl}
+                        alt={v.fikir}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.opacity = '0.2';
+                        }}
+                      />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
       )}
     </AppShell>
   );

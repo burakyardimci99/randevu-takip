@@ -6,8 +6,8 @@
 import { nanoid } from 'nanoid';
 import { dbAll, dbOne, dbRun } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
-import { getImageProvider, variantSeed } from './image-gen.service';
-import { downloadAndStore, internalImageUrl } from './visual-store.service';
+import { getImageProvider, variantSeed, translateToEnglish, type GeneratedImage } from './image-gen.service';
+import { downloadAndStore, storeBytes, internalImageUrl, deleteStoredFiles } from './visual-store.service';
 import { invalidateShowcaseFeed } from './showcase-feed.service';
 import { broadcastToUser } from './sse.service';
 // Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
@@ -121,26 +121,43 @@ export async function createVisual(userId: string, input: CreateVisualInput): Pr
 
 /**
  * Üretilen görseli sunucuda saklamayı dener (veri-yönetişimi + provider
- * bağımsızlığı). Başarılıysa prompt'suz iç URL, değilse dış URL döner (fallback).
+ * bağımsızlığı). İki provider türünü de işler:
+ *  - Bayt dönen provider (Hugging Face / Gemini): baytları doğrudan diske yazar.
+ *    Saklanamazsa dış URL fallback'i YOKTUR → çağıran hata göstermeli.
+ *  - URL dönen provider (Pollinations): URL'i indirip saklar; saklanamazsa
+ *    geçici hatada dış URL'de fallback, kalıcı (auth) hatada çağıran hata yapar.
  */
 async function persistVariant(
   id: string,
-  seed: number,
-  externalUrl: string
+  result: GeneratedImage
 ): Promise<{ url: string; stored: boolean; ext?: string; authError?: boolean }> {
-  const result = await downloadAndStore(id, seed, externalUrl);
-  if (result.ok) {
-    return { url: internalImageUrl(id, seed), stored: true, ext: result.ext };
+  // Bayt dönen provider → doğrudan sakla (harici URL yok).
+  if (result.data && result.contentType) {
+    const stored = await storeBytes(id, result.seed, result.data, result.contentType);
+    if (stored.ok) return { url: internalImageUrl(id, result.seed), stored: true, ext: stored.ext };
+    // Saklanamadı + dış URL yok → boş URL döndür; çağıran 'stored=false && !url'
+    // ile geçici hata gösterir (kullanıcı "Yeniden üret" diyebilir).
+    return { url: '', stored: false };
+  }
+
+  // URL dönen provider → indir ve sakla.
+  const dl = await downloadAndStore(id, result.seed, result.url);
+  if (dl.ok) {
+    return { url: internalImageUrl(id, result.seed), stored: true, ext: dl.ext };
   }
   // Saklanamadı: 'auth' (token/ödeme) KALICI → çağıran error yapmalı; 'transient'
   // (zaman aşımı/5xx) ise dış URL'de fallback (provider sonra düzelir).
-  return { url: externalUrl, stored: false, authError: result.reason === 'auth' };
+  return { url: result.url, stored: false, authError: dl.reason === 'auth' };
 }
 
-/** Pollinations anonim erişim 402 verdiğinde gösterilecek net kullanıcı mesajı. */
+/** Sağlayıcı kalıcı kimlik/ödeme hatası verdiğinde gösterilecek net mesaj. */
 const PROVIDER_AUTH_ERROR =
-  'Görsel sağlayıcı kimlik doğrulama/ödeme gerektiriyor. Yöneticinin POLLINATIONS_TOKEN ' +
-  'ayarlaması gerekiyor (enter.pollinations.ai üzerinden sk_ API anahtarı alınır).';
+  'Görsel sağlayıcı kimlik doğrulama gerektiriyor. Yöneticinin görsel sağlayıcı ' +
+  'anahtarını (ör. HUGGINGFACE_API_KEY) ayarlaması gerekiyor.';
+
+/** Saklama başarısız ve fallback URL de yoksa gösterilecek geçici hata mesajı. */
+const PROVIDER_TRANSIENT_ERROR =
+  'Görsel sağlayıcı şu an yanıt vermiyor. Lütfen birazdan "Yeniden üret" ile tekrar deneyin.';
 
 /** Arkaplan boru hattı: prompt → generate → diske sakla → DB güncelle → SSE push. */
 async function runVisualPipeline(
@@ -150,16 +167,27 @@ async function runVisualPipeline(
   tema?: string
 ): Promise<void> {
   try {
-    // Kullanıcı ne girdiyse onu kullan — AI prompt-enhancer (Claude/Pollinations-text) kaldırıldı.
-    const promptEn = tema && tema.trim() ? `${fikir.trim()}, ${tema.trim()}` : fikir.trim();
+    // Fikir (Türkçe) → İngilizce çeviri (FLUX İngilizce'de çok daha isabetli).
+    // Çeviri başarısızsa orijinal fikir kullanılır (graceful).
+    //
+    // Prompt yapısı: KONU baskın cümle, tema ise yalnız "Art style and color
+    // palette" olarak ikincil. Aksi halde "doğa/botanik" gibi İÇERİK temaları
+    // konuyu eziyor ve sadece çiçek/yeşillik üretiyordu. Bu yapı her temada
+    // (doğa, neon, fotogerçekçi…) projeyi koruyup temayı yalnız stile uygular.
+    const ideaEn = await translateToEnglish(fikir.trim());
+    const themeStr = tema?.trim();
+    const promptEn = themeStr
+      ? `${ideaEn}. Art style and color palette: ${themeStr}. High quality, detailed.`
+      : `${ideaEn}. High quality, detailed.`;
     await dbRun(`UPDATE visuals SET prompt_en = ?, status = 'generating', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [promptEn,
       id]);
 
     const result = await getImageProvider().generate({ prompt: promptEn });
-    // Üretilen görseli sunucuda sakla → image_url prompt'suz iç URL olur (fallback: dış URL).
-    const persisted = await persistVariant(id, result.seed, result.url);
-    // Sağlayıcı kimlik/ödeme istiyorsa (anonim 402) 'ready' deyip kırık URL VERME → net hata.
+    // Üretilen görseli sunucuda sakla → image_url prompt'suz iç URL olur.
+    const persisted = await persistVariant(id, result);
+    // Saklanamadıysa 'ready' deyip kırık URL VERME → net hata göster.
     if (!persisted.stored && persisted.authError) throw new Error(PROVIDER_AUTH_ERROR);
+    if (!persisted.stored && !persisted.url) throw new Error(PROVIDER_TRANSIENT_ERROR);
     const variant: VisualVariant = {
       seed: result.seed,
       url: persisted.url,
@@ -178,6 +206,45 @@ async function runVisualPipeline(
   } finally {
     broadcastToUser(userId, { type: 'visual.updated', data: { id } });
   }
+}
+
+/**
+ * Kullanıcının kendi görselini siler (IDOR: yalnız sahibi). Bu görseli arkaplan
+ * olarak kullanan kendi booking'lerinin showcase_image_url'i NULL'lanır (kırık
+ * referans kalmasın) ve diskteki tüm varyant dosyaları temizlenir.
+ */
+export async function deleteVisual(userId: string, visualId: string): Promise<{ deleted: true }> {
+  const row = await getRow(visualId);
+  if (!row || row.user_id !== userId) {
+    throw new HttpError(404, 'Görsel bulunamadı.', 'VISUAL_NOT_FOUND');
+  }
+
+  // Bu görseli arkaplan yapan referansları temizle (kırık görsel kalmasın). İç
+  // URL formatı: /api/public/visuals/<id>/image?v=<seed> → id'ye göre LIKE.
+  const ref = `%/visuals/${visualId}/image%`;
+  // 1) Proje (booking) showcase arkaplanı
+  await dbRun(
+    `UPDATE bookings SET showcase_image_url = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = ? AND showcase_image_url LIKE ?`,
+    [userId, ref]
+  );
+  // 2) Kullanıcının kişisel profil arka planı (leaderboard kartı + public profil)
+  //    ve sohbet teması — bu görseli kullananlardan referansı kaldır.
+  await dbRun(
+    `UPDATE users SET profile_background_url = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND profile_background_url LIKE ?`,
+    [userId, ref]
+  );
+  await dbRun(
+    `UPDATE users SET chat_background_url = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND chat_background_url LIKE ?`,
+    [userId, ref]
+  );
+
+  await dbRun('DELETE FROM visuals WHERE id = ? AND user_id = ?', [visualId, userId]);
+  await deleteStoredFiles(visualId);
+  invalidateShowcaseFeed(); // bir kart arkaplanı kalkmış olabilir → feed cache tazele
+  return { deleted: true };
 }
 
 export async function regenerateVisual(userId: string, visualId: string): Promise<VisualDto> {
@@ -206,9 +273,10 @@ async function runRegeneratePipeline(
     const newIndex = existing.length;
     const newSeed = variantSeed(promptEn, newIndex);
     const result = await getImageProvider().generate({ prompt: promptEn, seed: newSeed });
-    // Yeni varyantı sunucuda sakla → iç URL (fallback: dış URL).
-    const persisted = await persistVariant(visualId, result.seed, result.url);
+    // Yeni varyantı sunucuda sakla → iç URL.
+    const persisted = await persistVariant(visualId, result);
     if (!persisted.stored && persisted.authError) throw new Error(PROVIDER_AUTH_ERROR);
+    if (!persisted.stored && !persisted.url) throw new Error(PROVIDER_TRANSIENT_ERROR);
     const variant: VisualVariant = {
       seed: result.seed,
       url: persisted.url,
@@ -262,4 +330,53 @@ export async function setBookingShowcaseImage(
     bookingId]);
   invalidateShowcaseFeed(); // galeri kartı arkaplanı değişti → feed cache'ini tazele
   return { showcaseImageUrl: imageUrl };
+}
+
+/**
+ * Kullanıcının KİŞİSEL profil arka planını ayarlar (leaderboard kartı + public
+ * profil sayfası arka planı). visualId null ise kaldırır.
+ * IDOR: görsel giriş yapan kullanıcıya ait olmalı (kendi görselini seçebilir).
+ */
+export async function setProfileBackgroundImage(
+  userId: string,
+  visualId: string | null
+): Promise<{ profileBackgroundUrl: string | null }> {
+  let imageUrl: string | null = null;
+  if (visualId) {
+    const v = await getRow(visualId);
+    if (!v || v.user_id !== userId) {
+      throw new HttpError(404, 'Görsel bulunamadı.', 'VISUAL_NOT_FOUND');
+    }
+    if (!v.image_url) {
+      throw new HttpError(409, 'Bu görsel henüz hazır değil.', 'VISUAL_NOT_READY');
+    }
+    imageUrl = v.image_url;
+  }
+
+  await dbRun('UPDATE users SET profile_background_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [imageUrl, userId]);
+  return { profileBackgroundUrl: imageUrl };
+}
+
+/**
+ * Kullanıcının sohbet ekranı arka plan temasını ayarlar. visualId null ise kaldırır.
+ * IDOR: görsel giriş yapan kullanıcıya ait olmalı.
+ */
+export async function setChatBackgroundImage(
+  userId: string,
+  visualId: string | null
+): Promise<{ chatBackgroundUrl: string | null }> {
+  let imageUrl: string | null = null;
+  if (visualId) {
+    const v = await getRow(visualId);
+    if (!v || v.user_id !== userId) {
+      throw new HttpError(404, 'Görsel bulunamadı.', 'VISUAL_NOT_FOUND');
+    }
+    if (!v.image_url) {
+      throw new HttpError(409, 'Bu görsel henüz hazır değil.', 'VISUAL_NOT_READY');
+    }
+    imageUrl = v.image_url;
+  }
+
+  await dbRun('UPDATE users SET chat_background_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [imageUrl, userId]);
+  return { chatBackgroundUrl: imageUrl };
 }

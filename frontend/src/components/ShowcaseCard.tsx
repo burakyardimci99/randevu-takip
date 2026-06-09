@@ -6,6 +6,7 @@
  * Auth yoksa beğeni/yorum giriş'e yönlendirir.
  */
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useViewerKind } from '../hooks/useViewerKind';
@@ -282,8 +283,12 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
             to={`/u/${authorId}`}
             className="flex items-center gap-2 flex-1 min-w-0 group"
           >
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center font-bold text-xs">
-              {initials(item.authorFullName)}
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
+              {item.authorPhoto ? (
+                <img src={item.authorPhoto} alt="" className="w-full h-full object-cover" />
+              ) : (
+                initials(item.authorFullName)
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <div
@@ -300,8 +305,12 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
           </Link>
         ) : (
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center font-bold text-xs">
-              {initials(item.authorFullName)}
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
+              {item.authorPhoto ? (
+                <img src={item.authorPhoto} alt="" className="w-full h-full object-cover" />
+              ) : (
+                initials(item.authorFullName)
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <div
@@ -403,8 +412,12 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
             <ul className="space-y-2 max-h-48 overflow-y-auto scrollbar-thin">
               {commentsList.map((c) => (
                 <li key={c.id} className="flex gap-2 group">
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
-                    {initials(c.userFullName)}
+                  <div className="w-6 h-6 rounded-full overflow-hidden bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+                    {c.userProfilePhoto ? (
+                      <img src={c.userProfilePhoto} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      initials(c.userFullName)
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-2 mb-0.5">
@@ -437,8 +450,9 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
       </div>
     </article>
 
-    {/* Detay modalı — büyük görsel + tam açıklama + tüm teknolojiler. */}
-    {showDetail && (
+    {/* Detay modalı — body'ye portal: AppShell main(z-10) stacking context'inden
+        çık → sticky header (z-40) modalın üstünü örtmesin (üst kısım görünür kalsın). */}
+    {showDetail && createPortal(
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
         onClick={() => setShowDetail(false)}
@@ -449,7 +463,7 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
         >
           <div className="relative">
             {bgUrl ? (
-              <img src={bgUrl} alt={item.projectName} className="w-full aspect-video object-cover rounded-t-2xl" />
+              <img src={bgUrl} alt={item.projectName} className="w-full h-auto max-h-[65vh] object-contain rounded-t-2xl bg-kt-gray-100" />
             ) : (
               <div className="w-full aspect-video bg-gradient-to-br from-kt-green-700 to-kt-green-900 rounded-t-2xl flex items-center justify-center text-white/40 text-6xl">
                 🗂️
@@ -480,8 +494,12 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center font-bold text-sm shrink-0">
-                {initials(item.authorFullName)}
+              <div className="w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white flex items-center justify-center font-bold text-sm shrink-0">
+                {item.authorPhoto ? (
+                  <img src={item.authorPhoto} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  initials(item.authorFullName)
+                )}
               </div>
               <div className="min-w-0">
                 {authorId ? (
@@ -531,10 +549,11 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
             </div>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     )}
 
-    {showPicker && (
+    {showPicker && createPortal(
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
         onClick={() => setShowPicker(false)}
@@ -604,7 +623,8 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
             </div>
           )}
         </div>
-      </div>
+      </div>,
+      document.body
     )}
     </>
   );

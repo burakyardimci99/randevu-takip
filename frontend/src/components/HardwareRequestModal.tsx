@@ -3,6 +3,7 @@
  * WaitlistModal/BookingModal desenini izler.
  */
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type {
   CreateHardwareRequestPayload,
   EquipmentType,
@@ -64,7 +65,7 @@ export function HardwareRequestModal({ open, loading, editing, onClose, onSubmit
     });
   }
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -209,6 +210,7 @@ export function HardwareRequestModal({ open, loading, editing, onClose, onSubmit
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

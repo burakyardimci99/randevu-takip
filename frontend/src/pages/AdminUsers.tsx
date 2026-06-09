@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AppShell } from '../components/AppShell';
 import { useViewerKind } from '../hooks/useViewerKind';
 import { useToast } from '../components/Toast';
@@ -315,12 +316,16 @@ export default function AdminUsers() {
                   }`}
                 >
                   <div className="flex items-start gap-4">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-sm shrink-0 ${
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-sm shrink-0 overflow-hidden ${
                       isDisabled
                         ? 'bg-kt-gray-200 text-kt-gray-600'
                         : 'bg-gradient-to-br from-kt-green-600 to-kt-green-800 text-white'
                     }`}>
-                      {initials(u.fullName)}
+                      {u.profilePhoto ? (
+                        <img src={u.profilePhoto} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        initials(u.fullName)
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -431,7 +436,7 @@ export default function AdminUsers() {
       )}
 
       {/* Delete Confirm */}
-      {confirmDelete && (
+      {confirmDelete && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
           onClick={() => !actionLoading && setConfirmDelete(null)}
@@ -464,7 +469,8 @@ export default function AdminUsers() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Parola Sıfırlama */}
@@ -512,7 +518,7 @@ function ResetPasswordModal({ user, loading, onClose, onSubmit }: ResetPasswordM
     await onSubmit(password);
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
@@ -610,7 +616,8 @@ function ResetPasswordModal({ user, loading, onClose, onSubmit }: ResetPasswordM
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -648,7 +655,7 @@ function EditUserModal({ user, loading, onClose, onSave }: EditUserModalProps) {
     await onSave(form);
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
       onClick={() => !loading && onClose()}
@@ -812,6 +819,7 @@ function EditUserModal({ user, loading, onClose, onSave }: EditUserModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

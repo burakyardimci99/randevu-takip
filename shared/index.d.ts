@@ -40,6 +40,8 @@ export interface ShowcaseItem {
   theme: string;
   authorId: string;
   authorFullName: string;
+  /** Yazarın profil fotoğrafı (base64 data URL) — yoksa null (baş harf gösterilir). */
+  authorPhoto: string | null;
   periodMonths: number;
   startDate: string;
   endDate: string;
@@ -89,6 +91,8 @@ export interface LeaderboardUser {
   userId: string;
   fullName: string;
   department: string | null;
+  /** Kullanıcının seçtiği profil arka plan görseli (kart arka planı). */
+  profileBackgroundUrl: string | null;
   approvedBookings: number;
   utilizationDays: number;
   likes: number;

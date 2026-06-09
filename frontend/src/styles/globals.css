@@ -10,6 +10,9 @@
      büyürler, kaydırma html üzerinde olur (window.scrollTo da düzgün çalışır). */
   html {
     height: 100%;
+    /* Dikey scrollbar her zaman yer ayırsın → içerik yüklenince scrollbar
+       belirip ortalanmış içeriği yana kaydırmaz ("git-gel/sallanma" düzeltmesi). */
+    scrollbar-gutter: stable;
   }
   body, #root {
     min-height: 100%;
@@ -390,10 +393,14 @@
     background-repeat: no-repeat;
   }
 
-  /* Yarı şeffaf beyaz veil — circuit pattern hafif kalır, içerik öne çıkar */
+  /* Yarı şeffaf beyaz veil — circuit pattern hafif kalır, içerik öne çıkar.
+     position: FIXED (absolute değil): viewport'a sabit → doküman scroll
+     yüksekliğine katkı vermez. Aksi halde ::after'daki meshShift translate/scale
+     animasyonu tüm-doküman yüksekliğindeki katmanı taşırıp en altta beyaz boşluk
+     + scroll alanı oynaması ("yavaş yukarı kayma") yaratıyordu. */
   .bg-ai-light::before {
     content: '';
-    position: absolute;
+    position: fixed;
     inset: 0;
     pointer-events: none;
     z-index: 0;
@@ -403,10 +410,12 @@
       radial-gradient(ellipse 800px 500px at 85% 90%, rgba(168, 85, 247, 0.05) 0%, transparent 55%);
   }
 
-  /* Animated floating orbs — sade fütüristik canlılık */
+  /* Animated floating orbs — sade fütüristik canlılık.
+     position: FIXED (yukarıdaki ::before ile aynı sebep) — meshShift translate/scale
+     artık viewport içinde kalır, doküman yüksekliğini uzatmaz. */
   .bg-ai-light::after {
     content: '';
-    position: absolute;
+    position: fixed;
     inset: 0;
     pointer-events: none;
     z-index: 0;

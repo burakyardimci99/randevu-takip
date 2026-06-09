@@ -389,6 +389,14 @@ export default function AdminProjects() {
                 onClick={() => setSelected(b)}
               >
                 <div className="flex items-start justify-between gap-3 mb-2">
+                  {b.showcaseImageUrl && (
+                    <img
+                      src={b.showcaseImageUrl}
+                      alt=""
+                      className="w-14 h-14 rounded-lg object-cover border border-kt-gray-200 shrink-0"
+                      loading="lazy"
+                    />
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="text-xs font-mono font-bold text-kt-gold-700 tracking-wider">

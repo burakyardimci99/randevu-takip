@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { AppointmentModal } from '../components/AppointmentModal';
@@ -371,7 +372,7 @@ export default function UserBookings() {
       )}
 
       {/* Withdraw Confirmation */}
-      {confirmWithdraw && (
+      {confirmWithdraw && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
           onClick={() => !withdrawing && setConfirmWithdraw(null)}
@@ -412,7 +413,8 @@ export default function UserBookings() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </AppShell>
   );

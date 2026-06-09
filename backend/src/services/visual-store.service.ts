@@ -17,7 +17,7 @@
  *  - Yalnız image/* content-type kabul edilir (SSRF/içerik enjeksiyonu azaltma).
  */
 import { createReadStream } from 'node:fs';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Response } from 'express';
 
@@ -141,6 +141,52 @@ export async function downloadAndStore(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Provider'ın doğrudan döndürdüğü görsel baytlarını (Hugging Face / Gemini)
+ * diske yazar — harici URL'den indirme yok. content-type doğrulanır.
+ */
+export async function storeBytes(
+  id: string,
+  seed: number,
+  data: Buffer,
+  contentType: string
+): Promise<StoreResult> {
+  if (!isSafeVisualId(id) || safeSeed(seed) === null) return { ok: false, reason: 'transient' };
+
+  const ext = CONTENT_TYPE_TO_EXT[contentType.split(';')[0]!.trim().toLowerCase()];
+  if (!ext) return { ok: false, reason: 'transient' };
+  if (data.byteLength === 0 || data.byteLength > MAX_BYTES) return { ok: false, reason: 'transient' };
+
+  try {
+    await mkdir(VISUALS_DIR, { recursive: true, mode: 0o700 });
+    await writeFile(storedPath(id, seed, ext), data);
+    return { ok: true, ext };
+  } catch {
+    return { ok: false, reason: 'transient' };
+  }
+}
+
+/**
+ * Bir görsele ait TÜM saklanan dosyaları siler (<id>_<seed>.<ext> — tüm
+ * varyantlar). Görsel silinince diskte yetim dosya kalmasın. Best-effort:
+ * dosya yoksa/silinemezse sessizce geçer.
+ */
+export async function deleteStoredFiles(id: string): Promise<void> {
+  if (!isSafeVisualId(id)) return;
+  let entries: string[];
+  try {
+    entries = await readdir(VISUALS_DIR);
+  } catch {
+    return; // dizin yoksa silinecek bir şey de yok
+  }
+  const prefix = `${id}_`;
+  await Promise.all(
+    entries
+      .filter((name) => name.startsWith(prefix))
+      .map((name) => unlink(path.join(VISUALS_DIR, name)).catch(() => undefined))
+  );
 }
 
 /** Saklanan dosyayı (id+seed) bulur; yoksa null. */
