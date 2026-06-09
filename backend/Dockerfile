@@ -19,10 +19,13 @@ RUN npm install
 # Kaynak (dev'de bind-mount ile gölgelenir; image yine de çalışır halde).
 COPY . .
 
-# NOT: Non-root sertleştirme (USER node) yalnız PRODUCTION image'inde (Dockerfile.prod)
-# uygulanır. Dev image'de bind-mount edilen `./backend:/app` host-sahipli (0700 data/)
-# olduğundan `node` kullanıcısı Linux'ta data/ dizinine yazamaz (EACCES) → dev'de
-# root kalır (yalnız yerel geliştirme; internet-facing değil).
+# Veri dizinleri node-sahipli (model cache + üretilen görseller buraya yazılır).
+RUN mkdir -p /app/data && chown -R node:node /app/data
+
+# Non-root sertleştirme: container ayrıcalıksız 'node' kullanıcısıyla çalışır
+# (AppSec: dockerfile missing-user). macOS Docker Desktop'ta bind-mount uid-şeffaf;
+# Linux dev'de data/ dizini yukarıda node'a chown edildi.
+USER node
 
 EXPOSE 4000
 
