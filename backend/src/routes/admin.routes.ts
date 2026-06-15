@@ -32,7 +32,17 @@ import {
   similarSearchSchema,
   supportRequestsFilterSchema,
   waitlistMoveSchema,
+  createBookSchema,
+  updateBookSchema,
 } from '../validators/schemas';
+import {
+  listAllBooks,
+  getBookByIdAdmin,
+  createBook,
+  updateBook,
+  deleteBook,
+  listAllLoans,
+} from '../services/book.service';
 import {
   getBookingByIdAdmin,
   listAllBookings,
@@ -1368,5 +1378,72 @@ router.post(
     }
   }
 );
+
+/* ============ KÜTÜPHANE (kitap envanteri + ödünçler) ============ */
+// GET'ler requireStaff (izleyici/danışman/arge salt-okunur görebilir); mutasyonlar
+// router-seviyesi requireAdmin guard'ı ile yalnız admin'e açıktır.
+
+router.get('/books', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ books: await listAllBooks() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/books/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'kitap id');
+    const book = await getBookByIdAdmin(id);
+    if (!book) throw new HttpError(404, 'Kitap bulunamadı.', 'BOOK_NOT_FOUND');
+    res.json({ book });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/books', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = createBookSchema.parse(req.body);
+    const book = await createBook(req.auth!.subjectId, input);
+    res.status(201).json({ book });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/books/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'kitap id');
+    const input = updateBookSchema.parse(req.body);
+    const book = await updateBook(req.auth!.subjectId, id, input);
+    res.json({ book });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/books/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'kitap id');
+    await deleteBook(req.auth!.subjectId, id);
+    res.json({ deleted: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Tüm ödünç kayıtları (opsiyonel ?status=active|returned|overdue).
+router.get('/loans', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const status = req.query.status as string | undefined;
+    const allowed = ['active', 'returned', 'overdue'];
+    const filter =
+      status && allowed.includes(status) ? (status as 'active' | 'returned' | 'overdue') : undefined;
+    res.json({ loans: await listAllLoans({ status: filter }) });
+  } catch (err) {
+    next(err);
+  }
+});
 
 export default router;

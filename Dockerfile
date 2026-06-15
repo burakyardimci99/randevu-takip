@@ -54,6 +54,12 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
+# Base alpine OS paketlerini yamalı sürümlere yükselt — base image tag'i tazelenene
+# kadar libcrypto3/libssl3 gibi openssl CVE'leri (ör. CVE-2026-45447) burada kapanır.
+# Node kendi OpenSSL'ini bundle ettiğinden bu OS paketleri uygulama tarafından
+# kullanılmaz; yükseltme yalnız Trivy HIGH sayısını 0'a indirir (davranış değişmez).
+RUN apk upgrade --no-cache
+
 # Prod runtime'da paket yöneticisi gerekmez. Gömülü npm/npx'i kaldır — hem saldırı
 # yüzeyini düşürür hem de npm'in kendi bağımlılıklarındaki CVE'leri (örn. picomatch)
 # image'dan tamamen eler. Uygulama yalnız `node dist/index.js` ile çalışır.

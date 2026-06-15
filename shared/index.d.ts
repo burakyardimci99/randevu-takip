@@ -234,3 +234,42 @@ export interface Appointment {
   createdAt: string;
   updatedAt: string;
 }
+
+/* ============ Kütüphane (#kütüphane) — kitap envanteri + ödünç ============ */
+
+export interface Book {
+  id: string;
+  title: string;
+  author: string;
+  isbn: string | null;
+  category: string | null;
+  description: string | null;
+  coverImageUrl: string | null;
+  totalCopies: number;
+  availableCopies: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** Admin görünümünde: bu kitabın şu an ödünçte (active) kopya sayısı. */
+  activeLoanCount?: number;
+  /** Kullanıcı görünümünde: bu kullanıcının bu kitap için aktif ödüncü var mı. */
+  borrowedByMe?: boolean;
+}
+
+export type BookLoanStatus = 'active' | 'returned' | 'overdue';
+
+export interface BookLoan {
+  id: string;
+  bookId: string;
+  userId: string;
+  /** Admin görünümünde doldurulur. */
+  userFullName?: string;
+  userEmail?: string;
+  bookTitle: string;
+  bookAuthor: string;
+  borrowedAt: string;
+  dueAt: string;
+  returnedAt: string | null;
+  status: BookLoanStatus;
+  createdAt: string;
+}

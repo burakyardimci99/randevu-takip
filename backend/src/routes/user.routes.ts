@@ -19,6 +19,7 @@ import {
   profileUpdateSchema,
   similarSearchSchema,
   stageAdvanceRequestSchema,
+  borrowBookSchema,
 } from '../validators/schemas';
 import { listRooms } from '../services/room.service';
 import {
@@ -51,6 +52,12 @@ import {
 import { getLeaderboard } from '../services/leaderboard.service';
 import { exportUserData, purgeUser } from '../services/privacy.service';
 import { getUserLicenseUsage } from '../services/license.service';
+import {
+  listAvailableBooks,
+  borrowBook,
+  listMyLoans,
+  returnBook,
+} from '../services/book.service';
 import {
   createHardwareRequest,
   listUserHardwareRequests,
@@ -1020,6 +1027,47 @@ router.put('/chat/background', async (req: Request, res: Response, next: NextFun
     const input = setShowcaseImageSchema.parse(req.body);
     const result = await setChatBackgroundImage(req.auth!.subjectId, input.visualId);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============ KÜTÜPHANE (kitap ödünç alma/iade) ============ */
+
+// Ödünç alınabilir (aktif) kitaplar + bu kullanıcının halen ödüncte tuttukları (borrowedByMe).
+router.get('/books', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ books: await listAvailableBooks(req.auth!.subjectId) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/books/:id/borrow', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'kitap id');
+    const input = borrowBookSchema.parse(req.body ?? {});
+    const loan = await borrowBook(req.auth!.subjectId, id, input.periodDays);
+    res.status(201).json({ loan });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Kullanıcının ödünç geçmişi (aktif/gecikmiş + iade edilmiş).
+router.get('/loans', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ loans: await listMyLoans(req.auth!.subjectId) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/loans/:id/return', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'ödünç id');
+    const loan = await returnBook(req.auth!.subjectId, id);
+    res.json({ loan });
   } catch (err) {
     next(err);
   }

@@ -61,6 +61,8 @@ import type {
   RoomApptHeatmap,
   KioskRoom,
   KioskData,
+  Book,
+  BookLoan,
   StageEvent,
   SubjectKind,
   SupportRequest,
@@ -1527,6 +1529,77 @@ export const api = {
       `/admin/support/requests/${encodeURIComponent(id)}/resolve`,
       { method: 'POST', kind: staffKind() }
     );
+  },
+
+  /* ============ KÜTÜPHANE (kitap ödünç) ============ */
+
+  // Kullanıcı
+  async listBooks() {
+    return request<{ books: Book[] }>('/user/books', { kind: 'user' });
+  },
+  async borrowBook(bookId: string, periodDays?: 7 | 14 | 30) {
+    return request<{ loan: BookLoan }>(
+      `/user/books/${encodeURIComponent(bookId)}/borrow`,
+      { method: 'POST', body: periodDays ? { periodDays } : {}, kind: 'user' }
+    );
+  },
+  async listMyLoans() {
+    return request<{ loans: BookLoan[] }>('/user/loans', { kind: 'user' });
+  },
+  async returnLoan(loanId: string) {
+    return request<{ loan: BookLoan }>(
+      `/user/loans/${encodeURIComponent(loanId)}/return`,
+      { method: 'POST', kind: 'user' }
+    );
+  },
+
+  // Admin (GET'ler staff-okunur, mutasyonlar admin)
+  async adminListBooks() {
+    return request<{ books: Book[] }>('/admin/books', { kind: staffKind() });
+  },
+  async adminCreateBook(payload: {
+    title: string;
+    author: string;
+    isbn?: string;
+    category?: string;
+    description?: string;
+    coverImageUrl?: string;
+    totalCopies: number;
+  }) {
+    return request<{ book: Book }>('/admin/books', {
+      method: 'POST',
+      body: payload,
+      kind: 'admin',
+    });
+  },
+  async adminUpdateBook(
+    id: string,
+    payload: Partial<{
+      title: string;
+      author: string;
+      isbn: string;
+      category: string;
+      description: string;
+      coverImageUrl: string;
+      totalCopies: number;
+      isActive: boolean;
+    }>
+  ) {
+    return request<{ book: Book }>(`/admin/books/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: payload,
+      kind: 'admin',
+    });
+  },
+  async adminDeleteBook(id: string) {
+    return request<{ deleted: boolean }>(`/admin/books/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      kind: 'admin',
+    });
+  },
+  async adminListLoans(statusFilter?: 'active' | 'returned' | 'overdue') {
+    const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return request<{ loans: BookLoan[] }>(`/admin/loans${qs}`, { kind: staffKind() });
   },
 };
 

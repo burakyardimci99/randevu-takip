@@ -117,6 +117,14 @@ jobs:
       DISABLE_EMAIL: '1'
       DISABLE_RATE_LIMIT: '1'
       TZ: Europe/Istanbul
+      # env.ts JWT anahtar yollarını ZORUNLU ister (setup-env yalnız vitest'te default
+      # verir; db:init/backend boot doğrudan env.ts yükler). keys:generate bunları
+      # backend/keys/ altına üretir; adımlar working-directory: backend ile koştuğundan
+      # './keys/...' göreli yolu doğru çözülür.
+      USER_JWT_PRIVATE_KEY_PATH: ./keys/user_private.pem
+      USER_JWT_PUBLIC_KEY_PATH: ./keys/user_public.pem
+      ADMIN_JWT_PRIVATE_KEY_PATH: ./keys/admin_private.pem
+      ADMIN_JWT_PUBLIC_KEY_PATH: ./keys/admin_public.pem
     steps:
       - uses: actions/checkout@v4
 

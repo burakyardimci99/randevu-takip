@@ -557,3 +557,31 @@ export type CreateSupportRequestInput = z.infer<typeof createSupportRequestSchem
 export const supportRequestsFilterSchema = z.object({
   status: z.union([z.literal('open'), z.literal('resolved')]).optional(),
 });
+
+/* ============================================================
+ * Kütüphane (kitap + ödünç)
+ * ============================================================ */
+
+export const createBookSchema = z.object({
+  title: safeText(1, 200, 'Kitap adı'),
+  author: safeText(1, 120, 'Yazar'),
+  isbn: optionalShortText(20),
+  category: optionalShortText(60),
+  description: optionalShortText(2000),
+  coverImageUrl: optionalShortText(500),
+  // Toplam kopya sayısı; 0 = geçici olarak ödünç verilemez (envanter dışı).
+  totalCopies: z.number().int().min(0).max(999),
+});
+
+export const updateBookSchema = createBookSchema.partial().extend({
+  isActive: z.boolean().optional(),
+});
+
+/** Ödünç süresi (gün) — varsayılan 14. */
+export const borrowBookSchema = z.object({
+  periodDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).optional(),
+});
+
+export type CreateBookInput = z.infer<typeof createBookSchema>;
+export type UpdateBookInput = z.infer<typeof updateBookSchema>;
+export type BorrowBookInput = z.infer<typeof borrowBookSchema>;

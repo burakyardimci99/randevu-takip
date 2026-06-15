@@ -15,7 +15,8 @@ async function userLogin(page: Page): Promise<void> {
     ),
     page.locator('button[type="submit"]').click(),
   ]);
-  await page.waitForURL(/\/rooms/, { timeout: 15_000 });
+  // Aktif booking'i olan kullanıcı /dashboard'a, yoksa /rooms'a yönlenir.
+  await page.waitForURL(/\/(rooms|dashboard)/, { timeout: 15_000 });
 }
 
 test('sohbet sayfası açılır + kişi listesi yüklenir', async ({ page }) => {

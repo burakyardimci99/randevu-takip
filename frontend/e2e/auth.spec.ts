@@ -23,7 +23,9 @@ test.describe('Landing & Auth', () => {
       page.locator('button[type="submit"]').click(),
     ]);
     expect(resp.status()).toBe(200);
-    await page.waitForURL(/\/rooms/, { timeout: 15_000 });
+    // Login sonrası: aktif booking'i olan kullanıcı /dashboard'a, yoksa /rooms'a
+    // yönlenir (Login.tsx redirectAfterLogin). İkisi de geçerli kimlikli giriştir.
+    await page.waitForURL(/\/(rooms|dashboard)/, { timeout: 15_000 });
   });
 
   test('admin login → /admin', async ({ page }) => {

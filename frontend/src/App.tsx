@@ -17,6 +17,7 @@ const UserBookings = lazy(() => import('./pages/UserBookings'));
 const UserCalendar = lazy(() => import('./pages/UserCalendar'));
 const UserDashboard = lazy(() => import('./pages/UserDashboard'));
 const IzleyiciDashboard = lazy(() => import('./pages/IzleyiciDashboard'));
+const UserLibrary = lazy(() => import('./pages/UserLibrary'));
 const UserFAQ = lazy(() => import('./pages/UserFAQ'));
 const UserLicenses = lazy(() => import('./pages/UserLicenses'));
 const UserWaitlist = lazy(() => import('./pages/UserWaitlist'));
@@ -30,6 +31,7 @@ const PrivacySettings = lazy(() => import('./pages/PrivacySettings'));
 const PublicProfile = lazy(() => import('./pages/PublicProfile'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const AdminRooms = lazy(() => import('./pages/AdminRooms'));
+const AdminLibrary = lazy(() => import('./pages/AdminLibrary'));
 const AdminUsers = lazy(() => import('./pages/AdminUsers'));
 const AdminAnalytics = lazy(() => import('./pages/AdminAnalytics'));
 const AdminCalendar = lazy(() => import('./pages/AdminCalendar'));
@@ -85,6 +87,14 @@ export default function App() {
               element={
                 <ProtectedRoute kind="user">
                   <UserRooms />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/kutuphane"
+              element={
+                <ProtectedRoute kind="user">
+                  <UserLibrary />
                 </ProtectedRoute>
               }
             />
@@ -206,6 +216,14 @@ export default function App() {
               element={
                 <ProtectedRoute kind={['admin', 'danisman', 'arge', 'izleyici']}>
                   <AdminRooms />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/kutuphane"
+              element={
+                <ProtectedRoute kind={['admin', 'danisman', 'arge', 'izleyici']}>
+                  <AdminLibrary />
                 </ProtectedRoute>
               }
             />

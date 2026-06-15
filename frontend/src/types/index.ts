@@ -23,6 +23,9 @@ import type {
   LeaderboardProject,
   KioskRoom,
   KioskData,
+  Book,
+  BookLoan,
+  BookLoanStatus,
 } from '@klab/shared';
 
 export type {
@@ -46,6 +49,9 @@ export type {
   LeaderboardProject,
   KioskRoom,
   KioskData,
+  Book,
+  BookLoan,
+  BookLoanStatus,
 };
 
 export interface AuthUser {

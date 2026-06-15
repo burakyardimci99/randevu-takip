@@ -15,6 +15,7 @@
 import { dbExec, dbOne, dbRun } from '../db/schema';
 import { runIfCronLeader } from '../db/cron-lock';
 import { markPastAppointmentsCompleted } from './appointment.service';
+import { markOverdueLoans } from './book.service';
 import { logger } from '../utils/logger';
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -104,16 +105,18 @@ export async function runMaintenanceOnce(config: Partial<MaintenanceConfig> = {}
   refreshTokensDeleted: number;
   auditLogsDeleted: number;
   appointmentsCompleted: number;
+  overdueLoans: number;
   vacuumed: boolean;
 }> {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const { refreshTokensDeleted, auditLogsDeleted } = await pruneOnce(cfg);
   const appointmentsCompleted = await markPastAppointmentsCompleted();
+  const overdueLoans = await markOverdueLoans();
   const totalDeleted = refreshTokensDeleted + auditLogsDeleted;
   const vacuumed = await vacuumIfNeeded(cfg, totalDeleted);
 
-  const result = { refreshTokensDeleted, auditLogsDeleted, appointmentsCompleted, vacuumed };
-  if (totalDeleted > 0 || appointmentsCompleted > 0) {
+  const result = { refreshTokensDeleted, auditLogsDeleted, appointmentsCompleted, overdueLoans, vacuumed };
+  if (totalDeleted > 0 || appointmentsCompleted > 0 || overdueLoans > 0) {
     logger.info('maintenance_completed', result);
   }
   return result;
@@ -127,16 +130,18 @@ export async function runMaintenanceOnce(config: Partial<MaintenanceConfig> = {}
 async function runMaintenanceTick(cfg: MaintenanceConfig): Promise<void> {
   let counts = { refreshTokensDeleted: 0, auditLogsDeleted: 0 };
   let appointmentsCompleted = 0;
+  let overdueLoans = 0;
   const wasLeader = await runIfCronLeader('cron:maintenance', async () => {
     counts = await pruneOnce(cfg);
     appointmentsCompleted = await markPastAppointmentsCompleted();
+    overdueLoans = await markOverdueLoans();
   });
   if (!wasLeader) return;
 
   const totalDeleted = counts.refreshTokensDeleted + counts.auditLogsDeleted;
   const vacuumed = await vacuumIfNeeded(cfg, totalDeleted);
-  if (totalDeleted > 0 || appointmentsCompleted > 0) {
-    logger.info('maintenance_completed', { ...counts, appointmentsCompleted, vacuumed });
+  if (totalDeleted > 0 || appointmentsCompleted > 0 || overdueLoans > 0) {
+    logger.info('maintenance_completed', { ...counts, appointmentsCompleted, overdueLoans, vacuumed });
   }
 }
 
