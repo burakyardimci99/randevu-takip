@@ -5,7 +5,11 @@ Kapak: önce Google Books (TR kapsamı iyi), sonra Open Library fallback. Buluna
 cover_image_url NULL (UI placeholder gösterir). Çıktı: /tmp/books_seed.sql + /tmp/books.json
 """
 import zipfile, re, json, time, sys, urllib.parse, urllib.request, urllib.error
-import xml.etree.ElementTree as ET
+# nosemgrep: python.lang.security.use-defused-xml.use-defused-xml
+# Güvenli: yalnız GÜVENİLİR yerel dosyayı (kullanıcının xlsx'i) parse eden dev-only
+# araç; Docker image'ına kopyalanmaz (attack surface değil). ET, Py 3.7.1+'da dış
+# varlık (XXE) çözmez. defusedxml ek bağımlılık olduğundan tercih edilmedi.
+import xml.etree.ElementTree as ET  # noqa: S314
 
 XLSX = "AI LAB Kitap Listesi.xlsx"
 NS = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
