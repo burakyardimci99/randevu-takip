@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
+import { RoomHeroVisual } from '../components/RoomHeroVisual';
 import { useToast } from '../components/Toast';
 import { api } from '../services/api';
 import type { Booking, RoomWithOccupancy } from '../types';
@@ -96,25 +97,12 @@ export default function IzleyiciDashboard() {
             <h2 className="text-lg font-bold text-kt-green-900 mb-3">Oda Doluluğu</h2>
             <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
               {rooms.map((r) => {
-                const cover = r.bookings.find((b) => b.showcaseImageUrl)?.showcaseImageUrl ?? null;
                 return (
                   <div key={r.id} className="card overflow-hidden flex flex-col">
-                    {/* Görsel başlık — projeye atanmış üretilen görsel veya temalı placeholder */}
+                    {/* Görsel başlık — kullanıcının oda seçerken gördüğü oda görseli
+                        (donanıma göre Mac Studio / NVIDIA DGX Spark / workshop). */}
                     <div className="relative h-32 bg-gradient-to-br from-kt-green-700 to-kt-green-900">
-                      {cover ? (
-                        <img
-                          src={cover}
-                          alt={`${r.name} oda görseli`}
-                          loading="lazy"
-                          className="absolute inset-0 w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="absolute inset-0 flex items-center justify-center text-white/25">
-                          <svg className="w-12 h-12" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                          </svg>
-                        </div>
-                      )}
+                      <RoomHeroVisual room={r} className="absolute inset-0 w-full h-full" />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
                       <div className="absolute bottom-2 left-3 right-3 flex items-end justify-between gap-2">
                         <div className="min-w-0">

@@ -227,9 +227,10 @@ export function ChatWidget() {
         aria-label={unread > 0 ? `Sohbet — ${unread} okunmamış mesaj` : 'Sohbet'}
         aria-expanded={false}
         className={`fixed right-6 z-50 w-14 h-14 rounded-full bg-kt-green-900 text-white shadow-kt-card hover:bg-kt-green-800 hover:scale-105 transition-all flex items-center justify-center ${
-          // Destek butonu (SupportRequestButton) admin dışı rollerde aynı köşede
-          // (bottom-6 right-6) durur → çakışmamak için sohbet FAB'ını üstüne istifle.
-          kind !== 'admin' ? 'bottom-24' : 'bottom-6'
+          // Destek butonu (SupportRequestButton) yalnız user/danışman/arge'de aynı
+          // köşede (bottom-6) durur → o rollerde sohbet FAB'ını üstüne istifle.
+          // admin + izleyici'de destek butonu YOK → sohbet FAB'ı köşede (bottom-6).
+          kind === 'user' || kind === 'danisman' || kind === 'arge' ? 'bottom-24' : 'bottom-6'
         }`}
       >
         <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">

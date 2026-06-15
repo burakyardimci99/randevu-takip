@@ -26,6 +26,13 @@ const dateStr = (offsetDays: number): string => {
 
 beforeAll(async () => {
   await initSchema();
+  // İZOLASYON: testler tek paylaşılan pg DB'sinde sıralı koşar (fileParallelism:false)
+  // ve dosyalar arası temizlik yoktur. getAnalytics topUsers'ı GLOBAL agregasyondur
+  // (LIMIT 8); diğer dosyaların biriken booking'leri bu testin tek-booking'li
+  // kullanıcısını top-8 dışına itip flaky yapıyordu. Bu testin doğrulamaları kendi
+  // verisine bağlı olduğundan booking'leri temizleyip deterministik kılıyoruz
+  // (FK'ler ON DELETE CASCADE/SET NULL — appointments/embeddings/likes cascade olur).
+  await dbRun('DELETE FROM bookings', []);
   const hash = await argon2.hash('Demo1234!Pass', { type: argon2.argon2id });
   await dbRun(`INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`, [
     USER, 'analytics-user@test.local', hash, 'Analytics User',

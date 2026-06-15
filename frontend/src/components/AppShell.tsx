@@ -334,6 +334,15 @@ export const STAFF_VIEW_NAV: NavItem[] = [
       </svg>
     ),
   },
+  {
+    to: '/admin/kutuphane',
+    label: 'Kütüphane',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+      </svg>
+    ),
+  },
 ];
 
 /** Analitik Danışman nav — kendi inbox'ı + read-only admin görünümleri. */
@@ -390,8 +399,10 @@ function navForKind(kind: SubjectKind): NavItem[] {
 
 // Kullanıcının profil fotoğrafı — auth subject'i taşımadığından profilden çekilir.
 // Modül seviyesi cache: her sayfa gezinmesinde AppShell remount olsa da tekrar
-// tekrar fetch atılmasın (ilk yüklemede gelir, sonraki render'larda anında gösterilir).
-let cachedUserPhoto: string | null = null;
+// tekrar fetch atılmasın. ÖZNE (user) id'sine göre ANAHTARLI — aksi halde tek-oturum
+// SPA'da logout/login sonrası önceki kullanıcının foto'su başka kullanıcıya/role
+// sızıyordu (test user pp'si danışman/arge avatarında görünme bug'ı).
+let cachedUserPhoto: { id: string; photo: string | null } | null = null;
 
 export function AppShell({
   kind,
@@ -416,23 +427,30 @@ export function AppShell({
             ? auth.izleyici
             : auth.user;
 
-  // Kullanıcı profil fotoğrafını header avatarında göster (yalnız 'user' kind).
-  const [userPhoto, setUserPhoto] = useState<string | null>(cachedUserPhoto);
+  // Profil fotoğrafını header avatarında göster — YALNIZ 'user' kind. Danışman/arge/
+  // izleyici governance token'ıyla /user/profile'a erişemez (admin sabit görsel
+  // kullanır) → onlar baş harf gösterir. Cache yalnız aynı user id için kullanılır.
+  const [userPhoto, setUserPhoto] = useState<string | null>(
+    kind === 'user' && cachedUserPhoto && cachedUserPhoto.id === auth.user?.id
+      ? cachedUserPhoto.photo
+      : null
+  );
   useEffect(() => {
-    if (kind !== 'user') return;
+    if (kind !== 'user' || !auth.user?.id) return;
+    const uid = auth.user.id;
     let active = true;
     api
       .getProfile()
       .then((r) => {
         if (!active) return;
-        cachedUserPhoto = r.profile.profilePhoto;
+        cachedUserPhoto = { id: uid, photo: r.profile.profilePhoto };
         setUserPhoto(r.profile.profilePhoto);
       })
       .catch(() => {});
     return () => {
       active = false;
     };
-  }, [kind]);
+  }, [kind, auth.user?.id]);
 
   // Bildirim verisi — zil + menü rozetleri için tek kaynak.
   const location = useLocation();
@@ -579,7 +597,7 @@ export function AppShell({
               <div className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-kt-gold-400 to-kt-gold-600 text-kt-green-950 flex items-center justify-center font-bold text-xs shadow-glow-cyan">
                 {kind === 'admin' ? (
                   <img src="/admin-pp.png" alt="" className="w-full h-full object-cover" />
-                ) : userPhoto ? (
+                ) : kind === 'user' && userPhoto ? (
                   <img src={userPhoto} alt="" className="w-full h-full object-cover" />
                 ) : (
                   me?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('') ?? '??'
@@ -698,7 +716,7 @@ export function AppShell({
                 <div className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-kt-gold-400 to-kt-gold-600 text-kt-green-950 flex items-center justify-center font-bold text-xs shadow-glow-cyan shrink-0">
                   {kind === 'admin' ? (
                     <img src="/admin-pp.png" alt="" className="w-full h-full object-cover" />
-                  ) : userPhoto ? (
+                  ) : kind === 'user' && userPhoto ? (
                     <img src={userPhoto} alt="" className="w-full h-full object-cover" />
                   ) : (
                     me?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('') ?? '??'
@@ -729,7 +747,10 @@ export function AppShell({
       {/* Global overlays */}
       <CommandPalette kind={kind} />
       <OnboardingTour kind={kind} />
-      {kind !== 'admin' && <SupportRequestButton kind={kind} />}
+      {/* Destek talebi: admin'e ve salt-okunur izleyiciye gösterilmez (izleyici
+          değişiklik yapamaz; aksi halde alttaki destek FAB'ı sohbet sanılıp
+          tıklanınca izleyici token'ıyla hata veriyordu). */}
+      {kind !== 'admin' && kind !== 'izleyici' && <SupportRequestButton kind={kind} />}
       <ChatWidget />
     </div>
   );
