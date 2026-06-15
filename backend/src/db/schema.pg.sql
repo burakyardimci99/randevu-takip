@@ -218,7 +218,13 @@ CREATE TABLE IF NOT EXISTS book_loans (
           borrowed_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
           due_at TEXT NOT NULL,
           returned_at TEXT,
-          status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'returned', 'overdue')),
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'active', 'returned', 'overdue', 'rejected')),
+          period_days INTEGER NOT NULL DEFAULT 14,
+          extension_requested_days INTEGER,
+          extension_requested_at TEXT,
+          reviewed_by TEXT,
+          reviewed_at TEXT,
           created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
         );
 
@@ -540,6 +546,9 @@ CREATE INDEX IF NOT EXISTS idx_books_active ON books(is_active, title);
 CREATE INDEX IF NOT EXISTS idx_book_loans_user ON book_loans(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_book_loans_book ON book_loans(book_id);
 CREATE INDEX IF NOT EXISTS idx_book_loans_active ON book_loans(status, due_at);
+-- NOT: idx_book_loans_pending / idx_book_loans_extension index'leri migration
+-- 0004'te (ilgili kolon eklendikten SONRA) oluşturulur. Baseline'a KOYULMAZ; aksi
+-- halde mevcut DB'lerde kolon henüz yokken bu index baseline'da patlar (0004 öncesi).
 
 -- ============================================================
 -- ARTIMLI MİGRASYONLAR (idempotent)

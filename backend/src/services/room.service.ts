@@ -136,6 +136,8 @@ export interface RoomOccupant {
   startDate: string;
   endDate: string;
   status: 'approved' | 'pending' | 'feedback_requested';
+  /** Projeye atanmış üretilen görsel (varsa) — oda kartı arka planı için. */
+  showcaseImageUrl: string | null;
 }
 
 export interface RoomWithOccupancy extends RoomDto {
@@ -156,6 +158,7 @@ interface OccupantRow {
   start_date: string;
   end_date: string;
   status: 'approved' | 'pending' | 'feedback_requested';
+  showcase_image_url: string | null;
 }
 
 /**
@@ -167,7 +170,7 @@ export async function getRoomsWithOccupancy(): Promise<RoomWithOccupancy[]> {
   const today = ymdLocal();
 
   const rows = await dbAll(`SELECT b.id, b.room_id, b.user_id, b.project_name, b.period_months,
-              b.start_date, b.end_date, b.status,
+              b.start_date, b.end_date, b.status, b.showcase_image_url,
               u.full_name AS user_full_name, u.email AS user_email
        FROM bookings b
        INNER JOIN users u ON u.id = b.user_id
@@ -188,6 +191,7 @@ export async function getRoomsWithOccupancy(): Promise<RoomWithOccupancy[]> {
       startDate: r.start_date,
       endDate: r.end_date,
       status: r.status,
+      showcaseImageUrl: r.showcase_image_url,
     });
     byRoom.set(r.room_id, list);
   }

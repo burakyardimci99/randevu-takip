@@ -95,44 +95,68 @@ export default function IzleyiciDashboard() {
           <section>
             <h2 className="text-lg font-bold text-kt-green-900 mb-3">Oda Doluluğu</h2>
             <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {rooms.map((r) => (
-                <div key={r.id} className="card p-4">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div>
-                      <div className="text-xs font-bold uppercase tracking-wider text-kt-gold-700">
-                        {r.code}
+              {rooms.map((r) => {
+                const cover = r.bookings.find((b) => b.showcaseImageUrl)?.showcaseImageUrl ?? null;
+                return (
+                  <div key={r.id} className="card overflow-hidden flex flex-col">
+                    {/* Görsel başlık — projeye atanmış üretilen görsel veya temalı placeholder */}
+                    <div className="relative h-32 bg-gradient-to-br from-kt-green-700 to-kt-green-900">
+                      {cover ? (
+                        <img
+                          src={cover}
+                          alt={`${r.name} oda görseli`}
+                          loading="lazy"
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center text-white/25">
+                          <svg className="w-12 h-12" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                          </svg>
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                      <div className="absolute bottom-2 left-3 right-3 flex items-end justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-bold uppercase tracking-wider text-kt-gold-300">
+                            {r.code}
+                          </div>
+                          <div className="font-bold text-white drop-shadow truncate">{r.name}</div>
+                        </div>
+                        <span
+                          className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                            r.approvedCount > 0
+                              ? 'bg-red-500/90 text-white'
+                              : 'bg-emerald-500/90 text-white'
+                          }`}
+                        >
+                          {r.approvedCount > 0 ? 'Dolu' : 'Müsait'}
+                        </span>
                       </div>
-                      <div className="font-bold text-kt-green-900">{r.name}</div>
                     </div>
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                        r.approvedCount > 0
-                          ? 'bg-red-50 text-red-700 border border-red-200'
-                          : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      }`}
-                    >
-                      {r.approvedCount > 0 ? 'Dolu' : 'Müsait'}
-                    </span>
+                    {/* İçerik */}
+                    <div className="p-4 flex-1">
+                      {r.bookings.length > 0 ? (
+                        <ul className="space-y-1.5">
+                          {r.bookings.map((b) => (
+                            <li key={b.bookingId} className="text-sm text-kt-gray-600">
+                              <span className="font-semibold text-kt-green-800">{b.userFullName}</span>
+                              {' — '}
+                              {b.projectName}
+                              <span className="text-xs text-kt-gray-400">
+                                {' '}
+                                ({fmtDate(b.startDate)} – {fmtDate(b.endDate)})
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm text-kt-gray-400 italic">Aktif rezervasyon yok.</p>
+                      )}
+                    </div>
                   </div>
-                  {r.bookings.length > 0 ? (
-                    <ul className="space-y-1.5">
-                      {r.bookings.map((b) => (
-                        <li key={b.bookingId} className="text-sm text-kt-gray-600">
-                          <span className="font-semibold text-kt-green-800">{b.userFullName}</span>
-                          {' — '}
-                          {b.projectName}
-                          <span className="text-xs text-kt-gray-400">
-                            {' '}
-                            ({fmtDate(b.startDate)} – {fmtDate(b.endDate)})
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-kt-gray-400 italic">Aktif rezervasyon yok.</p>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
 

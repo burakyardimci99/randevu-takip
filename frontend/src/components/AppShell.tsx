@@ -10,6 +10,7 @@ import { useNotificationsData } from '../hooks/useNotificationsData';
 import { CommandPalette } from './CommandPalette';
 import { OnboardingTour } from './OnboardingTour';
 import { SupportRequestButton } from './SupportRequestButton';
+import { ChatWidget } from './ChatWidget';
 import type { SubjectKind } from '../types';
 
 interface AppShellProps {
@@ -729,6 +730,7 @@ export function AppShell({
       <CommandPalette kind={kind} />
       <OnboardingTour kind={kind} />
       {kind !== 'admin' && <SupportRequestButton kind={kind} />}
+      <ChatWidget />
     </div>
   );
 }

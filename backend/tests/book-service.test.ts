@@ -1,12 +1,9 @@
 /**
- * Kütüphane (book) servisi — envanter CRUD + ödünç/iade + overdue testleri.
+ * Kütüphane (book) servisi — envanter CRUD + ödünç onay akışı + süre uzatma + overdue.
  *
- * Kapsam:
- *  - createBook: available = total; listAvailableBooks yalnız aktif kitap.
- *  - borrowBook: kopya azalır, aktif loan; çift ödünç + tükenmiş kopya reddi.
- *  - returnBook: kopya geri kazanılır; IDOR + çift iade reddi.
- *  - markOverdueLoans: süresi geçmiş aktif loan -> overdue.
- *  - deleteBook: aktif loan varken silinemez; updateBook total -> available kaydırma.
+ * Akış: borrow → 'pending' (kopya rezerve) → admin approve → 'active' (süre başlar)
+ *       / admin reject → 'rejected' (kopya geri). return → 'returned'. Uzatma talebi
+ *       → admin approve (due_at uzar) / reject.
  */
 import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -22,6 +19,11 @@ import {
   listMyLoans,
   borrowBook,
   returnBook,
+  requestExtension,
+  approveLoan,
+  rejectLoan,
+  approveExtension,
+  rejectExtension,
   markOverdueLoans,
   listAllLoans,
 } from '../src/services/book.service';
@@ -67,44 +69,69 @@ describe('book.service — envanter', () => {
     const book = await createBook(ADMIN, { title: 'Genişleyen', author: 'Y', totalCopies: 2 });
     const updated = await updateBook(ADMIN, book.id, { totalCopies: 5 });
     expect(updated.totalCopies).toBe(5);
-    expect(updated.availableCopies).toBe(5); // 2 -> 5 (+3 delta, hiç ödünç yok)
+    expect(updated.availableCopies).toBe(5);
   });
 });
 
-describe('book.service — ödünç / iade', () => {
-  it('borrowBook: kopya azalır, aktif loan oluşur, borrowedByMe set olur', async () => {
+describe('book.service — ödünç onay akışı', () => {
+  it('borrowBook: pending oluşur, kopya rezerve edilir, borrowedByMe set olur', async () => {
     const book = await createBook(ADMIN, { title: 'Ödünç Kitap', author: 'Z', totalCopies: 2 });
     const loan = await borrowBook(USER1, book.id, 14);
-    expect(loan.status).toBe('active');
-    expect(loan.bookId).toBe(book.id);
+    expect(loan.status).toBe('pending');
+    expect(loan.periodDays).toBe(14);
 
     const after = await getBookByIdAdmin(book.id);
-    expect(after?.availableCopies).toBe(1);
+    expect(after?.availableCopies).toBe(1); // rezerve
 
     const visible = await listAvailableBooks(USER1);
     expect(visible.find((b) => b.id === book.id)?.borrowedByMe).toBe(true);
 
     const mine = await listMyLoans(USER1);
-    expect(mine.find((l) => l.id === loan.id)?.status).toBe('active');
+    expect(mine.find((l) => l.id === loan.id)?.status).toBe('pending');
   });
 
-  it('borrowBook: aynı kullanıcı aynı kitabı iki kez ödünç alamaz', async () => {
-    const book = await createBook(ADMIN, { title: 'Tek Ödünç', author: 'Z', totalCopies: 2 });
+  it('borrowBook: aynı kullanıcı aynı kitaba ikinci kez talep açamaz', async () => {
+    const book = await createBook(ADMIN, { title: 'Tek Talep', author: 'Z', totalCopies: 2 });
     await borrowBook(USER1, book.id, 14);
     await expect(borrowBook(USER1, book.id, 14)).rejects.toMatchObject({ code: 'ALREADY_BORROWED' });
   });
 
-  it('borrowBook: müsait kopya yoksa reddeder', async () => {
+  it('borrowBook: pending rezervasyon son kopyayı tutar → diğer kullanıcı alamaz', async () => {
     const book = await createBook(ADMIN, { title: 'Son Kopya', author: 'Z', totalCopies: 1 });
-    await borrowBook(USER1, book.id, 14); // available 1 -> 0
+    await borrowBook(USER1, book.id, 14); // available 1 -> 0 (rezerve)
     await expect(borrowBook(USER2, book.id, 14)).rejects.toMatchObject({ code: 'BOOK_UNAVAILABLE' });
   });
 
-  it('returnBook: kopyayı geri kazandırır, durum returned olur', async () => {
-    const book = await createBook(ADMIN, { title: 'İade Kitap', author: 'Z', totalCopies: 1 });
-    const loan = await borrowBook(USER1, book.id, 14);
+  it('approveLoan: pending → active, süre onay anında başlar', async () => {
+    const book = await createBook(ADMIN, { title: 'Onay Kitap', author: 'Z', totalCopies: 1 });
+    const loan = await borrowBook(USER1, book.id, 7);
+    const approved = await approveLoan(ADMIN, loan.id);
+    expect(approved.status).toBe('active');
+    expect(approved.reviewedBy).toBe(ADMIN);
+    expect(new Date(approved.dueAt).getTime()).toBeGreaterThan(new Date(approved.borrowedAt).getTime());
     expect((await getBookByIdAdmin(book.id))?.availableCopies).toBe(0);
+  });
 
+  it('approveLoan: pending olmayan kayıt onaylanamaz', async () => {
+    const book = await createBook(ADMIN, { title: 'İki Onay', author: 'Z', totalCopies: 1 });
+    const loan = await borrowBook(USER1, book.id, 7);
+    await approveLoan(ADMIN, loan.id);
+    await expect(approveLoan(ADMIN, loan.id)).rejects.toMatchObject({ code: 'LOAN_NOT_PENDING' });
+  });
+
+  it('rejectLoan: pending → rejected, rezerve kopya geri verilir', async () => {
+    const book = await createBook(ADMIN, { title: 'Red Kitap', author: 'Z', totalCopies: 1 });
+    const loan = await borrowBook(USER1, book.id, 7);
+    expect((await getBookByIdAdmin(book.id))?.availableCopies).toBe(0);
+    const rejected = await rejectLoan(ADMIN, loan.id);
+    expect(rejected.status).toBe('rejected');
+    expect((await getBookByIdAdmin(book.id))?.availableCopies).toBe(1);
+  });
+
+  it('returnBook: onaylı ödünç iade edilir, kopya geri kazanılır', async () => {
+    const book = await createBook(ADMIN, { title: 'İade Kitap', author: 'Z', totalCopies: 1 });
+    const loan = await borrowBook(USER1, book.id, 7);
+    await approveLoan(ADMIN, loan.id);
     const returned = await returnBook(USER1, loan.id);
     expect(returned.status).toBe('returned');
     expect(returned.returnedAt).not.toBeNull();
@@ -113,23 +140,59 @@ describe('book.service — ödünç / iade', () => {
 
   it('returnBook: başkasının ödüncü iade edilemez (IDOR)', async () => {
     const book = await createBook(ADMIN, { title: 'IDOR Kitap', author: 'Z', totalCopies: 1 });
-    const loan = await borrowBook(USER1, book.id, 14);
+    const loan = await borrowBook(USER1, book.id, 7);
+    await approveLoan(ADMIN, loan.id);
     await expect(returnBook(USER2, loan.id)).rejects.toMatchObject({ code: 'LOAN_NOT_FOUND' });
   });
 
   it('returnBook: çift iade reddedilir', async () => {
     const book = await createBook(ADMIN, { title: 'Çift İade', author: 'Z', totalCopies: 1 });
-    const loan = await borrowBook(USER1, book.id, 14);
+    const loan = await borrowBook(USER1, book.id, 7);
+    await approveLoan(ADMIN, loan.id);
     await returnBook(USER1, loan.id);
     await expect(returnBook(USER1, loan.id)).rejects.toMatchObject({ code: 'ALREADY_RETURNED' });
+  });
+});
+
+describe('book.service — süre uzatma', () => {
+  it('requestExtension + approveExtension: due_at uzar, talep temizlenir', async () => {
+    const book = await createBook(ADMIN, { title: 'Uzatma Kitap', author: 'Z', totalCopies: 1 });
+    const loan = await borrowBook(USER1, book.id, 7);
+    const active = await approveLoan(ADMIN, loan.id);
+    const dueBefore = new Date(active.dueAt).getTime();
+
+    const requested = await requestExtension(USER1, loan.id, 7);
+    expect(requested.extensionRequestedDays).toBe(7);
+    expect(requested.extensionRequestedAt).not.toBeNull();
+
+    const extended = await approveExtension(ADMIN, loan.id);
+    expect(extended.extensionRequestedDays).toBeNull();
+    expect(new Date(extended.dueAt).getTime()).toBeGreaterThan(dueBefore);
+  });
+
+  it('requestExtension: pending ödünçte istenemez', async () => {
+    const book = await createBook(ADMIN, { title: 'Pending Uzatma', author: 'Z', totalCopies: 1 });
+    const loan = await borrowBook(USER1, book.id, 7);
+    await expect(requestExtension(USER1, loan.id, 7)).rejects.toMatchObject({ code: 'NOT_EXTENDABLE' });
+  });
+
+  it('rejectExtension: talep temizlenir, due_at değişmez', async () => {
+    const book = await createBook(ADMIN, { title: 'Uzatma Red', author: 'Z', totalCopies: 1 });
+    const loan = await borrowBook(USER1, book.id, 7);
+    const active = await approveLoan(ADMIN, loan.id);
+    const dueBefore = active.dueAt;
+    await requestExtension(USER1, loan.id, 14);
+    const rejected = await rejectExtension(ADMIN, loan.id);
+    expect(rejected.extensionRequestedDays).toBeNull();
+    expect(rejected.dueAt).toBe(dueBefore);
   });
 });
 
 describe('book.service — bakım & silme', () => {
   it('markOverdueLoans: süresi geçmiş aktif loan overdue olur', async () => {
     const book = await createBook(ADMIN, { title: 'Gecikmiş', author: 'Z', totalCopies: 1 });
-    const loan = await borrowBook(USER1, book.id, 14);
-    // due_at'i geçmişe çek.
+    const loan = await borrowBook(USER1, book.id, 7);
+    await approveLoan(ADMIN, loan.id);
     await dbRun(`UPDATE book_loans SET due_at = ? WHERE id = ?`, [
       new Date(Date.now() - 86400000).toISOString(),
       loan.id,
@@ -140,9 +203,9 @@ describe('book.service — bakım & silme', () => {
     expect(mine.find((l) => l.id === loan.id)?.status).toBe('overdue');
   });
 
-  it('deleteBook: aktif ödünçlü kitap silinemez', async () => {
+  it('deleteBook: bekleyen/aktif ödüncü olan kitap silinemez', async () => {
     const book = await createBook(ADMIN, { title: 'Silinemez', author: 'Z', totalCopies: 1 });
-    await borrowBook(USER1, book.id, 14);
+    await borrowBook(USER1, book.id, 7); // pending
     await expect(deleteBook(ADMIN, book.id)).rejects.toMatchObject({ code: 'BOOK_HAS_ACTIVE_LOANS' });
   });
 
@@ -152,9 +215,9 @@ describe('book.service — bakım & silme', () => {
     expect(await getBookByIdAdmin(book.id)).toBeUndefined();
   });
 
-  it('listAllLoans: admin tüm ödünçleri görür (status filtresi)', async () => {
-    const active = await listAllLoans({ status: 'active' });
-    expect(Array.isArray(active)).toBe(true);
-    expect(active.every((l) => l.status === 'active')).toBe(true);
+  it('listAllLoans: pending filtresi yalnız bekleyenleri döner', async () => {
+    const pendingLoans = await listAllLoans({ status: 'pending' });
+    expect(Array.isArray(pendingLoans)).toBe(true);
+    expect(pendingLoans.every((l) => l.status === 'pending')).toBe(true);
   });
 });

@@ -15,12 +15,14 @@ import { AppShell } from '../components/AppShell';
 import { ShowcaseCard } from '../components/ShowcaseCard';
 import { EmptyState } from '../components/EmptyState';
 import { useAuth } from '../contexts/AuthContext';
+import { useViewerKind } from '../hooks/useViewerKind';
 import { api } from '../services/api';
 import type { ShowcaseEngagement, ShowcaseItem } from '../types';
 
 
 export default function Showcase() {
-  const { user, admin } = useAuth();
+  const auth = useAuth();
+  const viewerKind = useViewerKind();
   const [items, setItems] = useState<ShowcaseItem[]>([]);
   const [techs, setTechs] = useState<Array<{ technology: string; count: number }>>([]);
   const [engagement, setEngagement] = useState<ShowcaseEngagement>({});
@@ -59,8 +61,18 @@ export default function Showcase() {
     });
   }, [items, query, activeTech]);
 
-  const isLoggedIn = !!user || !!admin;
-  const homeLink = admin ? '/admin' : user ? '/rooms' : '/';
+  const isLoggedIn = !!(auth.user || auth.admin || auth.danisman || auth.arge || auth.izleyici);
+  const homeLink = auth.admin
+    ? '/admin'
+    : auth.danisman
+      ? '/danisman'
+      : auth.arge
+        ? '/arge'
+        : auth.izleyici
+          ? '/izleyici'
+          : auth.user
+            ? '/rooms'
+            : '/';
 
   // Envanter içeriği — hem AppShell hem public header altında aynı kullanılır.
   const content = (
@@ -168,11 +180,10 @@ export default function Showcase() {
 
   // Giriş yapmış kullanıcılar AppShell içinde — sidebar/nav korunur, "Envanter"
   // aktif highlight ile gözükür. Anonim ziyaretçiler için public header korundu.
-  if (user) {
-    return <AppShell kind="user">{content}</AppShell>;
-  }
-  if (admin) {
-    return <AppShell kind="admin">{content}</AppShell>;
+  // Giriş yapmış HER rol (user/admin/danışman/arge/izleyici) kendi AppShell'inde
+  // görür — izleyici/danışman/arge artık public "Giriş Yap" görünümüne düşmez.
+  if (isLoggedIn) {
+    return <AppShell kind={viewerKind}>{content}</AppShell>;
   }
 
   return (

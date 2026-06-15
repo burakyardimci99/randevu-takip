@@ -256,7 +256,7 @@ export interface Book {
   borrowedByMe?: boolean;
 }
 
-export type BookLoanStatus = 'active' | 'returned' | 'overdue';
+export type BookLoanStatus = 'pending' | 'active' | 'returned' | 'overdue' | 'rejected';
 
 export interface BookLoan {
   id: string;
@@ -271,5 +271,12 @@ export interface BookLoan {
   dueAt: string;
   returnedAt: string | null;
   status: BookLoanStatus;
+  /** Talep edilen ödünç süresi (gün). */
+  periodDays: number;
+  /** Bekleyen süre-uzatma talebi (gün) — null = talep yok. */
+  extensionRequestedDays: number | null;
+  extensionRequestedAt: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
   createdAt: string;
 }

@@ -1597,9 +1597,43 @@ export const api = {
       kind: 'admin',
     });
   },
-  async adminListLoans(statusFilter?: 'active' | 'returned' | 'overdue') {
+  async adminListLoans(statusFilter?: 'pending' | 'active' | 'returned' | 'overdue' | 'rejected') {
     const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
     return request<{ loans: BookLoan[] }>(`/admin/loans${qs}`, { kind: staffKind() });
+  },
+
+  // Kullanıcı: aktif/gecikmiş ödünç için süre uzatma talebi.
+  async requestExtension(loanId: string, days: 7 | 14 | 30) {
+    return request<{ loan: BookLoan }>(
+      `/user/loans/${encodeURIComponent(loanId)}/extend`,
+      { method: 'POST', body: { days }, kind: 'user' }
+    );
+  },
+
+  // Admin: bekleyen ödünç onay/red + süre-uzatma onay/red.
+  async adminApproveLoan(loanId: string) {
+    return request<{ loan: BookLoan }>(
+      `/admin/loans/${encodeURIComponent(loanId)}/approve`,
+      { method: 'POST', kind: 'admin' }
+    );
+  },
+  async adminRejectLoan(loanId: string) {
+    return request<{ loan: BookLoan }>(
+      `/admin/loans/${encodeURIComponent(loanId)}/reject`,
+      { method: 'POST', kind: 'admin' }
+    );
+  },
+  async adminApproveExtension(loanId: string) {
+    return request<{ loan: BookLoan }>(
+      `/admin/loans/${encodeURIComponent(loanId)}/extend/approve`,
+      { method: 'POST', kind: 'admin' }
+    );
+  },
+  async adminRejectExtension(loanId: string) {
+    return request<{ loan: BookLoan }>(
+      `/admin/loans/${encodeURIComponent(loanId)}/extend/reject`,
+      { method: 'POST', kind: 'admin' }
+    );
   },
 };
 

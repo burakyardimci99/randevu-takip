@@ -42,6 +42,10 @@ import {
   updateBook,
   deleteBook,
   listAllLoans,
+  approveLoan,
+  rejectLoan,
+  approveExtension,
+  rejectExtension,
 } from '../services/book.service';
 import {
   getBookingByIdAdmin,
@@ -1433,14 +1437,54 @@ router.delete('/books/:id', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
-// Tüm ödünç kayıtları (opsiyonel ?status=active|returned|overdue).
+// Tüm ödünç kayıtları (opsiyonel ?status=pending|active|returned|overdue|rejected).
 router.get('/loans', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const status = req.query.status as string | undefined;
-    const allowed = ['active', 'returned', 'overdue'];
+    const allowed = ['pending', 'active', 'returned', 'overdue', 'rejected'];
     const filter =
-      status && allowed.includes(status) ? (status as 'active' | 'returned' | 'overdue') : undefined;
+      status && allowed.includes(status)
+        ? (status as 'pending' | 'active' | 'returned' | 'overdue' | 'rejected')
+        : undefined;
     res.json({ loans: await listAllLoans({ status: filter }) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Bekleyen ödünç talebini onayla / reddet.
+router.post('/loans/:id/approve', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'ödünç id');
+    res.json({ loan: await approveLoan(req.auth!.subjectId, id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/loans/:id/reject', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'ödünç id');
+    res.json({ loan: await rejectLoan(req.auth!.subjectId, id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Bekleyen süre-uzatma talebini onayla / reddet.
+router.post('/loans/:id/extend/approve', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'ödünç id');
+    res.json({ loan: await approveExtension(req.auth!.subjectId, id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/loans/:id/extend/reject', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'ödünç id');
+    res.json({ loan: await rejectExtension(req.auth!.subjectId, id) });
   } catch (err) {
     next(err);
   }

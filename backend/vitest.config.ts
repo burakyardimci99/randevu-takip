@@ -13,7 +13,7 @@ export default defineConfig({
       // include verilmezse yalnız import edilen dosyalar rapora girer ve
       // kapsam olduğundan YÜKSEK görünür (test edilmeyen dosyalar görünmez).
       include: ['src/**/*.ts'],
-      exclude: ['src/db/seed.ts', 'src/openapi.ts'],
+      exclude: ['src/db/seed.ts', 'src/db/seed-books.ts', 'src/openapi.ts'],
       reporter: ['text-summary', 'html'],
       // Minimum kapsam eşikleri — REGRESYON BARİYERİ (ratchet): mevcut ölçülen
       // kapsamın (≈%38 satır / %32 dal, 174 test) hemen altına ayarlandı. Amaç

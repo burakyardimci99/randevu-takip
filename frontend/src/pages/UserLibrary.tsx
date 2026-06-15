@@ -15,6 +15,9 @@ import type { Book, BookLoan } from '../types';
 type BorrowPeriod = 7 | 14 | 30;
 const BORROW_PERIODS: BorrowPeriod[] = [7, 14, 30];
 
+type ExtensionDays = 7 | 14 | 30;
+const EXTENSION_DAYS: ExtensionDays[] = [7, 14, 30];
+
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('tr-TR', {
     day: '2-digit',
@@ -33,9 +36,11 @@ function daysUntil(iso: string): number {
 /** Ödünç durum rozeti — BookLoanStatus için (StatusBadge yalnız BookingStatus alır). */
 function LoanStatusBadge({ status }: { status: BookLoan['status'] }) {
   const cfg: Record<BookLoan['status'], { label: string; cls: string }> = {
+    pending: { label: 'Onay bekliyor', cls: 'bg-amber-100 text-amber-800 border-amber-300' },
     active: { label: 'Aktif', cls: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
     overdue: { label: 'Gecikmiş', cls: 'bg-rose-100 text-rose-800 border-rose-300' },
     returned: { label: 'İade Edildi', cls: 'bg-kt-gray-100 text-kt-gray-600 border-kt-gray-200' },
+    rejected: { label: 'Reddedildi', cls: 'bg-rose-100 text-rose-700 border-rose-300' },
   };
   const c = cfg[status];
   return (
@@ -69,6 +74,8 @@ export default function UserLibrary() {
 
   // Kart bazlı süre seçimi (varsayılan 14 gün). bookId → süre.
   const [periods, setPeriods] = useState<Record<string, BorrowPeriod>>({});
+  // Loan bazlı süre-uzatma seçimi (varsayılan 7 gün). loanId → gün.
+  const [extDays, setExtDays] = useState<Record<string, ExtensionDays>>({});
   // O an ödünç alınan / iade edilen kayıt id'si (buton spinner + disable).
   const [busyBook, setBusyBook] = useState<string | null>(null);
   const [busyLoan, setBusyLoan] = useState<string | null>(null);
@@ -115,13 +122,18 @@ export default function UserLibrary() {
     );
   }, [books, search]);
 
-  // Aktif/gecikmiş ödünçler (üstte) ve iade edilmiş geçmiş (altta).
+  // Onay bekleyen talepler (en üstte), aktif/gecikmiş ödünçler (ortada),
+  // iade edilmiş / reddedilmiş geçmiş (altta).
+  const pendingLoans = useMemo(
+    () => loans.filter((l) => l.status === 'pending'),
+    [loans]
+  );
   const activeLoans = useMemo(
     () => loans.filter((l) => l.status === 'active' || l.status === 'overdue'),
     [loans]
   );
   const pastLoans = useMemo(
-    () => loans.filter((l) => l.status === 'returned'),
+    () => loans.filter((l) => l.status === 'returned' || l.status === 'rejected'),
     [loans]
   );
 
@@ -131,10 +143,10 @@ export default function UserLibrary() {
     try {
       const period = periods[book.id] ?? 14;
       await api.borrowBook(book.id, period);
-      toast.push('success', `"${book.title}" ${period} günlüğüne ödünç alındı.`);
+      toast.push('success', 'Talebiniz alındı — admin onayına gönderildi.');
       await Promise.all([loadBooks(), loadLoans()]);
     } catch (err) {
-      toast.push('error', (err as Error).message || 'Kitap ödünç alınamadı.');
+      toast.push('error', (err as Error).message || 'Ödünç talebi gönderilemedi.');
     } finally {
       setBusyBook(null);
     }
@@ -154,12 +166,26 @@ export default function UserLibrary() {
     }
   }
 
+  async function handleRequestExtension(loan: BookLoan, days: ExtensionDays) {
+    if (busyLoan) return;
+    setBusyLoan(loan.id);
+    try {
+      await api.requestExtension(loan.id, days);
+      toast.push('success', `"${loan.bookTitle}" için ${days} günlük süre uzatma talebi gönderildi.`);
+      await loadLoans();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Süre uzatma talebi gönderilemedi.');
+    } finally {
+      setBusyLoan(null);
+    }
+  }
+
   return (
     <AppShell kind="user">
       <div className="mb-8">
         <h1 className="text-3xl font-extrabold text-kt-green-900 mb-1">Kütüphane</h1>
         <p className="text-kt-gray-500">
-          AI Lab kitaplığından kitap ödünç alın, ödünçlerinizi takip edin ve iade edin.
+          AI Lab kitaplığından kitap ödünç talep edin (admin onayıyla), ödünçlerinizi takip edin, süre uzatın ve iade edin.
         </p>
       </div>
 
@@ -227,7 +253,7 @@ export default function UserLibrary() {
                     )}
                     {mine && (
                       <span className="absolute top-3 right-3 text-[10px] font-bold px-2 py-0.5 rounded-md border bg-kt-violet-100 text-kt-violet-800 border-kt-violet-300">
-                        Sizde
+                        Sizde / Talebiniz var
                       </span>
                     )}
                   </div>
@@ -296,9 +322,9 @@ export default function UserLibrary() {
                           type="button"
                           disabled
                           className="btn-secondary w-full text-sm opacity-60 cursor-not-allowed"
-                          aria-label={`${book.title} zaten sizde`}
+                          aria-label={`${book.title} için talebiniz var veya sizde`}
                         >
-                          Sizde
+                          Talebiniz var
                         </button>
                       ) : soldOut ? (
                         <button
@@ -315,9 +341,9 @@ export default function UserLibrary() {
                           onClick={() => handleBorrow(book)}
                           disabled={borrowing}
                           className="btn-primary w-full text-sm"
-                          aria-label={`${book.title} kitabını ${period} günlüğüne ödünç al`}
+                          aria-label={`${book.title} kitabını ${period} günlüğüne ödünç talep et`}
                         >
-                          {borrowing ? 'İşleniyor…' : 'Ödünç Al'}
+                          {borrowing ? 'İşleniyor…' : 'Ödünç Talep Et'}
                         </button>
                       )}
                     </div>
@@ -343,6 +369,38 @@ export default function UserLibrary() {
           </div>
         ) : (
           <>
+            {/* Onay bekleyen talepler — aksiyon yok, yalnız bilgi. */}
+            {pendingLoans.length > 0 && (
+              <div className="mb-8">
+                <h3 className="text-sm font-bold text-kt-gray-600 uppercase tracking-wide mb-3">
+                  Onay Bekleyen Talepler ({pendingLoans.length})
+                </h3>
+                <ul className="space-y-3">
+                  {pendingLoans.map((loan) => (
+                    <li
+                      key={loan.id}
+                      className="card p-4 flex flex-col sm:flex-row sm:items-center gap-3 border-amber-200 bg-amber-50/40"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-kt-green-900 truncate">
+                            {loan.bookTitle}
+                          </span>
+                          <LoanStatusBadge status={loan.status} />
+                        </div>
+                        <div className="text-xs text-kt-gray-500 mt-0.5 truncate">
+                          {loan.bookAuthor}
+                        </div>
+                        <div className="text-xs mt-1 font-medium text-amber-700">
+                          {loan.periodDays} günlük ödünç talebi · admin onayı bekleniyor
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Aktif / gecikmiş ödünçler */}
             <div className="mb-8">
               <h3 className="text-sm font-bold text-kt-gray-600 uppercase tracking-wide mb-3">
@@ -360,46 +418,95 @@ export default function UserLibrary() {
                   {activeLoans.map((loan) => {
                     const overdue = loan.status === 'overdue';
                     const remaining = daysUntil(loan.dueAt);
-                    const returning = busyLoan === loan.id;
+                    const busy = busyLoan === loan.id;
+                    const extPending = loan.extensionRequestedDays != null;
+                    const extSel = extDays[loan.id] ?? 7;
                     return (
                       <li
                         key={loan.id}
-                        className={`card p-4 flex flex-col sm:flex-row sm:items-center gap-3 ${
+                        className={`card p-4 flex flex-col gap-3 ${
                           overdue ? 'border-rose-300 bg-rose-50/40' : ''
                         }`}
                       >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-bold text-kt-green-900 truncate">
-                              {loan.bookTitle}
-                            </span>
-                            <LoanStatusBadge status={loan.status} />
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-bold text-kt-green-900 truncate">
+                                {loan.bookTitle}
+                              </span>
+                              <LoanStatusBadge status={loan.status} />
+                              {extPending && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md border bg-amber-100 text-amber-800 border-amber-300">
+                                  Uzatma talebi: {loan.extensionRequestedDays} gün — onay bekliyor
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-kt-gray-500 mt-0.5 truncate">
+                              {loan.bookAuthor}
+                            </div>
+                            <div
+                              className={`text-xs mt-1 font-medium ${
+                                overdue ? 'text-rose-700' : 'text-kt-gray-600'
+                              }`}
+                            >
+                              Termin: {fmtDate(loan.dueAt)}
+                              {overdue
+                                ? ` · ${Math.abs(remaining)} gün gecikti`
+                                : remaining >= 0
+                                  ? ` · ${remaining} gün kaldı`
+                                  : ''}
+                            </div>
                           </div>
-                          <div className="text-xs text-kt-gray-500 mt-0.5 truncate">
-                            {loan.bookAuthor}
-                          </div>
-                          <div
-                            className={`text-xs mt-1 font-medium ${
-                              overdue ? 'text-rose-700' : 'text-kt-gray-600'
-                            }`}
+                          <button
+                            type="button"
+                            onClick={() => handleReturn(loan)}
+                            disabled={busy}
+                            className="btn-secondary text-sm shrink-0 self-start sm:self-auto"
+                            aria-label={`${loan.bookTitle} kitabını iade et`}
                           >
-                            Termin: {fmtDate(loan.dueAt)}
-                            {overdue
-                              ? ` · ${Math.abs(remaining)} gün gecikti`
-                              : remaining >= 0
-                                ? ` · ${remaining} gün kaldı`
-                                : ''}
-                          </div>
+                            {busy ? 'İşleniyor…' : 'İade Et'}
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleReturn(loan)}
-                          disabled={returning}
-                          className="btn-secondary text-sm shrink-0 self-start sm:self-auto"
-                          aria-label={`${loan.bookTitle} kitabını iade et`}
-                        >
-                          {returning ? 'İşleniyor…' : 'İade Et'}
-                        </button>
+
+                        {/* Süre uzatma — bekleyen talep yoksa göster. */}
+                        {!extPending && (
+                          <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-kt-gray-100">
+                            <label
+                              htmlFor={`ext-${loan.id}`}
+                              className="text-xs font-semibold text-kt-gray-600 shrink-0"
+                            >
+                              Süre uzat:
+                            </label>
+                            <select
+                              id={`ext-${loan.id}`}
+                              value={extSel}
+                              onChange={(e) =>
+                                setExtDays((m) => ({
+                                  ...m,
+                                  [loan.id]: Number(e.target.value) as ExtensionDays,
+                                }))
+                              }
+                              disabled={busy}
+                              className="input py-1.5 text-sm w-28"
+                              aria-label={`${loan.bookTitle} için uzatma süresi`}
+                            >
+                              {EXTENSION_DAYS.map((d) => (
+                                <option key={d} value={d}>
+                                  {d} gün
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => handleRequestExtension(loan, extSel)}
+                              disabled={busy}
+                              className="btn-ghost text-sm shrink-0"
+                              aria-label={`${loan.bookTitle} için ${extSel} günlük süre uzatma talep et`}
+                            >
+                              {busy ? 'İşleniyor…' : 'Süre Uzat'}
+                            </button>
+                          </div>
+                        )}
                       </li>
                     );
                   })}
@@ -407,14 +514,14 @@ export default function UserLibrary() {
               )}
             </div>
 
-            {/* İade geçmişi */}
+            {/* Geçmiş — iade edilen / reddedilen */}
             <div>
               <h3 className="text-sm font-bold text-kt-gray-600 uppercase tracking-wide mb-3">
-                İade Geçmişi ({pastLoans.length})
+                Geçmiş ({pastLoans.length})
               </h3>
               {pastLoans.length === 0 ? (
                 <p className="text-sm text-kt-gray-400 italic py-2">
-                  Henüz iade edilmiş kitabınız yok.
+                  Henüz iade edilmiş veya reddedilmiş kaydınız yok.
                 </p>
               ) : (
                 <ul className="space-y-2">
@@ -435,9 +542,13 @@ export default function UserLibrary() {
                         </div>
                       </div>
                       <div className="text-xs text-kt-gray-500 shrink-0">
-                        {loan.returnedAt
-                          ? `İade: ${fmtDate(loan.returnedAt)}`
-                          : '—'}
+                        {loan.status === 'rejected'
+                          ? loan.reviewedAt
+                            ? `Reddedildi: ${fmtDate(loan.reviewedAt)}`
+                            : 'Reddedildi'
+                          : loan.returnedAt
+                            ? `İade: ${fmtDate(loan.returnedAt)}`
+                            : '—'}
                       </div>
                     </li>
                   ))}

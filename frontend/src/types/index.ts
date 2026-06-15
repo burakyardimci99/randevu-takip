@@ -146,6 +146,7 @@ export interface RoomOccupant {
   startDate: string;
   endDate: string;
   status: 'approved' | 'pending' | 'feedback_requested';
+  showcaseImageUrl: string | null;
 }
 
 export interface RoomWithOccupancy extends Room {

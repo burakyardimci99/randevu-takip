@@ -20,6 +20,7 @@ import {
   similarSearchSchema,
   stageAdvanceRequestSchema,
   borrowBookSchema,
+  requestExtensionSchema,
 } from '../validators/schemas';
 import { listRooms } from '../services/room.service';
 import {
@@ -57,6 +58,7 @@ import {
   borrowBook,
   listMyLoans,
   returnBook,
+  requestExtension,
 } from '../services/book.service';
 import {
   createHardwareRequest,
@@ -1067,6 +1069,18 @@ router.post('/loans/:id/return', async (req: Request, res: Response, next: NextF
   try {
     const id = readId(req, 'id', 'ödünç id');
     const loan = await returnBook(req.auth!.subjectId, id);
+    res.json({ loan });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Süre uzatma talebi (admin onayına gider).
+router.post('/loans/:id/extend', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'ödünç id');
+    const input = requestExtensionSchema.parse(req.body);
+    const loan = await requestExtension(req.auth!.subjectId, id, input.days);
     res.json({ loan });
   } catch (err) {
     next(err);

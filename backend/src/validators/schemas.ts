@@ -582,6 +582,12 @@ export const borrowBookSchema = z.object({
   periodDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).optional(),
 });
 
+/** Süre uzatma talebi (gün). */
+export const requestExtensionSchema = z.object({
+  days: z.union([z.literal(7), z.literal(14), z.literal(30)]),
+});
+
 export type CreateBookInput = z.infer<typeof createBookSchema>;
 export type UpdateBookInput = z.infer<typeof updateBookSchema>;
 export type BorrowBookInput = z.infer<typeof borrowBookSchema>;
+export type RequestExtensionInput = z.infer<typeof requestExtensionSchema>;

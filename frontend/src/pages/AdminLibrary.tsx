@@ -19,7 +19,7 @@ import { api } from '../services/api';
 import type { Book, BookLoan } from '../types';
 
 type Tab = 'books' | 'loans';
-type LoanFilter = 'all' | 'active' | 'returned' | 'overdue';
+type LoanFilter = 'all' | 'pending' | 'active' | 'overdue' | 'returned' | 'rejected';
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('tr-TR', {
@@ -32,9 +32,11 @@ function fmtDate(iso: string): string {
 /** Ödünç durum rozeti — BookLoanStatus için (StatusBadge yalnız BookingStatus alır). */
 function LoanStatusBadge({ status }: { status: BookLoan['status'] }) {
   const cfg: Record<BookLoan['status'], { label: string; cls: string }> = {
+    pending: { label: 'Onay bekliyor', cls: 'bg-amber-100 text-amber-800 border-amber-300' },
     active: { label: 'Aktif', cls: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
     overdue: { label: 'Gecikmiş', cls: 'bg-rose-100 text-rose-800 border-rose-300' },
     returned: { label: 'İade Edildi', cls: 'bg-kt-gray-100 text-kt-gray-600 border-kt-gray-200' },
+    rejected: { label: 'Reddedildi', cls: 'bg-rose-100 text-rose-700 border-rose-300' },
   };
   const c = cfg[status];
   return (
@@ -69,9 +71,11 @@ const EMPTY_FORM: BookForm = {
 
 const LOAN_FILTERS: Array<{ key: LoanFilter; label: string }> = [
   { key: 'all', label: 'Tümü' },
+  { key: 'pending', label: 'Onay Bekleyen' },
   { key: 'active', label: 'Aktif' },
   { key: 'overdue', label: 'Gecikmiş' },
   { key: 'returned', label: 'İade Edildi' },
+  { key: 'rejected', label: 'Reddedildi' },
 ];
 
 export default function AdminLibrary() {
@@ -99,6 +103,10 @@ export default function AdminLibrary() {
   const [loans, setLoans] = useState<BookLoan[]>([]);
   const [loadingLoans, setLoadingLoans] = useState(true);
   const [loanFilter, setLoanFilter] = useState<LoanFilter>('all');
+  // O an onay/red/uzatma işlemi yürüyen ödünç kaydı (buton disable).
+  const [busyLoan, setBusyLoan] = useState<string | null>(null);
+  // Bekleyen ödünç talebi sayısı (sekme rozeti) — filtreden bağımsız tutulur.
+  const [pendingCount, setPendingCount] = useState(0);
 
   const loadBooks = useCallback(async () => {
     setLoadingBooks(true);
@@ -124,6 +132,16 @@ export default function AdminLibrary() {
     }
   }, [toast, loanFilter]);
 
+  // Bekleyen talep sayısı — sekme rozeti için filtreden bağımsız çekilir.
+  const loadPendingCount = useCallback(async () => {
+    try {
+      const res = await api.adminListLoans('pending');
+      setPendingCount(res.loans.length);
+    } catch {
+      // Rozet bilgilendiricidir; hatada sessizce geç.
+    }
+  }, []);
+
   useEffect(() => {
     void loadBooks();
   }, [loadBooks]);
@@ -131,6 +149,71 @@ export default function AdminLibrary() {
   useEffect(() => {
     void loadLoans();
   }, [loadLoans]);
+
+  useEffect(() => {
+    void loadPendingCount();
+  }, [loadPendingCount]);
+
+  // Onay/red/uzatma işleminden sonra liste + rozeti birlikte tazele.
+  const refreshLoans = useCallback(async () => {
+    await Promise.all([loadLoans(), loadPendingCount()]);
+  }, [loadLoans, loadPendingCount]);
+
+  async function handleApproveLoan(loan: BookLoan) {
+    if (busyLoan) return;
+    setBusyLoan(loan.id);
+    try {
+      await api.adminApproveLoan(loan.id);
+      toast.push('success', `"${loan.bookTitle}" ödünç talebi onaylandı.`);
+      await refreshLoans();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Ödünç talebi onaylanamadı.');
+    } finally {
+      setBusyLoan(null);
+    }
+  }
+
+  async function handleRejectLoan(loan: BookLoan) {
+    if (busyLoan) return;
+    setBusyLoan(loan.id);
+    try {
+      await api.adminRejectLoan(loan.id);
+      toast.push('success', `"${loan.bookTitle}" ödünç talebi reddedildi.`);
+      await refreshLoans();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Ödünç talebi reddedilemedi.');
+    } finally {
+      setBusyLoan(null);
+    }
+  }
+
+  async function handleApproveExtension(loan: BookLoan) {
+    if (busyLoan) return;
+    setBusyLoan(loan.id);
+    try {
+      await api.adminApproveExtension(loan.id);
+      toast.push('success', `"${loan.bookTitle}" süre uzatma talebi onaylandı.`);
+      await refreshLoans();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Süre uzatma onaylanamadı.');
+    } finally {
+      setBusyLoan(null);
+    }
+  }
+
+  async function handleRejectExtension(loan: BookLoan) {
+    if (busyLoan) return;
+    setBusyLoan(loan.id);
+    try {
+      await api.adminRejectExtension(loan.id);
+      toast.push('success', `"${loan.bookTitle}" süre uzatma talebi reddedildi.`);
+      await refreshLoans();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'Süre uzatma reddedilemedi.');
+    } finally {
+      setBusyLoan(null);
+    }
+  }
 
   function openCreate() {
     setEditing(null);
@@ -273,13 +356,23 @@ export default function AdminLibrary() {
           role="tab"
           aria-selected={tab === 'loans'}
           onClick={() => setTab('loans')}
-          className={`px-4 py-2 rounded-xl font-semibold text-sm transition-all ${
+          className={`px-4 py-2 rounded-xl font-semibold text-sm transition-all inline-flex items-center gap-2 ${
             tab === 'loans'
               ? 'bg-kt-green-800 text-white'
               : 'bg-white border border-kt-gray-200 text-kt-green-700 hover:border-kt-green-300'
           }`}
         >
           Ödünçler
+          {pendingCount > 0 && (
+            <span
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center ${
+                tab === 'loans' ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-800 border border-amber-300'
+              }`}
+              aria-label={`${pendingCount} bekleyen talep`}
+            >
+              {pendingCount}
+            </span>
+          )}
         </button>
       </div>
 
@@ -452,16 +545,25 @@ export default function AdminLibrary() {
                     <th className="px-4 py-3 font-semibold">Termin</th>
                     <th className="px-4 py-3 font-semibold">İade</th>
                     <th className="px-4 py-3 font-semibold text-center">Durum</th>
+                    {canEdit && <th className="px-4 py-3 font-semibold text-right">İşlemler</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-kt-gray-100">
                   {loans.map((loan) => {
                     const overdue = loan.status === 'overdue';
+                    const isPending = loan.status === 'pending';
+                    const extPending = loan.extensionRequestedDays != null;
+                    const busy = busyLoan === loan.id;
+                    const hasActions = canEdit && (isPending || extPending);
                     return (
                       <tr
                         key={loan.id}
                         className={`transition-colors ${
-                          overdue ? 'bg-rose-50/50 hover:bg-rose-50' : 'hover:bg-kt-gray-50/60'
+                          overdue
+                            ? 'bg-rose-50/50 hover:bg-rose-50'
+                            : isPending
+                              ? 'bg-amber-50/50 hover:bg-amber-50'
+                              : 'hover:bg-kt-gray-50/60'
                         }`}
                       >
                         <td className="px-4 py-3 min-w-0">
@@ -490,8 +592,69 @@ export default function AdminLibrary() {
                           {loan.returnedAt ? fmtDate(loan.returnedAt) : '—'}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <LoanStatusBadge status={loan.status} />
+                          <div className="flex flex-col items-center gap-1">
+                            <LoanStatusBadge status={loan.status} />
+                            {extPending && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md border bg-amber-100 text-amber-800 border-amber-300 whitespace-nowrap">
+                                Uzatma talebi: {loan.extensionRequestedDays} gün
+                              </span>
+                            )}
+                          </div>
                         </td>
+                        {canEdit && (
+                          <td className="px-4 py-3">
+                            {hasActions ? (
+                              <div className="flex flex-col items-end gap-1.5">
+                                {isPending && (
+                                  <div className="flex items-center justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleApproveLoan(loan)}
+                                      disabled={busy}
+                                      className="text-[11px] font-semibold px-2 py-1 rounded-md text-emerald-700 hover:bg-emerald-50 transition disabled:opacity-50"
+                                      aria-label={`${loan.bookTitle} ödünç talebini onayla`}
+                                    >
+                                      {busy ? '…' : 'Onayla'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRejectLoan(loan)}
+                                      disabled={busy}
+                                      className="text-[11px] font-semibold px-2 py-1 rounded-md text-rose-700 hover:bg-rose-50 transition disabled:opacity-50"
+                                      aria-label={`${loan.bookTitle} ödünç talebini reddet`}
+                                    >
+                                      {busy ? '…' : 'Reddet'}
+                                    </button>
+                                  </div>
+                                )}
+                                {extPending && (
+                                  <div className="flex items-center justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleApproveExtension(loan)}
+                                      disabled={busy}
+                                      className="text-[11px] font-semibold px-2 py-1 rounded-md text-emerald-700 hover:bg-emerald-50 transition disabled:opacity-50"
+                                      aria-label={`${loan.bookTitle} süre uzatma talebini onayla`}
+                                    >
+                                      {busy ? '…' : 'Uzatmayı Onayla'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRejectExtension(loan)}
+                                      disabled={busy}
+                                      className="text-[11px] font-semibold px-2 py-1 rounded-md text-rose-700 hover:bg-rose-50 transition disabled:opacity-50"
+                                      aria-label={`${loan.bookTitle} süre uzatma talebini reddet`}
+                                    >
+                                      {busy ? '…' : 'Uzatmayı Reddet'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="text-right text-kt-gray-400">—</div>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     );
                   })}

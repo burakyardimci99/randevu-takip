@@ -11,6 +11,7 @@
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
 import { dbAll, dbOne, dbRun, dbTx } from './schema';
+import { SEED_BOOKS } from './seed-books';
 import {
   GATE_DEFINITIONS,
   applicableGates,
@@ -1413,6 +1414,34 @@ export async function seedNotifications(): Promise<void> {
   console.log(`[SEED] ${count} bildirim eklendi.`);
 }
 
+/** Kütüphane: "AI LAB Kitap Listesi.xlsx"tan 75 kitap (kapaklarıyla). */
+export async function seedBooks(): Promise<void> {
+  const existing = (await dbOne('SELECT COUNT(*) as count FROM books', [])) as { count: number };
+  if (existing.count >= SEED_BOOKS.length) {
+    console.log(`[SEED] Kitaplar zaten yüklü (${existing.count}), atlanıyor.`);
+    return;
+  }
+  const INSERT_BOOK = `
+    INSERT OR IGNORE INTO books
+      (id, title, author, category, description, cover_image_url, total_copies, available_copies, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+  `;
+  for (const b of SEED_BOOKS) {
+    await dbRun(INSERT_BOOK, [
+      b.id,
+      b.title,
+      b.author,
+      b.category,
+      b.description,
+      b.coverImageUrl,
+      b.totalCopies,
+      b.totalCopies,
+    ]);
+  }
+  const withCover = SEED_BOOKS.filter((b) => b.coverImageUrl).length;
+  console.log(`[SEED] ${SEED_BOOKS.length} kitap eklendi (${withCover} kapaklı).`);
+}
+
 export async function runSeed(): Promise<void> {
   // PROD GUARD: Demo seed bilinen sabit parolalı hesaplar (admin@klab.test vb.)
   // üretir. Üretim DB'sine yanlışlıkla yüklenmesini engelle — bilinçli açmak için
@@ -1431,4 +1460,5 @@ export async function runSeed(): Promise<void> {
   await seedLicenseRequests();
   await seedWaitlist();
   await seedNotifications();
+  await seedBooks();
 }
