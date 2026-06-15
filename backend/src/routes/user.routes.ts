@@ -4,6 +4,7 @@
  */
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { requireUser } from '../middleware/auth.middleware';
+import { expensiveActionRateLimit } from '../middleware/security.middleware';
 import { logger } from '../utils/logger';
 import {
   createAppointmentSchema,
@@ -963,7 +964,7 @@ router.post('/support/requests', async (req: Request, res: Response, next: NextF
  * GÖRSEL ÜRETİMİ — kullanıcı (gorsel_uretim entegrasyonu)
  * ============================================================ */
 
-router.post('/visuals', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/visuals', expensiveActionRateLimit, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const input = createVisualSchema.parse(req.body);
     const visual = await createVisual(req.auth!.subjectId, input);
@@ -981,7 +982,7 @@ router.get('/visuals', async (req: Request, res: Response, next: NextFunction) =
   }
 });
 
-router.post('/visuals/:id/regenerate', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/visuals/:id/regenerate', expensiveActionRateLimit, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = readId(req, 'id', 'görsel id');
     const visual = await regenerateVisual(req.auth!.subjectId, id);

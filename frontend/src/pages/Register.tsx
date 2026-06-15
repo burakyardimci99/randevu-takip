@@ -78,9 +78,20 @@ export default function Register() {
     } catch (err) {
       const e = err as { message?: string; issues?: Array<{ path: string; message: string }> };
       if (e.issues?.length) {
+        // Yalnız ekranda gösterilen alanların hatası inline basılır; backend
+        // başka bir path (örn. body.*) dönerse sessizce kaybolmasın diye
+        // eşleşmeyenleri toast ile göster.
+        const KNOWN = new Set(['fullName', 'email', 'password', 'passwordConfirm']);
         const fieldErrors: Record<string, string> = {};
-        for (const issue of e.issues) fieldErrors[issue.path] = issue.message;
-        setErrors(fieldErrors);
+        const unmatched: string[] = [];
+        for (const issue of e.issues) {
+          if (KNOWN.has(issue.path)) fieldErrors[issue.path] = issue.message;
+          else unmatched.push(issue.message);
+        }
+        if (Object.keys(fieldErrors).length) setErrors(fieldErrors);
+        if (unmatched.length || Object.keys(fieldErrors).length === 0) {
+          toast.push('error', unmatched[0] || e.message || 'Kayıt başarısız. Bilgileri kontrol edin.');
+        }
       } else {
         toast.push('error', e.message || 'Kayıt başarısız.');
       }

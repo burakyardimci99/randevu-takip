@@ -161,13 +161,13 @@ function requireAdminSubject(req: Request, _res: Response, next: NextFunction): 
   next();
 }
 
-/** ?limit & ?offset parse — savunmacı sınırlar servislerde uygulanır. */
+/** ?limit & ?offset parse — route katmanında clamp + servislerde de sınır. */
 function readPage(req: Request): { limit?: number; offset?: number } {
-  const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined;
-  const offset = typeof req.query.offset === 'string' ? parseInt(req.query.offset, 10) : undefined;
+  const rawLimit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined;
+  const rawOffset = typeof req.query.offset === 'string' ? parseInt(req.query.offset, 10) : undefined;
   return {
-    limit: Number.isFinite(limit) ? limit : undefined,
-    offset: Number.isFinite(offset) ? offset : undefined,
+    limit: Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit as number, 1), 200) : undefined,
+    offset: Number.isFinite(rawOffset) ? Math.max(rawOffset as number, 0) : undefined,
   };
 }
 
@@ -253,7 +253,10 @@ router.post('/bookings/:id/cancel', async (req: Request, res: Response, next: Ne
 
 /* ============ KULLANICI YÖNETİMİ ============ */
 
-router.get('/users', async (req: Request, res: Response, next: NextFunction) => {
+// Kullanıcı listesi/detayı tüm kullanıcıların e-posta/departman/hesap-durumu
+// (PII) içerir — salt-okunur izleyici/danışman/arge bu veriye ihtiyaç duymaz.
+// EN AZ YETKİ gereği yalnız admin'e açık (app_security §1 — A01).
+router.get('/users', requireAdminSubject, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parsed = adminUserSearchSchema.safeParse(req.query);
     const filters = parsed.success ? parsed.data : {};
@@ -271,7 +274,7 @@ router.get('/users/meta/departments', async (_req: Request, res: Response, next:
   }
 });
 
-router.get('/users/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/users/:id', requireAdminSubject, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = readId(req, 'id', 'id');
     res.json({ user: await getUserByIdAdmin(id) });
@@ -613,10 +616,10 @@ router.get(
 /** Admin: bir randevuyu iptal et. */
 router.delete(
   '/appointments/:id',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = readId(req, 'id', 'randevu id');
-      const result = adminCancelAppointment(req.auth!.subjectId, id, {
+      const result = await adminCancelAppointment(req.auth!.subjectId, id, {
         ownerCheck: false,
         callerType: 'admin',
       });

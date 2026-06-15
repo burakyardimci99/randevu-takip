@@ -43,6 +43,10 @@ services:
     logging: *default-logging
     # Temiz kapanış için checkpoint süresi tanı (varsayılan 10s yetmeyebilir).
     stop_grace_period: 60s
+    # Sertleştirme: ayrıcalık yükseltme yok. (cap_drop ALL koymuyoruz — postgres
+    # init aşaması CHOWN/SETUID/SETGID gibi cap'lere ihtiyaç duyar.)
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -114,6 +118,12 @@ services:
     # Graceful shutdown zinciri (SSE kapat → queue boşalt → pool kapat) 15s
     # force-timer'lı; compose biraz daha tanısın.
     stop_grace_period: 30s
+    # Sertleştirme: image zaten `USER node` (non-root) ve yalnız ayrıcalıksız
+    # 4000 portunu dinler → hiçbir capability gerekmez.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
@@ -132,16 +142,23 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - '${HTTP_PORT:-80}:80'
+      # Container içi non-root nginx 8080 dinler; host portu (80) ona map'lenir.
+      - '${HTTP_PORT:-80}:8080'
     healthcheck:
-      # busybox wget (nginx:alpine) ile statik index erişimi.
-      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1']
+      # busybox wget (nginx:alpine) ile statik index erişimi (ayrıcalıksız 8080).
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1']
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 10s
     restart: unless-stopped
     logging: *default-logging
+    # Sertleştirme: ayrıcalık yükseltme yok + tüm Linux capability'leri düşür
+    # (nginx-unprivileged ayrıcalıksız portta çalıştığı için cap gerekmez).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:

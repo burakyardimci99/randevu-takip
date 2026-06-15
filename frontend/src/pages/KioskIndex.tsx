@@ -2,7 +2,7 @@
  * Kiosk oda seçici (#5b) — hangi odanın ekranı açılacak.
  * Public: lab ekranını ayarlarken oda seçilir, /kiosk/:roomId tam ekran açılır.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { api } from '../services/api';
@@ -17,21 +17,24 @@ const TYPE_LABEL: Record<KioskRoom['roomType'], string> = {
 export default function KioskIndex() {
   const [rooms, setRooms] = useState<KioskRoom[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const res = await api.kioskRooms();
+      setRooms(res.rooms);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await api.kioskRooms();
-        if (!cancelled) setRooms(res.rooms);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void load();
+  }, [load]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-kt-green-900 via-kt-green-800 to-kt-violet-900 text-white">
@@ -59,6 +62,27 @@ export default function KioskIndex() {
             {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="h-28 rounded-xl bg-white/10 animate-pulse" />
             ))}
+          </div>
+        ) : error ? (
+          <div className="rounded-xl bg-white/10 border border-white/10 p-8 text-center">
+            <div className="text-lg font-bold mb-1">Odalar yüklenemedi</div>
+            <p className="text-white/60 text-sm mb-4">
+              Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.
+            </p>
+            <button
+              type="button"
+              onClick={() => void load()}
+              className="inline-flex items-center rounded-lg bg-kt-gold-400/90 hover:bg-kt-gold-300 text-kt-green-900 font-bold px-4 py-2 text-sm transition-colors"
+            >
+              Tekrar dene
+            </button>
+          </div>
+        ) : rooms.length === 0 ? (
+          <div className="rounded-xl bg-white/10 border border-white/10 p-8 text-center">
+            <div className="text-lg font-bold mb-1">Henüz oda yok</div>
+            <p className="text-white/60 text-sm">
+              Gösterilecek bir oda bulunmuyor. Yönetici oda ekledikten sonra burada görünür.
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">

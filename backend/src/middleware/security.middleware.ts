@@ -193,6 +193,39 @@ export const authRateLimit = RATE_LIMIT_DISABLED
       },
     });
 
+/**
+ * Pahalı kaynak (harici görsel üretimi vb.) için KULLANICI-BAŞI rate-limit.
+ * Global limiter IP-başıdır; bu limiter authenticated subjectId'ye göre sayar,
+ * böylece tek bir hesap harici ücretli model çağrılarını suistimal ederek
+ * fatura/kontenjan tüketemez (Denial-of-Wallet — OWASP LLM10, app_security §2).
+ * requireUser SONRASI kullanılmalı (req.auth dolu olmalı).
+ */
+const EXPENSIVE_ACTION_MAX = config.isProduction ? 30 : 300;
+
+export const expensiveActionRateLimit = RATE_LIMIT_DISABLED
+  ? noopMiddleware
+  : rateLimit({
+      windowMs: config.rateLimitWindowMs,
+      max: EXPENSIVE_ACTION_MAX,
+      standardHeaders: true,
+      legacyHeaders: false,
+      // IP yerine kimlik: aynı hesap farklı IP'lerden de gelse tek sayaçta toplanır.
+      keyGenerator: (req: Request): string => req.auth?.subjectId ?? 'anonymous',
+      message: { error: 'Çok fazla görsel üretim isteği. Lütfen biraz bekleyin.' },
+      handler: (req: Request, res: Response) => {
+        recordAudit({
+          eventType: 'rate_limit.exceeded',
+          subjectId: req.auth?.subjectId,
+          subjectType: req.auth?.subjectType,
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent') ?? null,
+          success: false,
+          details: { path: req.path, scope: 'expensive' },
+        });
+        res.status(429).json({ error: 'Çok fazla görsel üretim isteği. Lütfen biraz bekleyin.' });
+      },
+    });
+
 export function requestLogger(req: Request, _res: Response, next: NextFunction): void {
   logger.info('request', {
     method: req.method,
