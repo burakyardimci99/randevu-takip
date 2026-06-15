@@ -35,7 +35,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
@@ -48,10 +48,13 @@ jobs:
       - name: Tip kontrolü + build (tsc, noEmitOnError)
         run: npm run build
 
-      - name: Testler (vitest — pg klab_test)
-        run: npm test
+      - name: Testler + coverage (vitest — pg klab_test)
+        run: npm run test:coverage
         env:
           TEST_DATABASE_URL: postgres://klab:klab_dev_password@localhost:5432/klab_test
+
+      - name: Lint (eslint — no-floating-promises hata bloklar)
+        run: npm run lint
 
       - name: Bağımlılık CVE taraması
         run: npm audit --omit=dev --audit-level=high
@@ -68,7 +71,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -84,3 +87,91 @@ jobs:
       - name: Bağımlılık CVE taraması
         run: npm audit --omit=dev --audit-level=high
         continue-on-error: true
+
+  e2e:
+    name: E2E — Playwright (auth/akış) + erişilebilirlik (axe)
+    runs-on: ubuntu-latest
+    # İlk koşularda kararlılık için NON-BLOCKING: bu job henüz hiç CI'da çalışmadı
+    # (lokal/manuel doğrulandı). Flaky/altyapı sorunları PR'ı bloklamasın diye
+    # geçici olarak continue-on-error; stabilize olunca bu satır kaldırılmalı.
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: klab
+          POSTGRES_PASSWORD: klab_dev_password
+          POSTGRES_DB: klab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://klab:klab_dev_password@localhost:5432/klab
+      NODE_ENV: development
+      CSRF_SECRET: ci_e2e_csrf_secret_minimum_32_chars_xx
+      FRONTEND_ORIGIN: http://127.0.0.1:5173
+      DISABLE_EMAIL: '1'
+      DISABLE_RATE_LIMIT: '1'
+      TZ: Europe/Istanbul
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Backend bağımlılıkları + JWT anahtarları
+        working-directory: backend
+        run: |
+          npm ci
+          npm run keys:generate
+
+      - name: Şema + demo seed (e2e demo hesapları kullanır)
+        working-directory: backend
+        run: npm run db:init
+
+      - name: Backend'i arka planda başlat
+        working-directory: backend
+        run: |
+          nohup npx tsx src/index.ts > /tmp/backend.log 2>&1 &
+          npx wait-on -t 60000 http://127.0.0.1:4000/api/readiness
+
+      - name: Frontend bağımlılıkları + Playwright tarayıcısı
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Frontend'i (vite dev) arka planda başlat
+        working-directory: frontend
+        env:
+          VITE_PROXY_TARGET: http://127.0.0.1:4000
+        run: |
+          nohup npm run dev > /tmp/frontend.log 2>&1 &
+          npx wait-on -t 60000 http://127.0.0.1:5173
+
+      - name: E2E testleri (auth, kritik akış, admin sayfaları, a11y)
+        working-directory: frontend
+        run: npm run e2e
+
+      - name: Sunucu logları (hata teşhisi)
+        if: failure()
+        run: |
+          echo '===== backend.log ====='; tail -100 /tmp/backend.log || true
+          echo '===== frontend.log ====='; tail -50 /tmp/frontend.log || true
+
+      - name: Playwright raporu (artifact)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7

@@ -60,7 +60,6 @@ export function SupportRequestButton({ kind = 'user' }: SupportRequestButtonProp
           role="dialog"
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-          onClick={() => !submitting && setOpen(false)}
         >
           <div
             className="bg-white rounded-2xl shadow-kt-card max-w-md w-full"

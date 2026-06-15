@@ -158,10 +158,13 @@ export default function Register() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
+              <p className="text-xs text-white/50">
+                <span className="text-red-400">*</span> işaretli alanlar zorunludur.
+              </p>
               {/* Ad Soyad */}
               <div>
                 <label htmlFor="fullName" className="block text-xs font-bold uppercase tracking-[0.18em] text-white/60 mb-1.5">
-                  Ad Soyad
+                  Ad Soyad<span className="text-red-400 ml-0.5" aria-hidden="true">*</span>
                 </label>
                 <div className="relative">
                   <User
@@ -187,7 +190,7 @@ export default function Register() {
               {/* E-posta */}
               <div>
                 <label htmlFor="email" className="block text-xs font-bold uppercase tracking-[0.18em] text-white/60 mb-1.5">
-                  E-posta
+                  E-posta<span className="text-red-400 ml-0.5" aria-hidden="true">*</span>
                 </label>
                 <div className="relative">
                   <Mail
@@ -213,7 +216,7 @@ export default function Register() {
               {/* Parola */}
               <div>
                 <label htmlFor="password" className="block text-xs font-bold uppercase tracking-[0.18em] text-white/60 mb-1.5">
-                  Parola
+                  Parola<span className="text-red-400 ml-0.5" aria-hidden="true">*</span>
                 </label>
                 <div className="relative">
                   <Lock
@@ -284,7 +287,7 @@ export default function Register() {
               {/* Parola tekrar */}
               <div>
                 <label htmlFor="passwordConfirm" className="block text-xs font-bold uppercase tracking-[0.18em] text-white/60 mb-1.5">
-                  Parola (tekrar)
+                  Parola (tekrar)<span className="text-red-400 ml-0.5" aria-hidden="true">*</span>
                 </label>
                 <div className="relative">
                   <Lock

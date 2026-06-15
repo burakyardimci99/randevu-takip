@@ -120,24 +120,23 @@ export async function setGateResult(
   input: GateResultInput
 ): Promise<QualityGate> {
   const def = GATE_DEFINITIONS[gateKey];
-  const existing = await dbOne('SELECT id FROM quality_gates WHERE request_id = ? AND gate_key = ?', [requestId, gateKey]) as { id: string } | undefined;
-
-  if (existing) {
-    await dbRun(`UPDATE quality_gates SET
-         status = ?, score = ?, detail = ?,
-         evaluated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`, [input.status, input.score ?? null, input.detail?.trim() || null, existing.id]);
-  } else {
-    await dbRun(`INSERT INTO quality_gates
-         (id, request_id, gate_key, status, score, threshold, detail, evaluated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [nanoid(),
-      requestId,
-      gateKey,
-      input.status,
-      input.score ?? null,
-      def?.threshold ?? null,
-      input.detail?.trim() || null]);
-  }
+  // Tek upsert: check-then-insert yarışında (CI + admin eşzamanlı) ikinci
+  // INSERT UNIQUE(request_id, gate_key) ihlaliyle 500 veriyordu.
+  await dbRun(`INSERT INTO quality_gates
+       (id, request_id, gate_key, status, score, threshold, detail, evaluated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT (request_id, gate_key) DO UPDATE SET
+       status = EXCLUDED.status,
+       score = EXCLUDED.score,
+       detail = EXCLUDED.detail,
+       evaluated_at = CURRENT_TIMESTAMP,
+       updated_at = CURRENT_TIMESTAMP`, [nanoid(),
+    requestId,
+    gateKey,
+    input.status,
+    input.score ?? null,
+    def?.threshold ?? null,
+    input.detail?.trim() || null]);
 
   const row = await dbOne('SELECT * FROM quality_gates WHERE request_id = ? AND gate_key = ?', [requestId, gateKey]) as GateRow;
   return rowToGate(row);

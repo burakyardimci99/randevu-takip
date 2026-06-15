@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { useToast } from '../components/Toast';
 import { api } from '../services/api';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import type { Visual, Booking } from '../types';
 
@@ -35,6 +36,7 @@ export default function VisualGenerator() {
   const [imgLoading, setImgLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [gallery, setGallery] = useState<Visual[]>([]);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   // Projeye atama + silme için kullanıcının projeleri (booking) ve durum state'i.
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [assignTarget, setAssignTarget] = useState<string>('');
@@ -139,9 +141,6 @@ export default function VisualGenerator() {
 
   // Görseli kalıcı siler (sahibi). Bir projeye atanmışsa backend arkaplanı kaldırır.
   async function handleDelete(id: string) {
-    if (!window.confirm('Bu görsel kalıcı olarak silinsin mi? Bir projeye atanmışsa kart arkaplanı kaldırılır.')) {
-      return;
-    }
     setDeletingId(id);
     try {
       await api.deleteVisual(id);
@@ -318,7 +317,7 @@ export default function VisualGenerator() {
                     </p>
                   )}
                   <button
-                    onClick={() => handleDelete(current.id)}
+                    onClick={() => setConfirmDeleteId(current.id)}
                     disabled={deletingId === current.id}
                     className="btn-ghost text-rose-600 text-sm"
                   >
@@ -357,7 +356,7 @@ export default function VisualGenerator() {
                   )}
                 </button>
                 <button
-                  onClick={() => handleDelete(v.id)}
+                  onClick={() => setConfirmDeleteId(v.id)}
                   disabled={deletingId === v.id}
                   className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white text-sm leading-none opacity-0 group-hover:opacity-100 hover:bg-rose-600 transition-opacity flex items-center justify-center"
                   title="Görseli sil"
@@ -369,6 +368,17 @@ export default function VisualGenerator() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        title="Görsel silinsin mi?"
+        message="Bu görsel kalıcı olarak silinecek. Bir projeye atanmışsa kart arkaplanı kaldırılır."
+        confirmLabel="Evet, sil"
+        onConfirm={() => {
+          if (confirmDeleteId) void handleDelete(confirmDeleteId);
+          setConfirmDeleteId(null);
+        }}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </AppShell>
   );
 }

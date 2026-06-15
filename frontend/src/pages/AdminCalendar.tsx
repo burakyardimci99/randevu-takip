@@ -23,6 +23,7 @@ import { BookingDetailModal } from '../components/BookingDetailModal';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import type {
   Appointment,
   Booking,
@@ -76,6 +77,8 @@ function statusColor(status: BookingStatus): { bg: string; text: string; dot: st
       return { bg: 'bg-amber-100 hover:bg-amber-200', text: 'text-amber-900', dot: 'bg-amber-500', label: 'Bekleyen' };
     case 'feedback_requested':
       return { bg: 'bg-blue-100 hover:bg-blue-200', text: 'text-blue-900', dot: 'bg-blue-500', label: 'Düzeltme' };
+    case 'cancelled':
+      return { bg: 'bg-gray-100 hover:bg-gray-200', text: 'text-gray-600', dot: 'bg-gray-400', label: 'İptal' };
     case 'rejected':
       return { bg: 'bg-rose-100 hover:bg-rose-200', text: 'text-rose-900', dot: 'bg-rose-500', label: 'Reddedilen' };
   }
@@ -105,6 +108,7 @@ export default function AdminCalendar() {
   const [selectedDate, setSelectedDate] = useState<Date>(() => startOfDay(new Date()));
   const [selected, setSelected] = useState<Booking | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -515,7 +519,7 @@ export default function AdminCalendar() {
                         {canEdit && (
                           <button
                             type="button"
-                            onClick={() => cancelAppointment(a.id)}
+                            onClick={() => setConfirmCancelId(a.id)}
                             className="text-[11px] text-rose-700 hover:text-rose-900 font-semibold shrink-0"
                           >
                             İptal
@@ -615,6 +619,17 @@ export default function AdminCalendar() {
         onReview={canEdit ? review : undefined}
         onAdvanceStage={canEdit ? advanceStage : undefined}
         onRegressStage={canEdit ? regressStage : undefined}
+      />
+      <ConfirmDialog
+        open={!!confirmCancelId}
+        title="Randevu iptal edilsin mi?"
+        message="Kullanıcının saatli randevusu iptal edilecek. Bu işlem geri alınamaz."
+        confirmLabel="Evet, iptal et"
+        onConfirm={() => {
+          if (confirmCancelId) void cancelAppointment(confirmCancelId);
+          setConfirmCancelId(null);
+        }}
+        onCancel={() => setConfirmCancelId(null)}
       />
     </AppShell>
   );

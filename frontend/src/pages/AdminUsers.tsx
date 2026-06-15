@@ -39,16 +39,22 @@ export default function AdminUsers() {
   const debounceRef = useRef<number | null>(null);
 
   // Server-side search (debounced)
+  const loadSeq = useRef(0);
   const load = useCallback(
     async (filters: AdminUserSearchFilters = {}) => {
+      // Yarış koruması: yalnız en son isteğin yanıtı uygulanır (geç gelen
+      // eski arama sonucu yenisini ezmesin).
+      const seq = ++loadSeq.current;
       setLoading(true);
       try {
         const res = await api.adminListUsers(filters);
+        if (seq !== loadSeq.current) return;
         setUsers(res.users);
       } catch (err) {
+        if (seq !== loadSeq.current) return;
         toast.push('error', (err as Error).message || 'Kullanıcılar yüklenemedi.');
       } finally {
-        setLoading(false);
+        if (seq === loadSeq.current) setLoading(false);
       }
     },
     [toast]
@@ -171,7 +177,7 @@ export default function AdminUsers() {
       </div>
 
       {/* Stat row */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
         <button
           onClick={() => setFilter('all')}
           className={`rounded-2xl p-4 text-left transition-all ${
@@ -439,7 +445,6 @@ export default function AdminUsers() {
       {confirmDelete && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
-          onClick={() => !actionLoading && setConfirmDelete(null)}
         >
           <div
             className="bg-white rounded-2xl shadow-kt-card max-w-md w-full p-6 animate-slide-up"
@@ -521,7 +526,6 @@ function ResetPasswordModal({ user, loading, onClose, onSubmit }: ResetPasswordM
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
-      onClick={onClose}
     >
       <div
         className="bg-white rounded-2xl shadow-kt-card max-w-md w-full p-6 animate-slide-up"
@@ -658,7 +662,6 @@ function EditUserModal({ user, loading, onClose, onSave }: EditUserModalProps) {
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
-      onClick={() => !loading && onClose()}
     >
       <div
         className="bg-white rounded-2xl shadow-kt-card max-w-2xl w-full max-h-[92vh] overflow-hidden flex flex-col animate-slide-up"
@@ -727,13 +730,14 @@ function EditUserModal({ user, loading, onClose, onSave }: EditUserModalProps) {
                     'governanceRole',
                     e.target.value === ''
                       ? null
-                      : (e.target.value as 'analitik_danisman' | 'yz_arge')
+                      : (e.target.value as 'analitik_danisman' | 'yz_arge' | 'izleyici')
                   )
                 }
               >
                 <option value="">Normal Kullanıcı (varsayılan)</option>
                 <option value="analitik_danisman">Analitik Danışman — Başvuru değerlendirme</option>
                 <option value="yz_arge">YZ / Ar-Ge Mühendisi — Stage + Production onayı</option>
+                <option value="izleyici">İzleyici — Salt-okunur görüntüleme (doluluk, talepler)</option>
               </select>
               <p className="text-[11px] text-kt-gray-500 mt-1">
                 Rol değişince kullanıcı bir sonraki girişte ilgili dashboard'a yönlendirilir.

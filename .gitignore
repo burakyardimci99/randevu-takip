@@ -68,3 +68,11 @@ A2/
 # QA üretilen çıktılar (her koşuda yeniden üretilir — versiyonlanmaz)
 qa/zap-report.html
 qa/k6-summary.json
+
+# Makine-yerel compose ayarları (ör. port çakışması override'ı) — commit edilmez
+docker-compose.override.yml
+
+# Kök dizine bırakılan geçici görseller/ekran görüntüleri — repo'ya girmez
+/*.png
+/*.jpg
+/*.jpeg

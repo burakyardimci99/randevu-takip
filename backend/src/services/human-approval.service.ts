@@ -67,8 +67,11 @@ export async function createPendingApproval(requestId: string, type: ApprovalTyp
   const existing = await dbOne(`SELECT id FROM human_approvals
        WHERE request_id = ? AND approval_type = ? AND decision = 'pending'`, [requestId, type]);
   if (existing) return;
+  // ON CONFLICT DO NOTHING: kısmi unique index (uq_human_approvals_pending)
+  // eşzamanlı çağrıların ikinci INSERT'ini sessizce yutar (yarış DB'de kapanır).
   await dbRun(`INSERT INTO human_approvals (id, request_id, approval_type, decision)
-     VALUES (?, ?, ?, 'pending')`, [nanoid(), requestId, type]);
+     VALUES (?, ?, ?, 'pending')
+     ON CONFLICT DO NOTHING`, [nanoid(), requestId, type]);
 }
 
 export async function listApprovalsForRequest(requestId: string): Promise<HumanApproval[]> {
@@ -130,15 +133,40 @@ export async function decideApproval(
     );
   }
 
-  await dbRun(`UPDATE human_approvals SET
+  // Guard: yalnız hâlâ 'pending' olan satır karara bağlanır — iki onaylayıcı
+  // yarışırsa ikincisi ilkinin kararını sessizce EZMESİN (audit bütünlüğü).
+  const res = await dbRun(`UPDATE human_approvals SET
        decision = ?, approver_id = ?,
        release_note = ?, risk_assessment = ?,
        decided_at = CURRENT_TIMESTAMP
-     WHERE id = ?`, [input.decision,
+     WHERE id = ? AND decision = 'pending'`, [input.decision,
     approverId,
     input.releaseNote?.trim() || null,
     input.riskAssessment?.trim() || null,
     pending.id]);
+  if (res.changes === 0) {
+    throw new HttpError(409, 'Bu onay az önce başka bir yetkili tarafından karara bağlandı.', 'APPROVAL_ALREADY_DECIDED');
+  }
+
+  // RED kararı durum makinesini kilitlemesin: proje bir önceki aşamaya
+  // döndürülür; ekip düzeltir, advanceLifecycle yeniden pending onay açar.
+  // (Önceden: reject sonrası yeni onay açacak hiçbir yol yoktu — talep
+  // sonsuza dek o aşamada kilitleniyordu.)
+  if (input.decision === 'rejected') {
+    const fallbackStage = type === 'stage' ? 'development' : 'stage';
+    await dbRun(`UPDATE license_requests
+       SET lifecycle_stage = ?, stage_entered_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`, [fallbackStage, requestId]);
+    await dbRun(`INSERT INTO project_stage_events
+         (id, request_id, from_stage, to_stage, actor_id, actor_type, note)
+       VALUES (?, ?, ?, ?, ?, 'admin', ?)`, [nanoid(),
+      requestId,
+      type === 'stage' ? 'stage' : 'production',
+      fallbackStage,
+      approverId,
+      `${type === 'stage' ? 'Stage' : 'Production'} onayı reddedildi — önceki aşamaya döndürüldü.`]);
+  }
 
   const row = await dbOne(`${SELECT_WITH_APPROVER} WHERE ha.id = ?`, [pending.id]) as ApprovalRow;
   return rowToApproval(row);

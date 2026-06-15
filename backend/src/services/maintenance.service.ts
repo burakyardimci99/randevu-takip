@@ -5,11 +5,16 @@
  * - Audit retention: data_security §11 — eski audit_logs N gün sonra silinebilir (config'den).
  *   (Default 365 gün — bankacılık için tipik.)
  *
- * Çalışma: setInterval — production'da BullMQ/cron'a taşınabilir.
- * Tek instance varsayımı geçerli (in-memory in-process); multi-instance için
- * Redis lock veya pg_advisory_lock gerekir.
+ * Çalışma: setInterval. Çok-instance ortamında periyodik silme işinin her instance'ta
+ * tekrar koşmaması için cron tick'i `runIfCronLeader` (pg_advisory kilidi) ile korunur —
+ * yalnız kilidi alan instance prune + VACUUM yapar. Tek-instance'ta kilit hep alınır,
+ * davranış aynıdır. NOT: VACUUM transaction içinde çalışamadığından, prune işi leader
+ * kilidini tutan tx içinde yapılır, VACUUM ise leader olduğu doğrulandıktan sonra tx
+ * dışında best-effort koşar.
  */
 import { dbExec, dbOne, dbRun } from '../db/schema';
+import { runIfCronLeader } from '../db/cron-lock';
+import { markPastAppointmentsCompleted } from './appointment.service';
 import { logger } from '../utils/logger';
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -46,13 +51,13 @@ const DEFAULT_CONFIG: MaintenanceConfig = {
 
 let timer: NodeJS.Timeout | null = null;
 
-export async function runMaintenanceOnce(config: Partial<MaintenanceConfig> = {}): Promise<{
-  refreshTokensDeleted: number;
-  auditLogsDeleted: number;
-  vacuumed: boolean;
-}> {
-  const cfg = { ...DEFAULT_CONFIG, ...config };
-
+/**
+ * Yalnız silme işleri (transaction-güvenli — VACUUM HARİÇ). Counts döner.
+ * Hem `runMaintenanceOnce` (doğrudan/test) hem leader-korumalı cron tick'i bunu kullanır.
+ */
+async function pruneOnce(
+  cfg: MaintenanceConfig
+): Promise<{ refreshTokensDeleted: number; auditLogsDeleted: number }> {
   // 1) Refresh token cleanup
   const tokenCutoff = new Date(Date.now() - cfg.refreshTokenGraceDays * ONE_DAY_MS).toISOString();
   const tokenRes = await dbRun(`DELETE FROM refresh_tokens
@@ -80,29 +85,59 @@ export async function runMaintenanceOnce(config: Partial<MaintenanceConfig> = {}
     }
   }
 
-  // 4) VACUUM — silme sonrası ölü tuple'ların alanını geri kazan (PostgreSQL).
-  //    Sadece gerçek silme olduğunda; VACUUM transaction içinde çalışamaz.
-  const totalDeleted = tokenRes.changes + auditDeleted;
-  let vacuumed = false;
-  if (cfg.vacuumOnPrune && totalDeleted > 0) {
-    try {
-      await dbExec('VACUUM'); // pg'de de geçerli; best-effort (try/catch)
-      vacuumed = true;
-    } catch (err) {
-      logger.warn('maintenance_vacuum_failed', { err: (err as Error).message });
-    }
+  return { refreshTokensDeleted: tokenRes.changes, auditLogsDeleted: auditDeleted };
+}
+
+/** Silme sonrası ölü tuple alanını geri kazan (best-effort; VACUUM tx-dışı koşmalı). */
+async function vacuumIfNeeded(cfg: MaintenanceConfig, totalDeleted: number): Promise<boolean> {
+  if (!cfg.vacuumOnPrune || totalDeleted <= 0) return false;
+  try {
+    await dbExec('VACUUM'); // pg'de de geçerli; best-effort (try/catch)
+    return true;
+  } catch (err) {
+    logger.warn('maintenance_vacuum_failed', { err: (err as Error).message });
+    return false;
   }
+}
 
-  const result = {
-    refreshTokensDeleted: tokenRes.changes,
-    auditLogsDeleted: auditDeleted,
-    vacuumed,
-  };
+export async function runMaintenanceOnce(config: Partial<MaintenanceConfig> = {}): Promise<{
+  refreshTokensDeleted: number;
+  auditLogsDeleted: number;
+  appointmentsCompleted: number;
+  vacuumed: boolean;
+}> {
+  const cfg = { ...DEFAULT_CONFIG, ...config };
+  const { refreshTokensDeleted, auditLogsDeleted } = await pruneOnce(cfg);
+  const appointmentsCompleted = await markPastAppointmentsCompleted();
+  const totalDeleted = refreshTokensDeleted + auditLogsDeleted;
+  const vacuumed = await vacuumIfNeeded(cfg, totalDeleted);
 
-  if (totalDeleted > 0) {
+  const result = { refreshTokensDeleted, auditLogsDeleted, appointmentsCompleted, vacuumed };
+  if (totalDeleted > 0 || appointmentsCompleted > 0) {
     logger.info('maintenance_completed', result);
   }
   return result;
+}
+
+/**
+ * Cron tick'i: leader-korumalı. Prune işi (tx-güvenli) advisory kilidini tutan tx
+ * içinde koşar; VACUUM (tx-dışı) yalnız leader olunduğunda, tx dışında çalışır.
+ * Leader değilse (başka instance yürütüyor) hiçbir şey yapılmaz.
+ */
+async function runMaintenanceTick(cfg: MaintenanceConfig): Promise<void> {
+  let counts = { refreshTokensDeleted: 0, auditLogsDeleted: 0 };
+  let appointmentsCompleted = 0;
+  const wasLeader = await runIfCronLeader('cron:maintenance', async () => {
+    counts = await pruneOnce(cfg);
+    appointmentsCompleted = await markPastAppointmentsCompleted();
+  });
+  if (!wasLeader) return;
+
+  const totalDeleted = counts.refreshTokensDeleted + counts.auditLogsDeleted;
+  const vacuumed = await vacuumIfNeeded(cfg, totalDeleted);
+  if (totalDeleted > 0 || appointmentsCompleted > 0) {
+    logger.info('maintenance_completed', { ...counts, appointmentsCompleted, vacuumed });
+  }
 }
 
 export function startMaintenance(config: Partial<MaintenanceConfig> = {}): void {
@@ -110,18 +145,15 @@ export function startMaintenance(config: Partial<MaintenanceConfig> = {}): void 
   const cfg = { ...DEFAULT_CONFIG, ...config };
   // İlk çalışma — server start sonrası 10sn bekle
   setTimeout(() => {
-    try {
-      runMaintenanceOnce(cfg);
-    } catch (err) {
+    // await edilmeyen çağrıda catch hiç tetiklenmiyordu (kaçan promise).
+    void runMaintenanceTick(cfg).catch((err) => {
       logger.warn('maintenance_initial_run_failed', { err: (err as Error).message });
-    }
+    });
   }, 10_000);
   timer = setInterval(() => {
-    try {
-      runMaintenanceOnce(cfg);
-    } catch (err) {
+    void runMaintenanceTick(cfg).catch((err) => {
       logger.warn('maintenance_run_failed', { err: (err as Error).message });
-    }
+    });
   }, cfg.intervalMs);
 }
 

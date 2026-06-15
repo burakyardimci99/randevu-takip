@@ -19,10 +19,12 @@ import {
   registerSchema,
   resetPasswordSchema,
 } from '../validators/schemas';
-import { unifiedLogin, registerUser } from '../services/auth.service';
+import { unifiedLogin, registerUser, findSubjectById } from '../services/auth.service';
 import {
+  issueRefreshToken,
   revokeRefreshToken,
   rotateRefreshToken,
+  signAccessToken,
   verifyAccessToken,
 } from '../services/token.service';
 import { recordAudit } from '../services/audit.service';
@@ -34,11 +36,14 @@ import {
   getRefreshCookie,
   setRefreshCookie,
 } from '../middleware/cookie-auth';
-import { isMfaRequired } from '../services/mfa.service';
+import { isMfaRequired, verifyMfaCode } from '../services/mfa.service';
 import { maskEmail } from '../utils/logger';
-import type { SubjectKind } from '../types/auth.types';
+import type { AdminRecord, SubjectKind } from '../types/auth.types';
 
 const router = Router();
+
+/** MFA ara token'ının ömrü (sn) — yalnız TOTP adımını tamamlamaya yetecek kadar. */
+export const MFA_PENDING_TTL = 300;
 
 /**
  * Yeni kullanıcı kaydı — sadece 'user' rolü.
@@ -68,9 +73,9 @@ router.post(
 
       setRefreshCookie(res, 'user', loginResult.tokens.refreshToken);
 
+      // Refresh token YALNIZ HttpOnly cookie'de yaşar (XSS'e karşı) — gövdede dönmez.
       res.status(201).json({
         accessToken: loginResult.tokens.accessToken,
-        refreshToken: loginResult.tokens.refreshToken, // geriye uyum: cookie-mode sonrası kaldırılacak
         expiresIn: loginResult.tokens.expiresIn,
         type: 'user' as const,
         subject: loginResult.subject,
@@ -104,6 +109,42 @@ router.post(
       const input = loginSchema.parse(req.body);
       const result = await unifiedLogin(input.email, input.password);
 
+      const mfaRequired = result.kind === 'admin' && (await isMfaRequired(result.subject.id));
+
+      // MFA'lı admin: tam token VERME. Parola doğru ama oturum ancak TOTP ile
+      // açılır — kısa ömürlü 'pending' token döner, login'in ürettiği refresh
+      // token iptal edilir. Tam token /auth/mfa/verify başarısında verilir.
+      if (mfaRequired) {
+        await revokeRefreshToken(result.tokens.refreshToken);
+        const { token: mfaPendingToken, ttl } = signAccessToken(
+          'admin',
+          {
+            sub: result.subject.id,
+            role: result.subject.role,
+            email: result.subject.email,
+            mfa: 'pending',
+          },
+          { ttlOverride: MFA_PENDING_TTL }
+        );
+        recordAudit({
+          eventType: 'auth.login.success',
+          subjectId: result.subject.id,
+          subjectType: 'admin',
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent') ?? null,
+          success: true,
+          details: { email: maskEmail(result.subject.email), unified: true, mfaPending: true },
+        });
+        res.json({
+          mfaRequired: true,
+          mfaPendingToken,
+          expiresIn: ttl,
+          type: result.kind,
+          subject: result.subject,
+        });
+        return;
+      }
+
       recordAudit({
         eventType: 'auth.login.success',
         subjectId: result.subject.id,
@@ -116,15 +157,13 @@ router.post(
 
       setRefreshCookie(res, result.kind, result.tokens.refreshToken);
 
-      const mfaRequired = result.kind === 'admin' && await isMfaRequired(result.subject.id);
-
+      // Refresh token yalnız HttpOnly cookie'de — gövdede dönmez.
       res.json({
         accessToken: result.tokens.accessToken,
-        refreshToken: result.tokens.refreshToken, // geriye uyum
         expiresIn: result.tokens.expiresIn,
         type: result.kind,
         subject: result.subject,
-        mfaRequired,
+        mfaRequired: false,
       });
     } catch (err) {
       if (err instanceof HttpError) {
@@ -142,6 +181,91 @@ router.post(
           },
         });
       }
+      next(err);
+    }
+  }
+);
+
+/**
+ * MFA login doğrulama — pending token + TOTP/backup kodu → tam oturum.
+ *
+ * Güvenlik:
+ * - Yalnız `mfa: 'pending'` claim'li, süresi geçmemiş admin token'ı kabul edilir
+ *   (tam yetkili token bu endpoint'te işe yaramaz, pending token başka hiçbir
+ *   endpoint'te geçmez — guard'lar reddeder).
+ * - authRateLimit TOTP brute-force'unu sınırlar; her başarısız deneme audit'lenir.
+ */
+router.post(
+  '/mfa/verify',
+  authRateLimit,
+  csrfProtection,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const bearer = req.get('authorization')?.split(' ')[1];
+      if (!bearer) throw new HttpError(401, 'MFA oturumu bulunamadı.', 'MFA_SESSION_REQUIRED');
+
+      let decoded;
+      try {
+        decoded = verifyAccessToken('admin', bearer);
+      } catch {
+        throw new HttpError(401, 'MFA oturumu geçersiz veya süresi doldu.', 'MFA_SESSION_INVALID');
+      }
+      if (decoded.mfa !== 'pending') {
+        throw new HttpError(401, 'MFA oturumu geçersiz.', 'MFA_SESSION_INVALID');
+      }
+
+      const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+      if (!code || code.length < 6 || code.length > 16) {
+        throw new HttpError(400, 'Geçersiz doğrulama kodu.', 'VALIDATION');
+      }
+
+      const verify = await verifyMfaCode(decoded.sub, code);
+      if (!verify.valid) {
+        recordAudit({
+          eventType: 'auth.mfa.verify.failure',
+          subjectId: decoded.sub,
+          subjectType: 'admin',
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent') ?? null,
+          success: false,
+        });
+        throw new HttpError(401, 'MFA kodu geçersiz.', 'MFA_INVALID');
+      }
+
+      const admin = (await findSubjectById('admin', decoded.sub)) as AdminRecord | undefined;
+      if (!admin) throw new HttpError(401, 'Oturum geçersiz.', 'SUBJECT_NOT_FOUND');
+
+      const { token: accessToken, ttl } = signAccessToken('admin', {
+        sub: admin.id,
+        role: admin.role,
+        email: admin.email,
+      });
+      const { token: refreshToken } = await issueRefreshToken('admin', admin.id);
+      setRefreshCookie(res, 'admin', refreshToken);
+
+      recordAudit({
+        eventType: 'auth.mfa.verify.success',
+        subjectId: admin.id,
+        subjectType: 'admin',
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') ?? null,
+        success: true,
+        details: { usedBackupCode: verify.usedBackupCode },
+      });
+
+      res.json({
+        accessToken,
+        expiresIn: ttl,
+        type: 'admin' as const,
+        subject: {
+          id: admin.id,
+          email: admin.email,
+          fullName: admin.full_name,
+          role: admin.role,
+        },
+        usedBackupCode: verify.usedBackupCode,
+      });
+    } catch (err) {
       next(err);
     }
   }
@@ -217,7 +341,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
     // Hangi key/aud ile decode edileceğini sırayla dene: user → admin → danisman → arge
     let decoded;
     let kind: SubjectKind = 'user';
-    const tryKinds: SubjectKind[] = ['user', 'admin', 'danisman', 'arge'];
+    const tryKinds: SubjectKind[] = ['user', 'admin', 'danisman', 'arge', 'izleyici'];
     let verified = false;
     for (const k of tryKinds) {
       try {
@@ -281,7 +405,6 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 
     res.json({
       accessToken: rotated.accessToken,
-      refreshToken: rotated.refreshToken, // geriye uyum
       expiresIn: rotated.expiresIn,
       type: kind,
     });
@@ -293,7 +416,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 router.post('/logout', csrfProtection, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const tokens: string[] = [];
-    const kinds: SubjectKind[] = ['user', 'admin', 'danisman', 'arge'];
+    const kinds: SubjectKind[] = ['user', 'admin', 'danisman', 'arge', 'izleyici'];
     for (const k of kinds) {
       const cookie = getRefreshCookie(req, k);
       if (cookie) tokens.push(cookie);
@@ -302,7 +425,7 @@ router.post('/logout', csrfProtection, async (req: Request, res: Response, next:
     const bodyParsed = refreshSchema.safeParse(req.body);
     if (bodyParsed.success) tokens.push(bodyParsed.data.refreshToken);
 
-    for (const t of tokens) revokeRefreshToken(t);
+    for (const t of tokens) await revokeRefreshToken(t);
 
     for (const k of kinds) clearRefreshCookie(res, k);
 

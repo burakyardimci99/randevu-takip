@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Booking, CreateBookingPayload, Room } from '../types';
+import { addMonthsEndDate, openDatePicker, ymdLocal } from '../lib/utils';
+import { FEATURES } from '../constants/features';
 import { MovableModalShell } from './MovableModalShell';
 
 interface BookingModalProps {
@@ -72,7 +74,7 @@ const TECH_GROUPS: { label: string; items: string[] }[] = [
 function todayPlus(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return ymdLocal(d);
 }
 
 export function BookingModal({ room, open, loading, editingBooking, onClose, onSubmit }: BookingModalProps) {
@@ -142,7 +144,7 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
     if (projectDescription.trim().length < 20) newErrors.projectDescription = 'Proje açıklaması en az 20 karakter olmalı.';
     if (helpNeeded.trim().length < 10) newErrors.helpNeeded = 'Yardım talebi en az 10 karakter olmalı.';
     if (technologies.length === 0) newErrors.technologies = 'En az bir teknoloji seçin.';
-    if (weekdays.length === 0) newErrors.weekdays = 'En az bir gün seçin.';
+    if (FEATURES.weekdaySelection && weekdays.length === 0) newErrors.weekdays = 'En az bir gün seçin.';
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -152,7 +154,11 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
     await onSubmit({
       roomId: room.id,
       periodMonths,
-      weekdays: [...weekdays].sort((a, b) => a - b),
+      weekdays: FEATURES.weekdaySelection
+        ? [...weekdays].sort((a, b) => a - b)
+        : isEditing
+          ? editingBooking!.weekdays
+          : undefined,
       startDate,
       projectName: projectName.trim(),
       projectDescription: projectDescription.trim(),
@@ -186,8 +192,11 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
         </div>
 
         <form onSubmit={handleSubmit} className="overflow-y-auto scrollbar-thin px-6 py-5 space-y-5 flex-1">
+          <p className="text-xs text-kt-gray-500 -mb-2">
+            <span className="text-red-500">*</span> işaretli alanlar zorunludur.
+          </p>
           <div>
-            <label className="label">Randevu Süresi</label>
+            <label className="label">Randevu Süresi<span className="text-red-500 ml-0.5" aria-hidden="true">*</span></label>
             <div className="grid grid-cols-3 gap-2">
               {[1, 2, 3].map((m) => (
                 <button
@@ -206,22 +215,41 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
             </div>
           </div>
 
-          <div>
-            <label htmlFor="start-date" className="label">Başlangıç Tarihi</label>
-            <input
-              id="start-date"
-              type="date"
-              className="input"
-              value={startDate}
-              min={todayPlus(0)}
-              onChange={(e) => setStartDate(e.target.value)}
-              required
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="start-date" className="label">Başlangıç Tarihi<span className="text-red-500 ml-0.5" aria-hidden="true">*</span></label>
+              <input
+                id="start-date"
+                type="date"
+                className="input cursor-pointer"
+                value={startDate}
+                min={todayPlus(0)}
+                onChange={(e) => setStartDate(e.target.value)}
+                onClick={openDatePicker}
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="end-date" className="label">Bitiş Tarihi</label>
+              <input
+                id="end-date"
+                type="date"
+                className="input bg-kt-gray-50 text-kt-gray-600 cursor-default"
+                value={addMonthsEndDate(startDate, periodMonths)}
+                readOnly
+                tabIndex={-1}
+                aria-describedby="end-date-hint"
+              />
+              <p id="end-date-hint" className="text-[11px] text-kt-gray-500 mt-1">
+                Seçilen süreye göre otomatik hesaplanır.
+              </p>
+            </div>
           </div>
 
+          {FEATURES.weekdaySelection && (
           <div>
             <label className="label">
-              Hangi günler? <span className="text-kt-gray-400 font-normal">(periyot boyunca)</span>
+              Hangi günler?<span className="text-red-500 ml-0.5" aria-hidden="true">*</span> <span className="text-kt-gray-400 font-normal">(periyot boyunca)</span>
             </label>
             <div className="grid grid-cols-7 gap-1.5">
               {[
@@ -248,13 +276,14 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
               ))}
             </div>
             <p className="text-[11px] text-kt-gray-500 mt-1.5">
-              Oda yalnızca seçtiğin günlerde sana ayrılır; kalan günler başka kullanıcılara açık kalır.
+              Oda yalnızca seçtiğiniz günlerde size ayrılır; kalan günler başka kullanıcılara açık kalır.
             </p>
             {errors.weekdays && <p className="text-xs text-red-600 mt-1">{errors.weekdays}</p>}
           </div>
+          )}
 
           <div>
-            <label htmlFor="project-name" className="label">Proje Adı</label>
+            <label htmlFor="project-name" className="label">Proje Adı<span className="text-red-500 ml-0.5" aria-hidden="true">*</span></label>
             <input
               id="project-name"
               type="text"
@@ -270,13 +299,13 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
 
           <div>
             <label htmlFor="project-description" className="label">
-              Proje Açıklaması <span className="text-kt-gray-400 font-normal">(vibe coding fikri)</span>
+              Proje Açıklaması<span className="text-red-500 ml-0.5" aria-hidden="true">*</span>
             </label>
             <textarea
               id="project-description"
               className="textarea"
               rows={4}
-              placeholder="Kafanda nasıl bir uygulama var? Hangi problemi çözüyor, kim için?"
+              placeholder="Planladığınız uygulamayı kısaca açıklayın: hangi problemi çözüyor, hedef kullanıcısı kim?"
               value={projectDescription}
               maxLength={2000}
               onChange={(e) => setProjectDescription(e.target.value)}
@@ -291,7 +320,7 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
           </div>
 
           <div>
-            <label htmlFor="help-needed" className="label">Hangi Konularda Yardım İstiyorsun?</label>
+            <label htmlFor="help-needed" className="label">Hangi Konularda Desteğe İhtiyacınız Var?<span className="text-red-500 ml-0.5" aria-hidden="true">*</span></label>
             <textarea
               id="help-needed"
               className="textarea"
@@ -347,7 +376,7 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
               <input
                 type="text"
                 className="input flex-1"
-                placeholder="Özel teknoloji ekle..."
+                placeholder="Farklı bir teknoloji ekleyin..."
                 value={customTech}
                 maxLength={40}
                 onChange={(e) => setCustomTech(e.target.value)}

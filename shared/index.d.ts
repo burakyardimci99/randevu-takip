@@ -120,31 +120,6 @@ export interface Leaderboard {
   scoring: { bookings: number; utilizationDay: number; like: number; comment: number };
 }
 
-/* ============ Oda × gün ısı-haritası (#5c) ============ */
-
-export interface HeatmapCell {
-  weekday: number; // 1=Pzt..7=Paz
-  count: number;
-}
-
-export interface HeatmapRoom {
-  roomId: string;
-  code: string;
-  name: string;
-  theme: string;
-  roomType: 'pod' | 'experience' | 'tribune';
-  days: HeatmapCell[];
-  total: number;
-}
-
-export interface RoomHeatmap {
-  rooms: HeatmapRoom[];
-  from: string;
-  to: string;
-  maxCount: number;
-  weekdays: number[];
-}
-
 /* ============ Kiosk — oda ekranı (#5b) ============ */
 
 export interface KioskRoom {
@@ -159,4 +134,103 @@ export interface KioskRoom {
 export interface KioskData {
   room: KioskRoom;
   latestVisual: { imageUrl: string; createdAt: string } | null;
+}
+
+/* ============================================================
+ * ÇEKİRDEK DOMAIN TİPLERİ — backend DTO'ları ile frontend tipleri
+ * arasındaki kopyala-yapıştır drift'ini kapatmak için TEK kaynak.
+ * Backend: BookingDto/WaitlistEntryDto/AppointmentDto bu tiplere alias'tır.
+ * Frontend: types/index.ts buradan re-export eder.
+ * ============================================================ */
+
+export type SubjectKind = 'user' | 'admin' | 'danisman' | 'arge' | 'izleyici';
+
+/** Kullanıcı yönetişim rolü. NULL = sıradan kullanıcı. */
+export type UserGovernanceRole = 'analitik_danisman' | 'yz_arge' | 'izleyici';
+
+export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'feedback_requested' | 'cancelled';
+
+export type LifecycleStage = 'application' | 'development' | 'stage' | 'production' | 'live';
+
+export interface Booking {
+  id: string;
+  userId: string;
+  userEmail?: string;
+  userFullName?: string;
+  /** Talep sahibinin profil fotoğrafı (cache'lenebilir URL) — listelerde avatar. */
+  userPhoto?: string | null;
+  roomId: string;
+  roomName: string;
+  roomCode: string;
+  periodMonths: number;
+  /** Periyodik randevu — haftanın seçili günleri (1=Pzt..7=Paz). Tüm hafta = [1..7]. */
+  weekdays: number[];
+  startDate: string;
+  endDate: string;
+  projectName: string;
+  projectDescription: string;
+  helpNeeded: string;
+  technologies: string[];
+  status: BookingStatus;
+  adminFeedback: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  lifecycleStage: LifecycleStage;
+  stageEnteredAt: string;
+  reviewTrack: 'standard' | 'swat';
+  stageAdvanceRequestedAt: string | null;
+  stageAdvanceNote: string | null;
+  showcaseImageUrl: string | null;
+  /** Kullanıcının kendi yazdığı ilerleme/çalışma notu (dashboard'da düzenlenir). */
+  progressNote: string | null;
+  progressUpdatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type WaitlistStatus = 'waiting' | 'promoted' | 'expired' | 'cancelled';
+
+export interface WaitlistEntry {
+  id: string;
+  userId: string;
+  userFullName?: string;
+  userEmail?: string;
+  roomId: string;
+  roomCode: string;
+  roomName: string;
+  periodMonths: number;
+  desiredStartDate: string;
+  projectName: string;
+  projectDescription: string;
+  helpNeeded: string;
+  technologies: string[];
+  /** Haftanın seçili günleri (1=Pzt..7=Paz) — promote edilen booking'e taşınır. */
+  weekdays: number[];
+  position: number;
+  status: WaitlistStatus;
+  promotedBookingId: string | null;
+  notifiedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AppointmentStatus = 'scheduled' | 'cancelled' | 'completed';
+
+export interface Appointment {
+  id: string;
+  bookingId: string;
+  userId: string;
+  userFullName?: string;
+  roomId: string;
+  roomCode: string;
+  roomName: string;
+  roomEquipment: string;
+  /** ISO 8601 datetime. */
+  startAt: string;
+  endAt: string;
+  title: string;
+  notes: string;
+  status: AppointmentStatus;
+  createdAt: string;
+  updatedAt: string;
 }

@@ -58,7 +58,6 @@ import type {
   SimilarBooking,
   DuplicateMatch,
   Leaderboard,
-  RoomHeatmap,
   RoomApptHeatmap,
   KioskRoom,
   KioskData,
@@ -152,6 +151,7 @@ async function refreshAccess(kind: SubjectKind): Promise<boolean> {
     const session = sessionStore.get(kind);
     if (!session) return false;
     try {
+      // Refresh token HttpOnly cookie'de yaşar — gövdede gönderilmez.
       const res = await fetch(`${API_BASE}/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
@@ -159,7 +159,6 @@ async function refreshAccess(kind: SubjectKind): Promise<boolean> {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${session.tokens.accessToken}`,
         },
-        body: JSON.stringify({ refreshToken: session.tokens.refreshToken ?? '' }),
       });
 
       if (!res.ok) {
@@ -173,7 +172,6 @@ async function refreshAccess(kind: SubjectKind): Promise<boolean> {
       const data = (await res.json()) as AuthTokens & { type?: SubjectKind };
       sessionStore.updateTokens(kind, {
         accessToken: data.accessToken,
-        refreshToken: data.refreshToken,
         expiresIn: data.expiresIn,
       });
       refreshFailedUntil[kind] = 0;
@@ -197,8 +195,11 @@ async function request<T>(path: string, options: RequestOptions): Promise<T> {
 
   const buildHeaders = async (): Promise<HeadersInit> => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (auth && !noAuth && session) {
-      headers.Authorization = `Bearer ${session.tokens.accessToken}`;
+    // Session her denemede taze okunur: 401 → refresh sonrası retry'ın
+    // closure'daki bayat access token yerine yenilenen token'ı kullanması şart.
+    const current = sessionStore.get(kind);
+    if (auth && !noAuth && current) {
+      headers.Authorization = `Bearer ${current.tokens.accessToken}`;
     }
     if (isMutation && !noAuth) {
       const csrf = await fetchCsrfToken();
@@ -271,7 +272,7 @@ async function request<T>(path: string, options: RequestOptions): Promise<T> {
  * audience'ları ayrı olduğu için user/admin route'larına düşemezler.
  */
 function notificationBase(kind: SubjectKind): string {
-  return kind === 'danisman' || kind === 'arge'
+  return kind === 'danisman' || kind === 'arge' || kind === 'izleyici'
     ? `/governance/${kind}`
     : `/${kind}`;
 }
@@ -282,17 +283,66 @@ function notificationBase(kind: SubjectKind): string {
 
 export interface SseSubscription {
   close: () => void;
-  source: EventSource;
 }
+
+/**
+ * SSE bağlantı havuzu — kind başına TEK EventSource paylaşılır (refcount'lu).
+ * Önceden her sayfadaki her hook ayrı bağlantı açıyordu (sayfa başına 2-3 SSE,
+ * navigasyonda kopar-bağlan). Artık aboneler tek bağlantının üzerinden fan-out
+ * alır; son abone kapanınca bağlantı kapanır.
+ */
+const ssePool = new Map<
+  SubjectKind,
+  { sub: SseSubscription; handlers: Set<(type: string, data: unknown) => void>; refs: number }
+>();
 
 export function subscribeEvents(
   kind: SubjectKind,
   handler: (type: string, data: unknown) => void
 ): SseSubscription | null {
-  const session = sessionStore.get(kind);
-  if (!session) return null;
-  const url = `${API_BASE}/events?access_token=${encodeURIComponent(session.tokens.accessToken)}`;
-  const source = new EventSource(url, { withCredentials: true });
+  if (!sessionStore.get(kind)) return null;
+
+  const existing = ssePool.get(kind);
+  if (existing) {
+    existing.handlers.add(handler);
+    existing.refs += 1;
+    return {
+      close: () => {
+        existing.handlers.delete(handler);
+        existing.refs -= 1;
+        if (existing.refs <= 0) {
+          ssePool.delete(kind);
+          existing.sub.close();
+        }
+      },
+    };
+  }
+
+  const handlers = new Set<(type: string, data: unknown) => void>([handler]);
+  const raw = openEventStream(kind, (t, d) => {
+    for (const h of handlers) h(t, d);
+  });
+  if (!raw) return null;
+  const entry = { sub: raw, handlers, refs: 1 };
+  ssePool.set(kind, entry);
+  return {
+    close: () => {
+      entry.handlers.delete(handler);
+      entry.refs -= 1;
+      if (entry.refs <= 0) {
+        ssePool.delete(kind);
+        entry.sub.close();
+      }
+    },
+  };
+}
+
+/** Gerçek EventSource yönetimi — yalnız havuz üzerinden kullanılır. */
+function openEventStream(
+  kind: SubjectKind,
+  handler: (type: string, data: unknown) => void
+): SseSubscription | null {
+  if (!sessionStore.get(kind)) return null;
 
   const wrap = (eventName: string) => (e: MessageEvent) => {
     try {
@@ -318,9 +368,53 @@ export function subscribeEvents(
     'support_request.created',
     'visual.updated',
   ];
-  for (const n of eventNames) source.addEventListener(n, wrap(n));
 
-  return { close: () => source.close(), source };
+  // EventSource'un native reconnect'i URL'e gömülü access token'ı yeniden
+  // kullanır; token süresi dolunca bağlantı sessizce ölürdü. Reconnect'i biz
+  // yönetiyoruz: her denemede token taze okunur, üst üste hatada refresh denenir.
+  let source: EventSource | null = null;
+  let retryTimer: number | undefined;
+  let attempt = 0;
+  let closed = false;
+
+  const connect = () => {
+    if (closed) return;
+    const session = sessionStore.get(kind);
+    if (!session) return; // oturum kapanmış — yeniden bağlanma
+    const url = `${API_BASE}/events?access_token=${encodeURIComponent(session.tokens.accessToken)}`;
+    source = new EventSource(url, { withCredentials: true });
+    for (const n of eventNames) source.addEventListener(n, wrap(n));
+    source.onopen = () => {
+      attempt = 0;
+    };
+    source.onerror = () => {
+      source?.close();
+      source = null;
+      if (closed) return;
+      attempt += 1;
+      const delay = Math.min(15_000, 1000 * 2 ** Math.min(attempt - 1, 4));
+      retryTimer = window.setTimeout(() => {
+        void (async () => {
+          if (closed) return;
+          // İlk hata ağ kopması olabilir; ardışık hatada token bayatlamış
+          // demektir → reconnect öncesi refresh (in-flight dedup'lı, ucuz).
+          if (attempt >= 2) await refreshAccess(kind);
+          connect();
+        })();
+      }, delay);
+    };
+  };
+
+  connect();
+
+  return {
+    close: () => {
+      closed = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      source?.close();
+      source = null;
+    },
+  };
 }
 
 /**
@@ -334,6 +428,7 @@ function staffKind(): SubjectKind {
   if (sessionStore.get('admin')) return 'admin';
   if (sessionStore.get('danisman')) return 'danisman';
   if (sessionStore.get('arge')) return 'arge';
+  if (sessionStore.get('izleyici')) return 'izleyici';
   return 'admin';
 }
 
@@ -344,13 +439,53 @@ function staffKind(): SubjectKind {
 export const api = {
   async login(email: string, password: string) {
     return request<{
-      accessToken: string;
-      refreshToken: string;
+      // mfaRequired=true ise accessToken GELMEZ; mfaPendingToken ile
+      // /auth/mfa/verify çağrılıp tam oturum alınır. Refresh token her durumda
+      // yalnız HttpOnly cookie'dedir.
+      accessToken?: string;
+      mfaPendingToken?: string;
       expiresIn: number;
       type: SubjectKind;
       subject: AuthUser;
       mfaRequired?: boolean;
     }>('/auth/login', { method: 'POST', body: { email, password }, kind: 'user', auth: false });
+  },
+
+  /** MFA login ikinci adımı: pending token + TOTP/backup kodu → tam oturum. */
+  async mfaLoginVerify(pendingToken: string, code: string) {
+    const csrf = await fetchCsrfToken();
+    const res = await fetch(`${API_BASE}/auth/mfa/verify`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${pendingToken}`,
+        ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
+      },
+      body: JSON.stringify({ code }),
+    });
+    if (!res.ok) {
+      let payload: ApiError = { error: 'MFA doğrulaması başarısız.' };
+      try {
+        payload = (await res.json()) as ApiError;
+      } catch {
+        // ignore
+      }
+      const error = new Error(payload.error || 'MFA doğrulaması başarısız.') as Error & {
+        status?: number;
+        code?: string;
+      };
+      error.status = res.status;
+      error.code = payload.code;
+      throw error;
+    }
+    return (await res.json()) as {
+      accessToken: string;
+      expiresIn: number;
+      type: 'admin';
+      subject: AuthUser;
+      usedBackupCode: boolean;
+    };
   },
 
   async register(payload: {
@@ -362,7 +497,6 @@ export const api = {
   }) {
     return request<{
       accessToken: string;
-      refreshToken: string;
       expiresIn: number;
       type: 'user';
       subject: AuthUser;
@@ -372,7 +506,6 @@ export const api = {
   async loginUser(email: string, password: string) {
     return request<{
       accessToken: string;
-      refreshToken: string;
       expiresIn: number;
       user: AuthUser;
     }>('/user/auth/login', {
@@ -406,7 +539,6 @@ export const api = {
   async loginAdmin(email: string, password: string) {
     return request<{
       accessToken: string;
-      refreshToken: string;
       expiresIn: number;
       admin: AuthUser;
       mfaRequired?: boolean;
@@ -443,6 +575,23 @@ export const api = {
 
   async listUserBookings() {
     return request<{ bookings: Booking[] }>('/user/bookings', { kind: 'user' });
+  },
+
+  /** Onaylı rezervasyonu iptal et — kayıt 'cancelled' olur, oda boşalır. */
+  async cancelApprovedBooking(bookingId: string) {
+    return request<{ booking: Booking }>(`/user/bookings/${encodeURIComponent(bookingId)}/cancel`, {
+      method: 'POST',
+      kind: 'user',
+    });
+  },
+
+  /** Dashboard ilerleme notu — yalnız sahibi, yalnız onaylı booking. */
+  async updateBookingProgress(bookingId: string, progressNote: string) {
+    return request<{ booking: Booking }>(`/user/bookings/${encodeURIComponent(bookingId)}/progress`, {
+      method: 'PUT',
+      body: { progressNote },
+      kind: 'user',
+    });
   },
 
   async createBooking(payload: CreateBookingPayload) {
@@ -1059,15 +1208,6 @@ export const api = {
   /** Sıralama: kullanıcı (oda kullanımı + etkileşim) + proje (beğeni/yorum). */
   async leaderboard() {
     return request<Leaderboard>('/user/leaderboard', { kind: 'user' });
-  },
-
-  /** Oda × haftanın günü müsaitlik ısı-haritası (opsiyonel tarih aralığı). */
-  async roomHeatmap(params?: { from?: string; to?: string }) {
-    const qs = new URLSearchParams();
-    if (params?.from) qs.set('from', params.from);
-    if (params?.to) qs.set('to', params.to);
-    const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    return request<RoomHeatmap>(`/user/rooms/heatmap${suffix}`, { kind: 'user' });
   },
 
   /** Appointment (saatli) ısı-haritası — oda × gün, saat detaylı (#5). */

@@ -4,8 +4,10 @@
  */
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { requireUser } from '../middleware/auth.middleware';
+import { logger } from '../utils/logger';
 import {
   createAppointmentSchema,
+  bookingProgressSchema,
   createBookingSchema,
   createHardwareRequestSchema,
   createLicenseRequestSchema,
@@ -47,7 +49,6 @@ import {
   findSimilarBookings,
 } from '../services/embedding.service';
 import { getLeaderboard } from '../services/leaderboard.service';
-import { getRoomWeekdayHeatmap } from '../services/room.service';
 import { exportUserData, purgeUser } from '../services/privacy.service';
 import { getUserLicenseUsage } from '../services/license.service';
 import {
@@ -80,6 +81,7 @@ import {
 import { recordAudit } from '../services/audit.service';
 import { csrfProtection } from '../middleware/cookie-auth';
 import { HttpError } from '../middleware/error.middleware';
+import { readId } from '../utils/route-helpers';
 import { dbOne, dbRun } from '../db/schema';
 
 const router = Router();
@@ -176,11 +178,7 @@ router.post('/bookings', async (req: Request, res: Response, next: NextFunction)
 
 router.get('/bookings/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const rawId = req.params.id;
-    const id = typeof rawId === 'string' ? rawId : '';
-    if (!id || id.length < 8 || id.length > 40) {
-      throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
-    }
+    const id = readId(req, 'id', 'booking id');
     const booking = await getBookingByIdForUser(req.auth!.subjectId, id);
     if (!booking) throw new HttpError(404, 'Booking bulunamadı.', 'NOT_FOUND');
     res.json({ booking });
@@ -195,11 +193,7 @@ router.get('/bookings/:id', async (req: Request, res: Response, next: NextFuncti
  */
 router.put('/bookings/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const rawId = req.params.id;
-    const id = typeof rawId === 'string' ? rawId : '';
-    if (!id || id.length < 8 || id.length > 40) {
-      throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
-    }
+    const id = readId(req, 'id', 'booking id');
     const input = createBookingSchema.parse(req.body);
     const booking = await updateBooking(req.auth!.subjectId, id, input);
 
@@ -223,15 +217,42 @@ router.put('/bookings/:id', async (req: Request, res: Response, next: NextFuncti
 });
 
 /**
+ * İlerleme notu güncelle — kullanıcı dashboard'unun "ne üzerinde çalışıyorum"
+ * alanı. Yalnız sahibi, yalnız onaylı booking.
+ */
+router.put('/bookings/:id/progress', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'booking id');
+    const input = bookingProgressSchema.parse(req.body);
+    const { updateBookingProgress } = await import('../services/booking.service');
+    const booking = await updateBookingProgress(req.auth!.subjectId, id, input.progressNote);
+    res.json({ booking });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * ONAYLI rezervasyonu iptal et — kayıt silinmez, 'cancelled' olur; oda
+ * kapasitesi serbest kalır ve waitlist promotion tetiklenir.
+ */
+router.post('/bookings/:id/cancel', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'booking id');
+    const { cancelApprovedBooking } = await import('../services/booking.service');
+    const booking = await cancelApprovedBooking(id, { id: req.auth!.subjectId, type: 'user' });
+    res.json({ booking });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * Booking geri çek (DELETE) — yalnızca pending/feedback_requested.
  */
 router.delete('/bookings/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const rawId = req.params.id;
-    const id = typeof rawId === 'string' ? rawId : '';
-    if (!id || id.length < 8 || id.length > 40) {
-      throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
-    }
+    const id = readId(req, 'id', 'booking id');
     const result = await deleteBooking(req.auth!.subjectId, id);
 
     recordAudit({
@@ -244,9 +265,9 @@ router.delete('/bookings/:id', async (req: Request, res: Response, next: NextFun
     });
 
     // Waitlist promote (async, fire-and-forget)
-    void import('../services/waitlist.service').then((m) =>
-      m.tryPromoteForRoom(result.roomId)
-    );
+    void import('../services/waitlist.service')
+      .then((m) => m.tryPromoteForRoom(result.roomId))
+      .catch((err) => logger.warn('waitlist_promote_failed', { err: (err as Error).message }));
 
     res.json({ deleted: true });
   } catch (err) {
@@ -274,14 +295,10 @@ router.post('/waitlist', async (req: Request, res: Response, next: NextFunction)
   }
 });
 
-router.delete('/waitlist/:id', (req: Request, res: Response, next: NextFunction) => {
+router.delete('/waitlist/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const rawId = req.params.id;
-    const id = typeof rawId === 'string' ? rawId : '';
-    if (!id || id.length < 8 || id.length > 40) {
-      throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
-    }
-    cancelWaitlist(req.auth!.subjectId, id);
+    const id = readId(req, 'id', 'id');
+    await cancelWaitlist(req.auth!.subjectId, id);
     res.json({ cancelled: true });
   } catch (err) {
     next(err);
@@ -291,11 +308,7 @@ router.delete('/waitlist/:id', (req: Request, res: Response, next: NextFunction)
 // Geçmiş kaydı (iptal/süresi geçmiş) kalıcı kaldır.
 router.delete('/waitlist/:id/remove', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const rawId = req.params.id;
-    const id = typeof rawId === 'string' ? rawId : '';
-    if (!id || id.length < 8 || id.length > 40) {
-      throw new HttpError(400, 'Geçersiz id.', 'INVALID_ID');
-    }
+    const id = readId(req, 'id', 'id');
     res.json(await removeWaitlistEntry(req.auth!.subjectId, id));
   } catch (err) {
     next(err);
@@ -390,18 +403,6 @@ router.get('/leaderboard', async (_req: Request, res: Response, next: NextFuncti
   }
 });
 
-/* ============ ODA × GÜN MÜSAİTLİK ISI-HARİTASI (#5c) ============ */
-
-router.get('/rooms/heatmap', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const from = typeof req.query.from === 'string' ? req.query.from : undefined;
-    const to = typeof req.query.to === 'string' ? req.query.to : undefined;
-    res.json(await getRoomWeekdayHeatmap({ from, to }));
-  } catch (err) {
-    next(err);
-  }
-});
-
 /* ===== ODA × GÜN APPOINTMENT (SAATLİ) ISI-HARİTASI (#5) ===== */
 
 router.get('/rooms/appointment-heatmap', async (req: Request, res: Response, next: NextFunction) => {
@@ -416,22 +417,22 @@ router.get('/rooms/appointment-heatmap', async (req: Request, res: Response, nex
 
 /* ============ PROFİL FOTOĞRAFI ============ */
 
-router.put('/me/photo', (req: Request, res: Response, next: NextFunction) => {
+router.put('/me/photo', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const dataUrl = req.body?.dataUrl;
     if (typeof dataUrl !== 'string') {
       throw new HttpError(400, 'dataUrl eksik.', 'VALIDATION');
     }
-    setUserProfilePhoto(req.auth!.subjectId, dataUrl);
+    await setUserProfilePhoto(req.auth!.subjectId, dataUrl);
     res.json({ ok: true });
   } catch (err) {
     next(err);
   }
 });
 
-router.delete('/me/photo', (req: Request, res: Response, next: NextFunction) => {
+router.delete('/me/photo', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    clearUserProfilePhoto(req.auth!.subjectId);
+    await clearUserProfilePhoto(req.auth!.subjectId);
     res.json({ ok: true });
   } catch (err) {
     next(err);
@@ -587,11 +588,7 @@ router.put(
   '/bookings/:id/showcase',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'booking id');
       const visible = req.body?.visible;
       if (typeof visible !== 'boolean') {
         throw new HttpError(400, "'visible' boolean olmalı.", 'VALIDATION');
@@ -601,7 +598,9 @@ router.put(
       await dbRun(`UPDATE bookings SET showcase_visible = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND user_id = ?`, [visible ? 1 : 0, id, req.auth!.subjectId]);
       // Galeri içeriği değişti (proje eklendi/çıkarıldı) → showcase feed cache'ini tazele.
-      void import('../services/showcase-feed.service').then((m) => m.invalidateShowcaseFeed());
+      void import('../services/showcase-feed.service')
+        .then((m) => m.invalidateShowcaseFeed())
+        .catch((err) => logger.warn('showcase_feed_invalidate_failed', { err: (err as Error).message }));
       const updated = await getBookingByIdForUser(req.auth!.subjectId, id);
       res.json({ booking: updated });
     } catch (err) {
@@ -690,11 +689,7 @@ router.put(
   requireUser,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'talep id');
       const input = createLicenseRequestSchema.parse(req.body);
       const { updateLicenseRequest } = await import('../services/license-request.service');
       const updated = await updateLicenseRequest(req.auth!.subjectId, id, input);
@@ -724,11 +719,7 @@ router.get(
   requireUser,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'talep id');
       const { getUserLicenseRequestById } = await import(
         '../services/license-request.service'
       );
@@ -777,15 +768,11 @@ router.post(
   requireUser,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz bildirim id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'bildirim id');
       const { markNotificationRead } = await import(
         '../services/notification-center.service'
       );
-      markNotificationRead(req.auth!.subjectId, 'user', id);
+      await markNotificationRead(req.auth!.subjectId, 'user', id);
       res.status(204).end();
     } catch (err) {
       next(err);
@@ -814,11 +801,7 @@ router.post(
   '/bookings/:id/request-advance',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'booking id');
       const { note } = stageAdvanceRequestSchema.parse(req.body ?? {});
       const booking = await requestStageAdvance(req.auth!.subjectId, id, note);
       res.json({ booking });
@@ -854,11 +837,7 @@ router.get(
   '/bookings/:id/appointments',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'booking id');
       // IDOR koruması: booking sahibi mi?
       const booking = await getBookingByIdForUser(req.auth!.subjectId, id);
       if (!booking) {
@@ -888,11 +867,7 @@ router.delete(
   '/appointments/:id',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz randevu id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'randevu id');
       const result = await cancelAppointment(req.auth!.subjectId, id, {
         ownerCheck: true,
         callerType: 'user',
@@ -942,11 +917,7 @@ router.post('/hardware/requests', async (req: Request, res: Response, next: Next
 
 router.put('/hardware/requests/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const rawId = req.params.id;
-    const id = typeof rawId === 'string' ? rawId : '';
-    if (!id || id.length < 8 || id.length > 40) {
-      throw new HttpError(400, 'Geçersiz talep id.', 'INVALID_ID');
-    }
+    const id = readId(req, 'id', 'talep id');
     const input = createHardwareRequestSchema.parse(req.body);
     const request = await updateHardwareRequest(req.auth!.subjectId, id, input);
     res.json({ request });
@@ -1003,10 +974,7 @@ router.get('/visuals', async (req: Request, res: Response, next: NextFunction) =
 
 router.post('/visuals/:id/regenerate', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = typeof req.params.id === 'string' ? req.params.id : '';
-    if (id.length < 8 || id.length > 40) {
-      throw new HttpError(400, 'Geçersiz görsel id.', 'INVALID_ID');
-    }
+    const id = readId(req, 'id', 'görsel id');
     const visual = await regenerateVisual(req.auth!.subjectId, id);
     res.json({ visual });
   } catch (err) {
@@ -1016,10 +984,7 @@ router.post('/visuals/:id/regenerate', async (req: Request, res: Response, next:
 
 router.delete('/visuals/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = typeof req.params.id === 'string' ? req.params.id : '';
-    if (id.length < 8 || id.length > 40) {
-      throw new HttpError(400, 'Geçersiz görsel id.', 'INVALID_ID');
-    }
+    const id = readId(req, 'id', 'görsel id');
     res.json(await deleteVisual(req.auth!.subjectId, id));
   } catch (err) {
     next(err);
@@ -1029,10 +994,7 @@ router.delete('/visuals/:id', async (req: Request, res: Response, next: NextFunc
 // Proje (booking) kartına görsel arkaplan ata / kaldır.
 router.put('/bookings/:id/showcase-image', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = typeof req.params.id === 'string' ? req.params.id : '';
-    if (id.length < 8 || id.length > 40) {
-      throw new HttpError(400, 'Geçersiz proje id.', 'INVALID_ID');
-    }
+    const id = readId(req, 'id', 'proje id');
     const input = setShowcaseImageSchema.parse(req.body);
     const result = await setBookingShowcaseImage(req.auth!.subjectId, id, input.visualId);
     res.json(result);

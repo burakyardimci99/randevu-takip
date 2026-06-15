@@ -290,11 +290,21 @@ class GeminiProvider implements ImageProvider {
     }
 
     const apiUrl = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-    const res = await fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: opts.prompt }] }] }),
-    });
+    // Timeout: HF provider'daki 60s desenle aynı — API asılı kalırsa görsel
+    // süresiz 'generating' durumunda takılıyordu.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60_000);
+    let res: Response;
+    try {
+      res = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: opts.prompt }] }] }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!res.ok) {
       const errorBody = await res.text();

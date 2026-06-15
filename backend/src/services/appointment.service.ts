@@ -27,26 +27,13 @@ import { dbAll, dbOne, dbRun, dbTx } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { recordAudit } from './audit.service';
 import { broadcastBooking, broadcastToAdmins } from './sse.service';
+import { ymdLocal } from '../utils/dates';
+import type { Appointment as SharedAppointment, AppointmentStatus } from '@klab/shared';
 
-export type AppointmentStatus = 'scheduled' | 'cancelled' | 'completed';
+export type { AppointmentStatus };
 
-export interface AppointmentDto {
-  id: string;
-  bookingId: string;
-  userId: string;
-  userFullName?: string;
-  roomId: string;
-  roomCode: string;
-  roomName: string;
-  roomEquipment: string;
-  startAt: string;
-  endAt: string;
-  title: string;
-  notes: string;
-  status: AppointmentStatus;
-  createdAt: string;
-  updatedAt: string;
-}
+/** Appointment DTO — TEK kaynak @klab/shared (frontend ile birebir aynı tip). */
+export type AppointmentDto = SharedAppointment;
 
 interface AppointmentRow {
   id: string;
@@ -413,7 +400,7 @@ export async function getAppointmentById(
  * Admin: tüm randevular (yönetim takvimi).
  */
 export async function listAllAppointments(
-  filters: { from?: string; to?: string; includeCancelled?: boolean } = {}
+  filters: { from?: string; to?: string; includeCancelled?: boolean; limit?: number; offset?: number } = {}
 ): Promise<AppointmentDto[]> {
   const where: string[] = [];
   const params: unknown[] = [];
@@ -427,9 +414,12 @@ export async function listAllAppointments(
     params.push(filters.to);
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  params.push(Math.min(Math.max(filters.limit ?? 500, 1), 1000));
+  params.push(Math.max(filters.offset ?? 0, 0));
   const rows = await dbAll(`SELECT ${SELECT_COLS} ${BASE_JOIN}
        ${whereSql}
-       ORDER BY a.start_at ASC`, [...params]) as AppointmentRow[];
+       ORDER BY a.start_at ASC
+       LIMIT ? OFFSET ?`, [...params]) as AppointmentRow[];
   return rows.map(rowToDto);
 }
 
@@ -489,12 +479,12 @@ function enumerateDates(from: string, to: string): string[] {
 export async function getRoomAppointmentHeatmap(opts: { from?: string; to?: string }): Promise<RoomApptHeatmap> {
   const valid = (d?: string): d is string => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d);
 
-  // Varsayılan: bu haftanın Pazartesi'si .. +6 gün.
-  const today = new Date();
-  const todayUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-  const mondayOffset = (todayUtc.getUTCDay() + 6) % 7;
-  const defaultFrom = new Date(todayUtc.getTime() - mondayOffset * 86400000).toISOString().slice(0, 10);
-  const defaultTo = new Date(todayUtc.getTime() + (6 - mondayOffset) * 86400000).toISOString().slice(0, 10);
+  // Varsayılan: bu haftanın Pazartesi'si .. +6 gün (YEREL güne göre — UTC
+  // tabanlı hesap TR'de 00:00-03:00 arasında pencereyi bir gün kaydırıyordu).
+  const todayAnchor = new Date(`${ymdLocal()}T00:00:00Z`);
+  const mondayOffset = (todayAnchor.getUTCDay() + 6) % 7;
+  const defaultFrom = new Date(todayAnchor.getTime() - mondayOffset * 86400000).toISOString().slice(0, 10);
+  const defaultTo = new Date(todayAnchor.getTime() + (6 - mondayOffset) * 86400000).toISOString().slice(0, 10);
 
   const from = valid(opts.from) ? opts.from : defaultFrom;
   const to = valid(opts.to) ? opts.to : defaultTo;
@@ -543,4 +533,22 @@ export async function getRoomAppointmentHeatmap(opts: { from?: string; to?: stri
   });
 
   return { from, to, maxCount, rooms: resultRooms };
+}
+
+/**
+ * Bitiş zamanı geçmiş ve hâlâ 'scheduled' olan randevuları 'completed' işaretler.
+ * Periyodik bakım cron'undan (leader-korumalı) çağrılır — şemada tanımlı ama daha
+ * önce hiç set edilmeyen 'completed' statüsüne anlam kazandırır (geçmiş oturum
+ * istatistikleri/temizlik için). Tek UPDATE: çağıranın transaction'ı varsa onun içinde
+ * tx-güvenli koşar. start_at/end_at ISO UTC string → leksik karşılaştırma güvenli.
+ * Güncellenen satır sayısını döner.
+ */
+export async function markPastAppointmentsCompleted(): Promise<number> {
+  const nowIso = new Date().toISOString();
+  const res = await dbRun(
+    `UPDATE appointments SET status = 'completed', updated_at = CURRENT_TIMESTAMP
+       WHERE status = 'scheduled' AND end_at < ?`,
+    [nowIso]
+  );
+  return res.changes;
 }

@@ -56,7 +56,10 @@ class InMemoryQueue implements QueueAdapter {
   }
 
   async drain(): Promise<void> {
-    while (this.queue.length > 0) {
+    // processing de beklenir: job shift() ile kuyruktan çıktıktan sonra handler
+    // çalışırken length=0 olur — yalnız length'e bakmak uçuştaki job'u yarıda
+    // kestiriyordu (shutdown'da e-posta/embedding kaybı).
+    while (this.queue.length > 0 || this.processing) {
       await new Promise((r) => setImmediate(r));
     }
   }
@@ -84,10 +87,19 @@ class InMemoryQueue implements QueueAdapter {
           } catch (err) {
             job.attempts++;
             if (job.attempts < 3) {
-              this.queue.push(job);
+              // Backoff'lu retry: aynı tick döngüsünde anında tekrar denenirse
+              // geçici hatalarda (SMTP/HF kısa kesinti) 3 hak <1sn'de tükeniyordu.
+              const delayMs = job.attempts * 5_000;
+              const timer = setTimeout(() => {
+                if (this.shuttingDown) return;
+                this.queue.push(job);
+                this.tick();
+              }, delayMs);
+              timer.unref();
               logger.warn('queue_job_retry', {
                 job: job.name,
                 attempts: job.attempts,
+                delayMs,
                 err: (err as Error).message,
               });
             } else {

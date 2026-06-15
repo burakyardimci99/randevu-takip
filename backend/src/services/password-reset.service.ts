@@ -100,7 +100,7 @@ export async function resetPassword(
   });
 
   // Tüm oturumları kapat — eski parolayla açılmış token'lar geçersiz olsun.
-  revokeAllForSubject('user', row.user_id);
+  await revokeAllForSubject('user', row.user_id);
 
   return { userId: row.user_id };
 }

@@ -425,3 +425,45 @@
     animation: meshShift 22s ease-in-out infinite;
   }
 }
+
+/* ============================================================
+ * ERİŞİLEBİLİRLİK — HAREKET AZALTMA (WCAG 2.3.3 Animation from Interactions)
+ * ============================================================
+ * Kullanıcı işletim sisteminde "hareketi azalt" tercihini açtıysa,
+ * vestibüler hassasiyeti tetikleyebilecek sürekli / süslü animasyonları
+ * kapat veya çok kısalt. Tek seferlik geçişler (fade-in/slide-up) zararsız
+ * olduğundan minimal süreye indirgenir; sürekli dönen/yüzen/parıldayan
+ * efektler tamamen durdurulur.
+ *
+ * @layer DIŞINDA tanımlı + !important → tüm utility/komponent animasyonlarını
+ * güvenle override eder. */
+@media (prefers-reduced-motion: reduce) {
+  /* Genel güvenlik ağı: tüm animasyon ve geçişleri neredeyse anlık yap. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Sürekli dönen / yüzen / parıldayan süslü efektleri tamamen durdur. */
+  .animate-ken-burns,
+  .animate-mesh-shift,
+  .animate-float-slow,
+  .animate-float-medium,
+  .animate-glow-pulse,
+  .animate-pulse-gold,
+  .animate-neural-flow,
+  .animate-scan-line,
+  .animate-circuit-trace,
+  .animate-orbit,
+  .animate-shimmer,
+  .animate-spotlight,
+  .text-shimmer,
+  .scan-overlay::after,
+  .bg-ai-light::after {
+    animation: none !important;
+  }
+}

@@ -26,7 +26,7 @@ export type NotificationCategory =
 // recipient_type'ındaki bildirimleri görür (danışman/arge user'ın kişisel
 // bildirimlerini GÖRMEZ). NOT: şu an INSERT yalnız 'user'/'admin' için yapılır
 // (schema CHECK); 'danisman'/'arge' okuma-kapsamı olarak kullanılır (izolasyon).
-export type RecipientType = 'user' | 'admin' | 'danisman' | 'arge';
+export type RecipientType = 'user' | 'admin' | 'danisman' | 'arge' | 'izleyici';
 
 export interface Notification {
   id: string;
@@ -72,7 +72,15 @@ export interface PushNotificationInput {
 /**
  * Tek bir alıcıya bildirim oluşturur. Best-effort — hata fırlatmaz.
  */
-export async function pushNotification(input: PushNotificationInput): Promise<void> {
+/**
+ * Bildirim — BİLİNÇLİ fire-and-forget: yanıtı bloklamaz, hata içeride loglanır.
+ * `void` döner; çağıranların await etmesi gerekmez.
+ */
+export function pushNotification(input: PushNotificationInput): void {
+  void pushNotificationAsync(input);
+}
+
+export async function pushNotificationAsync(input: PushNotificationInput): Promise<void> {
   try {
     await dbRun(`INSERT INTO notifications
          (id, recipient_id, recipient_type, category, title, body, link)

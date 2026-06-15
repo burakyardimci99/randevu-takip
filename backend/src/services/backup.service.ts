@@ -5,7 +5,9 @@
  * pg_basebackup / managed servis (RDS, Cloud SQL, Azure DB) ile yapılır.
  * Bu servis pg'de NO-OP'tur — arayüz (route + cron) korunur ama dosya yazmaz.
  *
- * Production öneri: yönetilen otomatik yedek + off-site (S3/Blob) saklama.
+ * GERÇEK YEDEKLEME: docker-compose.prod.yml'deki `postgres-backup` sidecar'ı
+ * (pg_dump, gece 02:30, 7g/4h/6a saklama). Prosedür ve restore tatbikatı:
+ * docs/backup-restore-runbook.md
  */
 import { logger } from '../utils/logger';
 
@@ -35,7 +37,11 @@ export function listBackups(): Array<{ file: string; sizeBytes: number; createdA
 }
 
 export function startBackupCron(_config: Partial<BackupConfig> = {}): void {
-  // pg: uygulama-içi backup yok — cron no-op (managed/pg_dump kullanılır).
+  // pg: uygulama-içi backup yok — cron no-op. "Yedek alınıyor" yanılsaması
+  // yaratmamak için açıkça loglanır; gerçek yedek postgres-backup sidecar'ında.
+  logger.info('db_backup_cron_noop', {
+    note: 'Uygulama-içi yedek YOK — pg_dump sidecar kullanılır (docs/backup-restore-runbook.md)',
+  });
 }
 
 export function stopBackupCron(): void {

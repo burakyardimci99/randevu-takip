@@ -393,7 +393,6 @@ export function AdminLicenseRequestsTab({ readOnly = false }: AdminLicenseReques
       {modalReq && modalAction && createPortal(
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
-          onClick={closeModal}
         >
           <div
             className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 animate-slide-up"

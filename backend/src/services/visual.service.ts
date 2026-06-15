@@ -6,6 +6,7 @@
 import { nanoid } from 'nanoid';
 import { dbAll, dbOne, dbRun } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
+import { logger } from '../utils/logger';
 import { getImageProvider, variantSeed, translateToEnglish, type GeneratedImage } from './image-gen.service';
 import { downloadAndStore, storeBytes, internalImageUrl, deleteStoredFiles } from './visual-store.service';
 import { invalidateShowcaseFeed } from './showcase-feed.service';
@@ -114,7 +115,9 @@ export async function createVisual(userId: string, input: CreateVisualInput): Pr
 
   // Üretim arkaplanda — istek bloklanmaz (UX + timeout dayanıklılığı). Bitince
   // 'visual.updated' SSE event'i kullanıcıya push'lanır.
-  void runVisualPipeline(userId, id, input.fikir, input.tema);
+  void runVisualPipeline(userId, id, input.fikir, input.tema).catch((err) => {
+    logger.error('visual_pipeline_unhandled', { id, err: (err as Error).message });
+  });
 
   return (await getVisualForUser(userId, id))!; // status: 'enhancing'
 }
@@ -145,9 +148,11 @@ async function persistVariant(
   if (dl.ok) {
     return { url: internalImageUrl(id, result.seed), stored: true, ext: dl.ext };
   }
-  // Saklanamadı: 'auth' (token/ödeme) KALICI → çağıran error yapmalı; 'transient'
-  // (zaman aşımı/5xx) ise dış URL'de fallback (provider sonra düzelir).
-  return { url: result.url, stored: false, authError: dl.reason === 'auth' };
+  // Saklanamadı: 'auth' (token/ödeme) KALICI, 'transient' (zaman aşımı/5xx)
+  // geçici. İKİSİNDE DE dış URL fallback'i YOK: Pollinations URL'i prompt'u
+  // (kullanıcı fikri+teması) içerir ve public kiosk/showcase'e sızardı.
+  // Çağıran net hata gösterir; kullanıcı "Yeniden üret" diyebilir.
+  return { url: '', stored: false, authError: dl.reason === 'auth' };
 }
 
 /** Sağlayıcı kalıcı kimlik/ödeme hatası verdiğinde gösterilecek net mesaj. */
@@ -185,9 +190,10 @@ async function runVisualPipeline(
     const result = await getImageProvider().generate({ prompt: promptEn });
     // Üretilen görseli sunucuda sakla → image_url prompt'suz iç URL olur.
     const persisted = await persistVariant(id, result);
-    // Saklanamadıysa 'ready' deyip kırık URL VERME → net hata göster.
-    if (!persisted.stored && persisted.authError) throw new Error(PROVIDER_AUTH_ERROR);
-    if (!persisted.stored && !persisted.url) throw new Error(PROVIDER_TRANSIENT_ERROR);
+    // Saklanamadıysa 'ready' deyip dış/kırık URL VERME → net hata göster.
+    if (!persisted.stored) {
+      throw new Error(persisted.authError ? PROVIDER_AUTH_ERROR : PROVIDER_TRANSIENT_ERROR);
+    }
     const variant: VisualVariant = {
       seed: result.seed,
       url: persisted.url,
@@ -221,23 +227,25 @@ export async function deleteVisual(userId: string, visualId: string): Promise<{ 
 
   // Bu görseli arkaplan yapan referansları temizle (kırık görsel kalmasın). İç
   // URL formatı: /api/public/visuals/<id>/image?v=<seed> → id'ye göre LIKE.
-  const ref = `%/visuals/${visualId}/image%`;
+  // LIKE'ta '_' tek-karakter joker — nanoid '_' içerebilir; escape edilmezse
+  // komşu id'li görsellerin referansları da yanlışlıkla NULL'lanır.
+  const ref = `%/visuals/${visualId.replace(/([\\%_])/g, '\\$1')}/image%`;
   // 1) Proje (booking) showcase arkaplanı
   await dbRun(
     `UPDATE bookings SET showcase_image_url = NULL, updated_at = CURRENT_TIMESTAMP
-       WHERE user_id = ? AND showcase_image_url LIKE ?`,
+       WHERE user_id = ? AND showcase_image_url LIKE ? ESCAPE '\'`,
     [userId, ref]
   );
   // 2) Kullanıcının kişisel profil arka planı (leaderboard kartı + public profil)
   //    ve sohbet teması — bu görseli kullananlardan referansı kaldır.
   await dbRun(
     `UPDATE users SET profile_background_url = NULL, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND profile_background_url LIKE ?`,
+       WHERE id = ? AND profile_background_url LIKE ? ESCAPE '\'`,
     [userId, ref]
   );
   await dbRun(
     `UPDATE users SET chat_background_url = NULL, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND chat_background_url LIKE ?`,
+       WHERE id = ? AND chat_background_url LIKE ? ESCAPE '\'`,
     [userId, ref]
   );
 
@@ -257,8 +265,19 @@ export async function regenerateVisual(userId: string, visualId: string): Promis
   }
 
   // Yeni varyant üretimi arkaplanda; istek hemen 'generating' döner, bitince SSE.
-  await dbRun(`UPDATE visuals SET status = 'generating', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [visualId]);
-  void runRegeneratePipeline(userId, visualId, row.prompt_en, parseVariants(row.variants));
+  // Eşzamanlılık guard'ı: zaten üretim sürüyorsa ikinci pipeline başlatma
+  // (aynı seed + son-yazan-kazanır varyant kaybı + kota israfı).
+  const claimed = await dbRun(
+    `UPDATE visuals SET status = 'generating', updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND status NOT IN ('generating', 'enhancing')`,
+    [visualId]
+  );
+  if (claimed.changes === 0) {
+    throw new HttpError(409, 'Bu görsel için üretim zaten sürüyor.', 'VISUAL_BUSY');
+  }
+  void runRegeneratePipeline(userId, visualId, row.prompt_en, parseVariants(row.variants)).catch((err) => {
+    logger.error('visual_regenerate_unhandled', { visualId, err: (err as Error).message });
+  });
 
   return (await getVisualForUser(userId, visualId))!; // status: 'generating'
 }
@@ -275,8 +294,9 @@ async function runRegeneratePipeline(
     const result = await getImageProvider().generate({ prompt: promptEn, seed: newSeed });
     // Yeni varyantı sunucuda sakla → iç URL.
     const persisted = await persistVariant(visualId, result);
-    if (!persisted.stored && persisted.authError) throw new Error(PROVIDER_AUTH_ERROR);
-    if (!persisted.stored && !persisted.url) throw new Error(PROVIDER_TRANSIENT_ERROR);
+    if (!persisted.stored) {
+      throw new Error(persisted.authError ? PROVIDER_AUTH_ERROR : PROVIDER_TRANSIENT_ERROR);
+    }
     const variant: VisualVariant = {
       seed: result.seed,
       url: persisted.url,

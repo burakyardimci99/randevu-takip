@@ -29,28 +29,12 @@ import {
   saveBookingEmbedding,
 } from './embedding.service';
 import { enqueueEmail, waitlistPromotedEmail } from './notification.service';
+import { maskToWeekdays, weekdaysToMask } from '../utils/weekdays';
+import type { WaitlistEntry as SharedWaitlistEntry } from '@klab/shared';
+import { addMonthsEndDate } from '../utils/dates';
 
-export interface WaitlistEntryDto {
-  id: string;
-  userId: string;
-  userFullName?: string;
-  userEmail?: string;
-  roomId: string;
-  roomCode: string;
-  roomName: string;
-  periodMonths: number;
-  desiredStartDate: string;
-  projectName: string;
-  projectDescription: string;
-  helpNeeded: string;
-  technologies: string[];
-  position: number;
-  status: 'waiting' | 'promoted' | 'expired' | 'cancelled';
-  promotedBookingId: string | null;
-  notifiedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+/** Waitlist DTO — TEK kaynak @klab/shared (frontend ile birebir aynı tip). */
+export type WaitlistEntryDto = SharedWaitlistEntry;
 
 interface WaitlistRow {
   id: string;
@@ -66,6 +50,7 @@ interface WaitlistRow {
   project_description: string;
   help_needed: string;
   technologies: string;
+  weekday_mask: number;
   position: number;
   status: 'waiting' | 'promoted' | 'expired' | 'cancelled';
   promoted_booking_id: string | null;
@@ -96,6 +81,7 @@ function rowToDto(r: WaitlistRow): WaitlistEntryDto {
     projectDescription: r.project_description,
     helpNeeded: r.help_needed,
     technologies: techs,
+    weekdays: maskToWeekdays(r.weekday_mask),
     position: r.position,
     status: r.status,
     promotedBookingId: r.promoted_booking_id,
@@ -105,12 +91,8 @@ function rowToDto(r: WaitlistRow): WaitlistEntryDto {
   };
 }
 
-function addMonths(dateStr: string, months: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + months);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
+// Bitiş tarihi hesabı utils/dates'e taşındı (ay taşması kıskaçlı, booking ile ortak).
+const addMonths = addMonthsEndDate;
 
 function isStartDateValid(dateStr: string): boolean {
   const today = new Date();
@@ -127,6 +109,8 @@ export interface JoinWaitlistInput {
   projectDescription: string;
   helpNeeded: string;
   technologies: string[];
+  /** Haftanın seçili günleri (1=Pzt..7=Paz). Verilmezse tüm hafta. */
+  weekdays?: number[];
 }
 
 export async function joinWaitlist(userId: string, input: JoinWaitlistInput): Promise<WaitlistEntryDto> {
@@ -135,18 +119,22 @@ export async function joinWaitlist(userId: string, input: JoinWaitlistInput): Pr
   }
 
   const endDate = addMonths(input.desiredStartDate, input.periodMonths);
+  const weekdayMask = weekdaysToMask(input.weekdays);
 
   const id = await dbTx(async () => {
     // Oda var mı?
     const room = await dbOne(`SELECT id FROM rooms WHERE id = ? AND is_active = 1`, [input.roomId]) as { id: string } | undefined;
     if (!room) throw new HttpError(404, 'Oda bulunamadı.', 'ROOM_NOT_FOUND');
 
-    // Aslında oda boşsa waitlist'e değil booking'e gitmeli — kontrol
+    // Aslında oda boşsa waitlist'e değil booking'e gitmeli — kontrol.
+    // Çakışma semantiği createBooking ile aynı: tarih aralığı VE haftanın
+    // günleri kesişiyorsa doludur (yalnız tarih bakmak yanlış pozitif üretir).
     const conflict = await dbOne(`SELECT id FROM bookings
          WHERE room_id = ?
            AND status IN ('pending', 'approved', 'feedback_requested')
            AND NOT (end_date < ? OR start_date > ?)
-         LIMIT 1`, [input.roomId, input.desiredStartDate, endDate]);
+           AND (weekday_mask & ?) != 0
+         LIMIT 1`, [input.roomId, input.desiredStartDate, endDate, weekdayMask]);
     if (!conflict) {
       throw new HttpError(
         409,
@@ -176,8 +164,8 @@ export async function joinWaitlist(userId: string, input: JoinWaitlistInput): Pr
     const id = nanoid();
     await dbRun(`INSERT INTO waitlist (
          id, user_id, room_id, period_months, desired_start_date,
-         project_name, project_description, help_needed, technologies, position, status
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`, [id,
+         project_name, project_description, help_needed, technologies, weekday_mask, position, status
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`, [id,
       userId,
       input.roomId,
       input.periodMonths,
@@ -186,6 +174,7 @@ export async function joinWaitlist(userId: string, input: JoinWaitlistInput): Pr
       input.projectDescription,
       input.helpNeeded,
       JSON.stringify(input.technologies),
+      weekdayMask,
       position]);
 
     return id;
@@ -245,13 +234,16 @@ export async function listRoomWaitlist(roomId: string): Promise<WaitlistEntryDto
   return rows.map(rowToDto);
 }
 
-export async function listAllWaitlist(): Promise<WaitlistEntryDto[]> {
+export async function listAllWaitlist(page?: { limit?: number; offset?: number }): Promise<WaitlistEntryDto[]> {
+  const limit = Math.min(Math.max(page?.limit ?? 200, 1), 500);
+  const offset = Math.max(page?.offset ?? 0, 0);
   const rows = await dbAll(`SELECT w.*, r.code AS room_code, r.name AS room_name,
               u.full_name AS user_full_name, u.email AS user_email
        FROM waitlist w
        INNER JOIN rooms r ON r.id = w.room_id
        INNER JOIN users u ON u.id = w.user_id
-       ORDER BY w.created_at DESC`, []) as WaitlistRow[];
+       ORDER BY w.created_at DESC
+       LIMIT ? OFFSET ?`, [limit, offset]) as WaitlistRow[];
   return rows.map(rowToDto);
 }
 
@@ -276,7 +268,7 @@ export async function cancelWaitlist(userId: string, waitlistId: string): Promis
   });
 
   // Geriye kalanların position'larını yeniden hesapla
-  recomputePositions(roomId);
+  await recomputePositions(roomId);
 
   recordAudit({
     eventType: 'waitlist.left',
@@ -322,9 +314,11 @@ async function recomputePositions(roomId: string): Promise<void> {
        WHERE room_id = ? AND status = 'waiting'
        ORDER BY created_at ASC`, [roomId]) as Array<{ id: string }>;
   await dbTx(async () => {
-    rows.forEach(async (row, idx) => {
+    // for...of: forEach(async) callback'leri beklenmez — UPDATE'ler transaction
+    // kapsamı dışına kaçabilirdi.
+    for (const [idx, row] of rows.entries()) {
       await dbRun(`UPDATE waitlist SET position = ? WHERE id = ?`, [idx + 1, row.id]);
-    });
+    }
   });
 }
 
@@ -369,9 +363,9 @@ export async function moveWaitlistEntry(waitlistId: string, move: WaitlistMove):
     return; // sınırda — değişiklik yok
   }
   await dbTx(async () => {
-    next.forEach(async (id, i) => {
+    for (const [i, id] of next.entries()) {
       await dbRun(`UPDATE waitlist SET position = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [i + 1, id]);
-    });
+    }
   });
 
   recordAudit({
@@ -417,18 +411,21 @@ export async function tryPromoteForRoom(roomId: string): Promise<string[]> {
     let newBookingId: string | null = null;
 
     newBookingId = await dbTx(async () => {
+      // Çakışma kontrolü entry'nin weekday_mask'iyle yapılır; yeni booking de
+      // aynı maskeyle açılır (önceden DEFAULT 127 ile TÜM haftaya yayılıyordu).
       const conflict = await dbOne(`SELECT id FROM bookings
            WHERE room_id = ?
              AND status IN ('pending', 'approved', 'feedback_requested')
              AND NOT (end_date < ? OR start_date > ?)
-           LIMIT 1`, [roomId, entry.desired_start_date, endDate]);
+             AND (weekday_mask & ?) != 0
+           LIMIT 1`, [roomId, entry.desired_start_date, endDate, entry.weekday_mask]);
       if (conflict) return null;
 
       const id = nanoid();
       await dbRun(`INSERT INTO bookings (
            id, user_id, room_id, period_months, start_date, end_date,
-           project_name, project_description, help_needed, technologies, status
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`, [id,
+           project_name, project_description, help_needed, technologies, weekday_mask, status
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`, [id,
         entry.user_id,
         entry.room_id,
         entry.period_months,
@@ -437,7 +434,8 @@ export async function tryPromoteForRoom(roomId: string): Promise<string[]> {
         entry.project_name,
         entry.project_description,
         entry.help_needed,
-        entry.technologies]);
+        entry.technologies,
+        entry.weekday_mask]);
 
       await dbRun(`UPDATE waitlist
          SET status = 'promoted', promoted_booking_id = ?, notified_at = CURRENT_TIMESTAMP,
@@ -502,7 +500,7 @@ export async function tryPromoteForRoom(roomId: string): Promise<string[]> {
   }
 
   if (promotedIds.length > 0) {
-    recomputePositions(roomId);
+    await recomputePositions(roomId);
   }
   return promotedIds;
 }
@@ -510,6 +508,13 @@ export async function tryPromoteForRoom(roomId: string): Promise<string[]> {
 /**
  * Tüm odalar için promotion + expired temizleme cron.
  * Periyodik çağrılır (server start sırasında setInterval).
+ *
+ * Çok-instance notu: Buraya ayrı bir cron leader-kilidi EKLENMEDİ çünkü
+ * tryPromoteForRoom kendi içinde dbTx açar (cron-lock'un tek-tx gereği ile çakışır,
+ * nested-tx desteklenmiyor). Bunun yerine eşzamanlılık veri katmanında zaten
+ * korunuyor: promotion'ın oluşturduğu booking, oda-bazlı pg_advisory_xact_lock
+ * (booking.service lockRoomForBooking) altında yazılır → aynı slotun iki instance'ta
+ * çift promote edilmesi engellenir. Tek-instance dağıtımda bu konu zaten geçersiz.
  */
 let maintenanceTimer: NodeJS.Timeout | null = null;
 

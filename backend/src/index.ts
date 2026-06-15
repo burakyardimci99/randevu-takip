@@ -8,21 +8,10 @@
 import { initOtel } from './observability/otel';
 void initOtel();
 
-import express, { type Request, type Response } from 'express';
-import cookieParser from 'cookie-parser';
 import { config } from './config/env';
-import { initSchema, dbOne, closeDb } from './db/schema';
+import { initSchema, closeDb } from './db/schema';
 import { logger } from './utils/logger';
-import {
-  corsMiddleware,
-  globalRateLimit,
-  helmetMiddleware,
-  permissionsPolicyMiddleware,
-  requestLogger,
-} from './middleware/security.middleware';
-import { errorHandler, notFoundHandler } from './middleware/error.middleware';
-import { csrfProtection, csrfTokenHandler } from './middleware/cookie-auth';
-import { initSseRoutes, closeAllSse } from './services/sse.service';
+import { closeAllSse } from './services/sse.service';
 import { getQueue } from './services/queue.service';
 import { startWaitlistMaintenance } from './services/waitlist.service';
 import { warmupEmbeddings, backfillEmbeddings } from './services/embedding.service';
@@ -30,83 +19,7 @@ import { warmupTranslation } from './services/image-gen.service';
 import { startMaintenance } from './services/maintenance.service';
 import { startBackupCron } from './services/backup.service';
 import { registerEmailHandler } from './services/notification.service';
-
-import unifiedAuthRoutes from './routes/auth.routes';
-import userAuthRoutes from './routes/user-auth.routes';
-import adminAuthRoutes from './routes/admin-auth.routes';
-import userRoutes from './routes/user.routes';
-import adminRoutes from './routes/admin.routes';
-import governanceRoutes from './routes/governance.routes';
-import chatRoutes from './routes/chat.routes';
-import showcaseRoutes from './routes/showcase.routes';
-import publicRoutes from './routes/public.routes';
-import { openApiDocument } from './openapi';
-
-function buildApp(): express.Express {
-  const app = express();
-
-  app.disable('x-powered-by');
-  app.set('trust proxy', 1);
-
-  app.use(helmetMiddleware);
-  app.use(permissionsPolicyMiddleware);
-  app.use(corsMiddleware);
-  app.use(express.json({ limit: '512kb' })); // profil fotoğrafı (200KB JPEG + base64 overhead) için
-  app.use(cookieParser());
-  app.use(requestLogger);
-  app.use(globalRateLimit);
-
-  // Liveness — process ayakta mı (bağımlılık kontrolü yok, her zaman hızlı).
-  app.get('/api/health', (_req: Request, res: Response) => {
-    res.json({ status: 'ok', service: 'klab-randevu', time: new Date().toISOString() });
-  });
-
-  // Readiness — DB'ye gerçekten bağlanabiliyor mu? Orchestrator/LB bu yeşil
-  // olmadan trafik yönlendirmemeli (DB hazır değilken 500 dönmesin).
-  app.get('/api/readiness', async (_req: Request, res: Response) => {
-    try {
-      await dbOne('SELECT 1 AS ok');
-      res.json({ status: 'ready' });
-    } catch (err) {
-      logger.warn('readiness_check_failed', { err: (err as Error).message });
-      res.status(503).json({ status: 'not_ready' });
-    }
-  });
-
-  // CSRF token endpoint (GET — CSRF korumalı değil, token üretir)
-  app.get('/api/csrf', csrfTokenHandler);
-
-  // OpenAPI 3.1 schema (public, no auth)
-  app.get('/api/openapi.json', (_req: Request, res: Response) => {
-    res.json(openApiDocument);
-  });
-
-  // SSE: real-time notification stream (auth bearer query veya cookie ile)
-  initSseRoutes(app);
-
-  // Public (auth gerektirmeyen) showcase + odalar
-  app.use('/api/public', publicRoutes);
-
-  app.use('/api/auth', unifiedAuthRoutes);          // Birleşik giriş
-  app.use('/api/user/auth', userAuthRoutes);        // Eski yol (geriye uyum)
-  app.use('/api/admin/auth', adminAuthRoutes);      // Eski yol (geriye uyum)
-  app.use('/api/user', userRoutes);
-  app.use('/api/admin', adminRoutes);
-  app.use('/api/governance', governanceRoutes);
-  app.use('/api/chat', chatRoutes);                 // Rol-bağımsız genel sohbet
-  app.use('/api/showcase', showcaseRoutes);         // Rol-bağımsız envanter okuma (beğeni/yorum görüntüleme)
-
-  app.use(notFoundHandler);
-  app.use(errorHandler);
-
-  // CSRF middleware globalde uygulanmıyor — auth endpointleri (login/register/refresh)
-  // henüz session olmadığından korumadan muaf. State-changing endpointlerde
-  // route-level csrfProtection enforce edilecek (user.routes + admin.routes).
-  // Bu, geriye uyum + güvenlik dengesi içindir.
-  void csrfProtection;
-
-  return app;
-}
+import { buildApp } from './app';
 
 async function start(): Promise<void> {
   const migrationResult = await initSchema();
@@ -197,6 +110,20 @@ async function start(): Promise<void> {
 
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  // Savunma katmanı: kaçan promise rejection'ları process'i öldürmesin (Node >=15
+  // varsayılanı crash). Loglanır; kalıcı hata sinyali için uncaughtException'da
+  // graceful shutdown tetiklenir.
+  process.on('unhandledRejection', (reason) => {
+    logger.error('unhandled_rejection', {
+      reason: reason instanceof Error ? reason.message : String(reason),
+      stack: reason instanceof Error ? reason.stack : undefined,
+    });
+  });
+  process.on('uncaughtException', (err) => {
+    logger.error('uncaught_exception', { err: err.message, stack: err.stack });
+    shutdown('uncaughtException');
+  });
 }
 
 start().catch((err) => {

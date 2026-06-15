@@ -28,6 +28,7 @@ import { dbAll, dbOne, dbRun, dbTx } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { logger } from '../utils/logger';
 import { recordAudit } from './audit.service';
+import { invalidateSubjectCache } from './auth.service';
 
 export interface UserDataExport {
   generatedAt: string;
@@ -75,7 +76,7 @@ export async function exportUserData(userId: string): Promise<UserDataExport> {
        LIMIT 500`, [userId]) as Array<Record<string, unknown>>;
 
   recordAudit({
-    eventType: 'user.update', // 'user.data_export' ekleyebiliriz; şimdilik 'user.update'
+    eventType: 'user.data_export', // KVKK veri ihracı — ayrı denetim olayı (genel user.update'ten ayrı izlenebilir).
     subjectId: userId,
     subjectType: 'user',
     success: true,
@@ -112,6 +113,14 @@ export interface PurgeResult {
   cancelledWaitlist: number;
   revokedTokens: number;
   deletedEmbeddings: number;
+  deletedChatMessages: number;
+  deletedComments: number;
+  deletedLikes: number;
+  deletedNotifications: number;
+  cancelledAppointments: number;
+  deletedSupportRequests: number;
+  deletedHardwareRequests: number;
+  deletedVisuals: number;
 }
 
 export async function purgeUser(userId: string, requestedBy: { id: string; type: 'user' | 'admin' }): Promise<PurgeResult> {
@@ -153,7 +162,38 @@ export async function purgeUser(userId: string, requestedBy: { id: string; type:
     const tokensRes = await dbRun(`UPDATE refresh_tokens SET revoked = 1
          WHERE subject_id = ? AND subject_type = 'user' AND revoked = 0`, [userId]);
 
-    // 5) User row → pseudonymize + status=3
+    // 4b) Diğer kişisel veri tabloları — "unutulma hakkı" yalnız users/bookings
+    // ile bitmez (KVKK): sohbet, yorum, beğeni, bildirim, randevu, destek/donanım
+    // talepleri ve üretilen görseller de temizlenir.
+    const chatRes = await dbRun(
+      `DELETE FROM chat_messages WHERE sender_id = ? OR recipient_id = ?`,
+      [userId, userId]
+    );
+    const commentsRes = await dbRun(`DELETE FROM showcase_comments WHERE user_id = ?`, [userId]);
+    const likesRes = await dbRun(`DELETE FROM showcase_likes WHERE user_id = ?`, [userId]);
+    const notifRes = await dbRun(
+      `DELETE FROM notifications WHERE recipient_id = ?`,
+      [userId]
+    );
+    // Randevular: geçmiş kayıtların tarih bütünlüğü için silinmez, iptal +
+    // kişisel metinler scrub edilir.
+    const apptRes = await dbRun(
+      `UPDATE appointments
+         SET status = 'cancelled', title = '[silindi]', notes = '[silindi]'
+       WHERE user_id = ? AND status = 'scheduled'`,
+      [userId]
+    );
+    await dbRun(
+      `UPDATE appointments SET title = '[silindi]', notes = '[silindi]'
+       WHERE user_id = ?`,
+      [userId]
+    );
+    const supportRes = await dbRun(`DELETE FROM support_requests WHERE user_id = ?`, [userId]);
+    const hardwareRes = await dbRun(`DELETE FROM hardware_requests WHERE user_id = ?`, [userId]);
+    const visualsRes = await dbRun(`DELETE FROM visuals WHERE user_id = ?`, [userId]);
+    // Profil görselleri/arkaplanları user satırında — adım 5'te NULL'lanır.
+
+    // 5) User row → pseudonymize + status=3 (profil foto/arkaplanlar dahil)
     await dbRun(`UPDATE users
        SET email = ?,
            full_name = '[Silinen kullanıcı]',
@@ -163,6 +203,9 @@ export async function purgeUser(userId: string, requestedBy: { id: string; type:
            phone = NULL,
            bio = NULL,
            project_idea = NULL,
+           profile_photo = NULL,
+           profile_background_url = NULL,
+           chat_background_url = NULL,
            password_hash = '',
            status = 3,
            failed_login_count = 0,
@@ -176,8 +219,19 @@ export async function purgeUser(userId: string, requestedBy: { id: string; type:
       cancelledWaitlist: waitlistRes.changes,
       revokedTokens: tokensRes.changes,
       deletedEmbeddings: deletable.length, // approximate count
+      deletedChatMessages: chatRes.changes,
+      deletedComments: commentsRes.changes,
+      deletedLikes: likesRes.changes,
+      deletedNotifications: notifRes.changes,
+      cancelledAppointments: apptRes.changes,
+      deletedSupportRequests: supportRes.changes,
+      deletedHardwareRequests: hardwareRes.changes,
+      deletedVisuals: visualsRes.changes,
     };
   });
+
+  // Auth cache: purge edilen kullanıcının token'ları anında geçersizleşsin.
+  invalidateSubjectCache(userId);
 
   recordAudit({
     eventType: 'user.delete',

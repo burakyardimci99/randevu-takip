@@ -192,7 +192,7 @@ export default function ArgeDashboard() {
             geri alın (rollback). Kullanıcıların ilerletme taleplerini siz onaylarsınız.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-3 min-w-[420px]">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <KpiCard icon={Inbox} label="Aşama Talebi" value={counts.withAdvanceRequest} tone="gold" compact />
           <KpiCard icon={FlaskConical} label="Stage" value={counts.inStage} tone="cyan" compact />
           <KpiCard icon={Rocket} label="Production" value={counts.inProduction} tone="violet" compact />

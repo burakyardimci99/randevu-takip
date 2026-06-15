@@ -16,6 +16,13 @@
 # container/volume/network ÇAKIŞMASIN. Aksi halde `prod down` dev'i de söker.
 name: klab-randevu-prod
 
+# Ortak log rotasyonu — sınırsız json-file büyümesi disk doldurur.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '20m'
+    max-file: '5'
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -24,6 +31,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER gerekli}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD gerekli}
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB gerekli}
+      TZ: ${TZ:-Europe/Istanbul}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -32,6 +40,13 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    logging: *default-logging
+    # Temiz kapanış için checkpoint süresi tanı (varsayılan 10s yetmeyebilir).
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     # Port DIŞA AÇILMAZ — yalnız compose iç ağından erişilir.
 
   backend:
@@ -47,6 +62,7 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: '4000'
+      TZ: ${TZ:-Europe/Istanbul}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?FRONTEND_ORIGIN gerekli (örn https://randevu.klab.example)}
       CSRF_SECRET: ${CSRF_SECRET:?CSRF_SECRET gerekli (min 32 karakter)}
@@ -63,8 +79,22 @@ services:
       POLLINATIONS_TOKEN: ${POLLINATIONS_TOKEN:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Prometheus scrape erişimi (boşsa /api/metrics prod'da kapalı kalır).
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
       # Embedding modeli cache'i node_modules yerine yazılabilir data volume'una.
       MODEL_CACHE_DIR: /app/data/models
+      # E-posta bildirimleri (SMTP) — boşsa transport kurulmaz, bildirim atlanır.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      # Kuyruk backend'i — boşsa in-memory fallback (tek instance).
+      REDIS_URL: ${REDIS_URL:-}
+      # Observability (OpenTelemetry) — endpoint boşsa trace exporter kapalı.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-klab-randevu}
     volumes:
       # JWT anahtarları — image'e gömülmez, salt-okunur mount (secret yönetimi).
       - ./backend/keys:/app/keys:ro
@@ -80,6 +110,16 @@ services:
       retries: 5
       start_period: 40s
     restart: unless-stopped
+    logging: *default-logging
+    # Graceful shutdown zinciri (SSE kapat → queue boşalt → pool kapat) 15s
+    # force-timer'lı; compose biraz daha tanısın.
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          # In-process embedding modeli (transformers) bellek tüketir — host'taki
+          # postgres'i OOM'a sürüklemesin.
+          memory: 2g
     # Port DIŞA AÇILMAZ — nginx (frontend) /api'yi iç ağdan proxy'ler.
 
   frontend:
@@ -101,7 +141,48 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  # ============================================================
+  # YEDEKLEME — pg_dump cron sidecar'ı.
+  # Zamanlanmış mantıksal yedek (custom format) + saklama politikası.
+  # Yedekler 'pgbackups' volume'unda; off-site kopya İÇİN bu volume'u
+  # harici depoya senkronlayın (runbook: docs/backup-restore-runbook.md).
+  # ============================================================
+  postgres-backup:
+    image: prodrigestivill/postgres-backup-local:16
+    container_name: klab-postgres-backup-prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB gerekli}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER gerekli}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD gerekli}
+      POSTGRES_EXTRA_OPTS: '--clean --if-exists'
+      TZ: ${TZ:-Europe/Istanbul}
+      # Her gece 02:30 (TR) — saklama: 7 günlük + 4 haftalık + 6 aylık.
+      SCHEDULE: '30 2 * * *'
+      BACKUP_KEEP_DAYS: '7'
+      BACKUP_KEEP_WEEKS: '4'
+      BACKUP_KEEP_MONTHS: '6'
+      HEALTHCHECK_PORT: '8080'
+    volumes:
+      - pgbackups:/backups
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1']
+      interval: 60s
+      timeout: 5s
+      retries: 3
 
 volumes:
   pgdata:
   appdata:
+  pgbackups:

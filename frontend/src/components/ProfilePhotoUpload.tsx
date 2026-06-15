@@ -237,7 +237,6 @@ function CameraCaptureModal({
       aria-modal="true"
       aria-label="Kameradan fotoğraf çek"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onClick={() => !busy && onClose()}
     >
       <div
         className="bg-white rounded-2xl shadow-kt-card max-w-md w-full overflow-hidden"

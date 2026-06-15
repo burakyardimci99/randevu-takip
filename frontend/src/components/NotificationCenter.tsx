@@ -73,8 +73,11 @@ export function NotificationCenter({
       <button
         onClick={() => setOpen((o) => !o)}
         className="relative p-2 rounded-lg hover:bg-white/10 text-white/80 hover:text-kt-gold-300 transition-colors"
-        aria-label="Bildirimler"
+        aria-label={totalUnread > 0 ? `Bildirimler, ${totalUnread} okunmamış` : 'Bildirimler'}
         title="Bildirimler"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls="notification-panel"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -87,7 +90,12 @@ export function NotificationCenter({
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-[360px] max-h-[500px] rounded-2xl bg-white shadow-2xl border border-kt-gray-200 overflow-hidden flex flex-col z-50 animate-fade-in">
+        <div
+          id="notification-panel"
+          role="dialog"
+          aria-label="Bildirimler"
+          className="absolute right-0 mt-2 w-[360px] max-h-[500px] rounded-2xl bg-white shadow-2xl border border-kt-gray-200 overflow-hidden flex flex-col z-50 animate-fade-in"
+        >
           {/* Header */}
           <div className="px-4 py-3 border-b border-kt-gray-100 flex items-center justify-between bg-gradient-to-r from-kt-green-50 to-white">
             <div>

@@ -97,7 +97,8 @@ export async function createSupportRequest(
   const row = await dbOne('SELECT * FROM support_requests WHERE id = ?', [id]) as DbRow;
   const created = rowToSupportRequest(row);
 
-  notifyAdminsSupportRequested(created);
+  // Bildirim hatası talebi geri almasın — bilinçli fire-and-forget.
+  void notifyAdminsSupportRequested(created).catch(() => undefined);
 
   return created;
 }

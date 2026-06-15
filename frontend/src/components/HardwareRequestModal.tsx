@@ -70,7 +70,6 @@ export function HardwareRequestModal({ open, loading, editing, onClose, onSubmit
       role="dialog"
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onClick={() => !loading && onClose()}
     >
       <div
         className="bg-white rounded-2xl shadow-kt-card max-w-lg w-full max-h-[90vh] overflow-y-auto"

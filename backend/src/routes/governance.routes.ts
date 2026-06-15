@@ -15,9 +15,10 @@
  * tabanlı; davranış, ses ve audit aynı kalır (subjectId = user id).
  */
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { requireArge, requireDanisman } from '../middleware/auth.middleware';
+import { requireArge, requireDanisman, requireIzleyici } from '../middleware/auth.middleware';
 import { csrfProtection } from '../middleware/cookie-auth';
 import { HttpError } from '../middleware/error.middleware';
+import { readId } from '../utils/route-helpers';
 import {
   reviewBookingSchema,
   reviewLicenseRequestSchema,
@@ -73,11 +74,7 @@ router.post(
   danismanGuard,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'booking id');
       const input = reviewBookingSchema.parse(req.body);
       const result = await reviewBooking(req.auth!.subjectId, id, input, 'danisman');
       res.json({
@@ -97,11 +94,7 @@ router.post(
   danismanGuard,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz license id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'license id');
       const input = reviewLicenseRequestSchema.parse(req.body);
       const updated = await reviewLicenseRequest(req.auth!.subjectId, id, input, 'danisman');
       res.json({ request: updated });
@@ -116,6 +109,8 @@ router.post(
  * ============================================================ */
 
 const argeGuard = requireArge;
+/** İzleyici — salt-okunur; yalnız bildirim/destek uçları için kullanılır. */
+const izleyiciGuard = requireIzleyici;
 
 /** Ar-Ge dashboard — onaylı projeler (özellikle advance request veya stage/production'da olanlar). */
 router.get('/arge/projects', argeGuard, async (_req, res, next) => {
@@ -141,11 +136,7 @@ router.post(
   argeGuard,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'booking id');
       const booking = await advanceBookingLifecycle(req.auth!.subjectId, id, 'arge');
       res.json({ booking });
     } catch (err) {
@@ -160,11 +151,7 @@ router.post(
   argeGuard,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'booking id');
       const booking = await regressBookingLifecycle(req.auth!.subjectId, id, 'arge');
       res.json({ booking });
     } catch (err) {
@@ -179,11 +166,7 @@ router.delete(
   argeGuard,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const rawId = req.params.id;
-      const id = typeof rawId === 'string' ? rawId : '';
-      if (!id || id.length < 8 || id.length > 40) {
-        throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
-      }
+      const id = readId(req, 'id', 'booking id');
       const booking = await rejectStageAdvanceRequest(req.auth!.subjectId, id);
       res.json({ booking });
     } catch (err) {
@@ -195,11 +178,7 @@ router.delete(
 /** Ar-Ge: tek booking detay (modal için). */
 router.get('/arge/bookings/:id', argeGuard, async (req, res, next) => {
   try {
-    const rawId = req.params.id;
-    const id = typeof rawId === 'string' ? rawId : '';
-    if (!id || id.length < 8 || id.length > 40) {
-      throw new HttpError(400, 'Geçersiz booking id.', 'INVALID_ID');
-    }
+    const id = readId(req, 'id', 'booking id');
     const booking = await getBookingByIdAdmin(id);
     if (!booking) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
     res.json({ booking });
@@ -214,9 +193,10 @@ router.get('/arge/bookings/:id', argeGuard, async (req, res, next) => {
  * NotificationCenter `/{kind}/notifications` çağırır; user/admin için doğrudan
  * route var, danisman/arge için bu governance-prefixed eşdeğerleri kullanılır.
  * ============================================================ */
-const GOVERNANCE_ROLES: ReadonlyArray<{ prefix: 'danisman' | 'arge'; guard: typeof danismanGuard }> = [
+const GOVERNANCE_ROLES: ReadonlyArray<{ prefix: 'danisman' | 'arge' | 'izleyici'; guard: typeof danismanGuard }> = [
   { prefix: 'danisman', guard: danismanGuard },
   { prefix: 'arge', guard: argeGuard },
+  { prefix: 'izleyici', guard: izleyiciGuard },
 ];
 
 for (const { prefix, guard } of GOVERNANCE_ROLES) {
@@ -246,15 +226,11 @@ for (const { prefix, guard } of GOVERNANCE_ROLES) {
     guard,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const rawId = req.params.id;
-        const id = typeof rawId === 'string' ? rawId : '';
-        if (!id || id.length < 8 || id.length > 40) {
-          throw new HttpError(400, 'Geçersiz bildirim id.', 'INVALID_ID');
-        }
+        const id = readId(req, 'id', 'bildirim id');
         const { markNotificationRead } = await import(
           '../services/notification-center.service'
         );
-        markNotificationRead(req.auth!.subjectId, prefix, id);
+        await markNotificationRead(req.auth!.subjectId, prefix, id);
         res.status(204).end();
       } catch (err) {
         next(err);

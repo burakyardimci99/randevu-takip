@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Booking } from '../types';
+import { openDatePicker } from '../lib/utils';
 
 interface Props {
   booking: Booking;
@@ -96,7 +97,6 @@ export function AppointmentModal({ booking, onClose, onSubmit, submitting, initi
   return createPortal(
     <div
       className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
-      onClick={() => !submitting && onClose()}
     >
       <form
         className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-slide-up"
@@ -113,11 +113,12 @@ export function AppointmentModal({ booking, onClose, onSubmit, submitting, initi
         <label className="label">Tarih</label>
         <input
           type="date"
-          className="input mb-3"
+          className="input mb-3 cursor-pointer"
           value={date}
           min={minDate}
           max={maxDate}
           onChange={(e) => setDate(e.target.value)}
+          onClick={openDatePicker}
           disabled={submitting}
           required
         />

@@ -132,9 +132,13 @@ export async function exportAuditCsv(filters: AuditLogFilters = {}): Promise<str
   const header = 'created_at,event_type,subject_type,subject_id,ip_address,success,details';
   const escape = (v: unknown): string => {
     if (v === null || v === undefined) return '';
-    const s = typeof v === 'string' ? v : JSON.stringify(v);
-    // RFC 4180 CSV escape
-    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    let s = typeof v === 'string' ? v : JSON.stringify(v);
+    // CSV formül enjeksiyonu (OWASP): Excel/Sheets '=', '+', '-', '@', TAB ile
+    // başlayan hücreyi formül olarak çalıştırır. ip_address trust proxy nedeniyle
+    // saldırgan kontrollü olabilir — tek tırnakla nötralize et.
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    // RFC 4180 CSV escape (+ lone \r satır yapısını bozmasın)
+    if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
       return `"${s.replace(/"/g, '""')}"`;
     }
     return s;

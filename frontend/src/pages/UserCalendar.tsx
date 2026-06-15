@@ -12,6 +12,7 @@ import { EmptyState } from '../components/EmptyState';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { Appointment, Booking } from '../types';
 
 /* ============ Tarih yardımcıları ============ */
@@ -83,6 +84,7 @@ export default function UserCalendar() {
   const [selectedDate, setSelectedDate] = useState<Date>(() => startOfDay(new Date()));
   const [scheduling, setScheduling] = useState<Booking | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -344,7 +346,7 @@ export default function UserCalendar() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => cancelAppointment(a.id)}
+                        onClick={() => setConfirmCancelId(a.id)}
                         className="text-[11px] text-rose-700 hover:text-rose-900 font-semibold shrink-0"
                       >
                         İptal
@@ -421,6 +423,17 @@ export default function UserCalendar() {
           initialDate={ymd(selectedDate)}
         />
       )}
+      <ConfirmDialog
+        open={!!confirmCancelId}
+        title="Randevu iptal edilsin mi?"
+        message="Bu saatli randevu iptal edilecek. Bu işlem geri alınamaz."
+        confirmLabel="Evet, iptal et"
+        onConfirm={() => {
+          if (confirmCancelId) void cancelAppointment(confirmCancelId);
+          setConfirmCancelId(null);
+        }}
+        onCancel={() => setConfirmCancelId(null)}
+      />
     </AppShell>
   );
 }

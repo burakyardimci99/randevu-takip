@@ -163,7 +163,8 @@ export async function createHardwareRequest(
   const row = await dbOne('SELECT * FROM hardware_requests WHERE id = ?', [id]) as DbRow;
   const created = rowToHardwareRequest(row);
 
-  notifyAdminsHardwareRequested(created);
+  // Bildirim hatası talebi geri almasın — bilinçli fire-and-forget.
+  void notifyAdminsHardwareRequested(created).catch(() => undefined);
 
   return created;
 }
@@ -192,16 +193,21 @@ export async function updateHardwareRequest(
     );
   }
 
-  await dbRun(`UPDATE hardware_requests SET
+  // Guard: SELECT-anındaki durum bayatlamış olabilir (admin onayı ile yarış);
+  // finalize edilmiş talep 'pending'e geri DİRİLMESİN.
+  const updRes = await dbRun(`UPDATE hardware_requests SET
        equipment_type = ?, equipment_detail = ?, quantity = ?,
        reason = ?, urgency = ?, status = 'pending',
        updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`, [input.equipmentType,
+     WHERE id = ? AND status IN ('pending', 'feedback_requested')`, [input.equipmentType,
     input.equipmentDetail?.trim() || null,
     input.quantity,
     input.reason.trim(),
     input.urgency,
     requestId]);
+  if (updRes.changes === 0) {
+    throw new HttpError(409, 'Talep az önce sonuçlandırıldı — düzenlenemez.', 'HARDWARE_REQUEST_FINALIZED');
+  }
 
   const row = await dbOne('SELECT * FROM hardware_requests WHERE id = ?', [requestId]) as DbRow;
   return rowToHardwareRequest(row);
@@ -287,10 +293,13 @@ export async function reviewHardwareRequest(
         ? 'rejected'
         : 'feedback_requested';
 
-  await dbRun(`UPDATE hardware_requests SET
+  const revRes = await dbRun(`UPDATE hardware_requests SET
        status = ?, admin_feedback = ?, reviewed_by = ?,
        reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`, [nextStatus, input.adminFeedback?.trim() || null, reviewerId, requestId]);
+     WHERE id = ? AND status IN ('pending', 'feedback_requested')`, [nextStatus, input.adminFeedback?.trim() || null, reviewerId, requestId]);
+  if (revRes.changes === 0) {
+    throw new HttpError(409, 'Talep az önce başka bir yetkili tarafından sonuçlandırıldı.', 'HARDWARE_REQUEST_FINALIZED');
+  }
 
   const result = (await getAdminHardwareRequestById(requestId))!;
   const label = EQUIPMENT_LABEL[result.equipmentType];

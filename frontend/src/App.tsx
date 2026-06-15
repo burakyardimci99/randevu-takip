@@ -1,47 +1,63 @@
+import { Suspense, lazy } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ToastProvider } from './components/Toast';
 import { ProtectedRoute } from './components/ProtectedRoute';
+// İlk boyamada gereken sayfalar eager (landing + auth ekranları); gerisi route
+// bazlı code-splitting ile lazy — 33 sayfa tek 700KB+ bundle'a gömülmesin.
 import Landing from './pages/Landing';
 import Login from './pages/Login';
-import Register from './pages/Register';
-import ForgotPassword from './pages/ForgotPassword';
-import ResetPassword from './pages/ResetPassword';
-import Profile from './pages/Profile';
-import UserRooms from './pages/UserRooms';
-import UserBookings from './pages/UserBookings';
-import UserCalendar from './pages/UserCalendar';
-import UserFAQ from './pages/UserFAQ';
-import UserLicenses from './pages/UserLicenses';
-import UserWaitlist from './pages/UserWaitlist';
-import Chat from './pages/Chat';
-import VisualGenerator from './pages/VisualGenerator';
-import Showcase from './pages/Showcase';
-import Leaderboard from './pages/Leaderboard';
-import KioskIndex from './pages/KioskIndex';
-import KioskScreen from './pages/KioskScreen';
-import PrivacySettings from './pages/PrivacySettings';
-import PublicProfile from './pages/PublicProfile';
-import AdminDashboard from './pages/AdminDashboard';
-import AdminRooms from './pages/AdminRooms';
-import AdminUsers from './pages/AdminUsers';
-import AdminAnalytics from './pages/AdminAnalytics';
-import AdminCalendar from './pages/AdminCalendar';
-import AdminWaitlist from './pages/AdminWaitlist';
-import AdminSecurity from './pages/AdminSecurity';
-import AdminAuditLog from './pages/AdminAuditLog';
-import AdminLicenses from './pages/AdminLicenses';
-import AdminProjects from './pages/AdminProjects';
-import AdminHardwareRequests from './pages/AdminHardwareRequests';
-import AdminSupportRequests from './pages/AdminSupportRequests';
-import ArgeDashboard from './pages/ArgeDashboard';
-import DanismanDashboard from './pages/DanismanDashboard';
+
+const Register = lazy(() => import('./pages/Register'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const Profile = lazy(() => import('./pages/Profile'));
+const UserRooms = lazy(() => import('./pages/UserRooms'));
+const UserBookings = lazy(() => import('./pages/UserBookings'));
+const UserCalendar = lazy(() => import('./pages/UserCalendar'));
+const UserDashboard = lazy(() => import('./pages/UserDashboard'));
+const IzleyiciDashboard = lazy(() => import('./pages/IzleyiciDashboard'));
+const UserFAQ = lazy(() => import('./pages/UserFAQ'));
+const UserLicenses = lazy(() => import('./pages/UserLicenses'));
+const UserWaitlist = lazy(() => import('./pages/UserWaitlist'));
+const Chat = lazy(() => import('./pages/Chat'));
+const VisualGenerator = lazy(() => import('./pages/VisualGenerator'));
+const Showcase = lazy(() => import('./pages/Showcase'));
+const Leaderboard = lazy(() => import('./pages/Leaderboard'));
+const KioskIndex = lazy(() => import('./pages/KioskIndex'));
+const KioskScreen = lazy(() => import('./pages/KioskScreen'));
+const PrivacySettings = lazy(() => import('./pages/PrivacySettings'));
+const PublicProfile = lazy(() => import('./pages/PublicProfile'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const AdminRooms = lazy(() => import('./pages/AdminRooms'));
+const AdminUsers = lazy(() => import('./pages/AdminUsers'));
+const AdminAnalytics = lazy(() => import('./pages/AdminAnalytics'));
+const AdminCalendar = lazy(() => import('./pages/AdminCalendar'));
+const AdminWaitlist = lazy(() => import('./pages/AdminWaitlist'));
+const AdminSecurity = lazy(() => import('./pages/AdminSecurity'));
+const AdminAuditLog = lazy(() => import('./pages/AdminAuditLog'));
+const AdminLicenses = lazy(() => import('./pages/AdminLicenses'));
+const AdminProjects = lazy(() => import('./pages/AdminProjects'));
+const AdminHardwareRequests = lazy(() => import('./pages/AdminHardwareRequests'));
+const AdminSupportRequests = lazy(() => import('./pages/AdminSupportRequests'));
+const ArgeDashboard = lazy(() => import('./pages/ArgeDashboard'));
+const DanismanDashboard = lazy(() => import('./pages/DanismanDashboard'));
+
+/** Lazy chunk yüklenirken gösterilen hafif yer tutucu. */
+function PageLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-kt-gray-50">
+      <div className="animate-spin w-8 h-8 border-3 border-kt-gold-500 border-t-transparent rounded-full" />
+    </div>
+  );
+}
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
+          <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
@@ -56,6 +72,14 @@ export default function App() {
             {/* Eski URL'ler /login'e yönlendirilir — backwards compat */}
             <Route path="/admin/login" element={<Navigate to="/login" replace />} />
 
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute kind="user">
+                  <UserDashboard />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="/rooms"
               element={
@@ -156,7 +180,7 @@ export default function App() {
             <Route
               path="/admin/users"
               element={
-                <ProtectedRoute kind={['admin', 'danisman', 'arge']}>
+                <ProtectedRoute kind={['admin', 'danisman', 'arge', 'izleyici']}>
                   <AdminUsers />
                 </ProtectedRoute>
               }
@@ -172,7 +196,7 @@ export default function App() {
             <Route
               path="/admin/calendar"
               element={
-                <ProtectedRoute kind={['admin', 'danisman', 'arge']}>
+                <ProtectedRoute kind={['admin', 'danisman', 'arge', 'izleyici']}>
                   <AdminCalendar />
                 </ProtectedRoute>
               }
@@ -180,7 +204,7 @@ export default function App() {
             <Route
               path="/admin/rooms"
               element={
-                <ProtectedRoute kind={['admin', 'danisman', 'arge']}>
+                <ProtectedRoute kind={['admin', 'danisman', 'arge', 'izleyici']}>
                   <AdminRooms />
                 </ProtectedRoute>
               }
@@ -212,7 +236,7 @@ export default function App() {
             <Route
               path="/admin/licenses"
               element={
-                <ProtectedRoute kind={['admin', 'danisman', 'arge']}>
+                <ProtectedRoute kind={['admin', 'danisman', 'arge', 'izleyici']}>
                   <AdminLicenses />
                 </ProtectedRoute>
               }
@@ -220,7 +244,7 @@ export default function App() {
             <Route
               path="/admin/projects"
               element={
-                <ProtectedRoute kind={['admin', 'danisman', 'arge']}>
+                <ProtectedRoute kind={['admin', 'danisman', 'arge', 'izleyici']}>
                   <AdminProjects />
                 </ProtectedRoute>
               }
@@ -252,6 +276,14 @@ export default function App() {
               }
             />
             <Route
+              path="/izleyici"
+              element={
+                <ProtectedRoute kind="izleyici">
+                  <IzleyiciDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/arge"
               element={
                 <ProtectedRoute kind="arge">
@@ -262,6 +294,7 @@ export default function App() {
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </Suspense>
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

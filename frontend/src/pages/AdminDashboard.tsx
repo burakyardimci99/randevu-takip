@@ -269,7 +269,7 @@ export default function AdminDashboard() {
               {/* Arka plan görseli + okunabilirlik için sola beyazlaşan degrade */}
               <div
                 className="absolute inset-0 bg-cover bg-center"
-                style={{ backgroundImage: 'url("/admin-hero.png")' }}
+                style={{ backgroundImage: 'url("/admin-hero.jpg")' }}
                 aria-hidden="true"
               />
               <div className="absolute inset-0 bg-gradient-to-r from-white/95 via-white/82 to-white/40 pointer-events-none" />

@@ -54,6 +54,7 @@ const STATUS_BADGE: Record<LicenseRequestStatus | Booking['status'], string> = {
   approved: 'bg-emerald-100 text-emerald-800 border-emerald-300',
   rejected: 'bg-rose-100 text-rose-800 border-rose-300',
   feedback_requested: 'bg-blue-100 text-blue-800 border-blue-300',
+  cancelled: 'bg-gray-100 text-gray-600 border-gray-300',
 };
 
 const STATUS_LABEL: Record<LicenseRequestStatus | Booking['status'], string> = {
@@ -61,6 +62,7 @@ const STATUS_LABEL: Record<LicenseRequestStatus | Booking['status'], string> = {
   approved: 'Onaylandı',
   rejected: 'Reddedildi',
   feedback_requested: 'Revize',
+  cancelled: 'İptal Edildi',
 };
 
 interface ActionModalState {
@@ -463,7 +465,6 @@ export default function DanismanDashboard() {
       {actionModal && createPortal(
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
-          onClick={() => !submitting && setActionModal(null)}
         >
           <div
             className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-slide-up"

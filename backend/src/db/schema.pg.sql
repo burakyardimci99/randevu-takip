@@ -1,5 +1,9 @@
--- OTOMATİK ÜRETİLDİ (scripts/gen-pg-schema.ts). Elle düzenlemeyin.
--- Postgres konsolide şema — SQLite son şemasından çevrildi (#2).
+-- Konsolide PostgreSQL şeması — ELLE BAKIMLI baseline.
+-- Geçmişte scripts/gen-pg-schema.ts ile SQLite şemasından üretiliyordu (#2); o
+-- otomatik-üretim akışı TERK EDİLDİ ve script kaldırıldı. Bu dosya artık elle
+-- bakılır. Yeni şema değişikliği eklerken: (1) var olan prod DB'ler için aşağıdaki
+-- "ARTIMLI MİGRASYONLAR" bloğuna (veya tercihen migrations/NNNN-*.sql'e) ekleyin VE
+-- (2) yeni kurulumların eksiksiz olması için ilgili CREATE TABLE tanımını da güncelleyin.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
       id TEXT PRIMARY KEY,
@@ -26,7 +30,8 @@ CREATE TABLE IF NOT EXISTS users (
           updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
         , profile_photo TEXT, governance_role TEXT
           CHECK(governance_role IS NULL OR
-                governance_role IN ('analitik_danisman','yz_arge')));
+                governance_role IN ('analitik_danisman','yz_arge','izleyici'))
+          , profile_background_url TEXT, chat_background_url TEXT);
 
 CREATE TABLE IF NOT EXISTS admins (
           id TEXT PRIMARY KEY,
@@ -78,6 +83,7 @@ CREATE TABLE IF NOT EXISTS waitlist (
           project_description TEXT NOT NULL,
           help_needed TEXT NOT NULL,
           technologies TEXT NOT NULL,
+          weekday_mask INTEGER NOT NULL DEFAULT 127,
           position INTEGER NOT NULL,
           status TEXT NOT NULL DEFAULT 'waiting'
             CHECK(status IN ('waiting', 'promoted', 'expired', 'cancelled')),
@@ -194,7 +200,7 @@ CREATE TABLE IF NOT EXISTS "refresh_tokens" (
           token_hash TEXT NOT NULL UNIQUE,
           subject_id TEXT NOT NULL,
           subject_type TEXT NOT NULL
-            CHECK(subject_type IN ('user', 'admin', 'danisman', 'arge')),
+            CHECK(subject_type IN ('user', 'admin', 'danisman', 'arge', 'izleyici')),
           expires_at TEXT NOT NULL,
           revoked INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
@@ -226,7 +232,7 @@ CREATE TABLE IF NOT EXISTS "bookings" (
             help_needed TEXT NOT NULL,
             technologies TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending'
-              CHECK(status IN ('pending', 'approved', 'rejected', 'feedback_requested')),
+              CHECK(status IN ('pending', 'approved', 'rejected', 'feedback_requested', 'cancelled')),
             admin_feedback TEXT,
             reviewed_by TEXT,
             reviewed_at TEXT,
@@ -240,7 +246,9 @@ CREATE TABLE IF NOT EXISTS "bookings" (
             review_track TEXT NOT NULL DEFAULT 'standard'
               CHECK(review_track IN ('standard','swat')),
             stage_advance_requested_at TEXT,
-            stage_advance_note TEXT, weekday_mask INTEGER NOT NULL DEFAULT 127, showcase_image_url TEXT
+            stage_advance_note TEXT, weekday_mask INTEGER NOT NULL DEFAULT 127, showcase_image_url TEXT,
+            progress_note TEXT,
+            progress_updated_at TEXT
           );
 
 CREATE TABLE IF NOT EXISTS "license_requests" (
@@ -519,3 +527,23 @@ ALTER TABLE admins ADD COLUMN IF NOT EXISTS totp_enabled INTEGER NOT NULL DEFAUL
 ALTER TABLE admins ADD COLUMN IF NOT EXISTS totp_backup_codes TEXT;
 ALTER TABLE admins ADD COLUMN IF NOT EXISTS governance_role TEXT;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS showcase_image_url TEXT;
+ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS weekday_mask INTEGER NOT NULL DEFAULT 127;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS progress_note TEXT;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS progress_updated_at TEXT;
+-- İzleyici (salt-okunur görüntüleyici) rolü: mevcut DB'lerde CHECK'leri genişlet.
+DO $$ BEGIN
+  ALTER TABLE users DROP CONSTRAINT IF EXISTS users_governance_role_check;
+  ALTER TABLE users ADD CONSTRAINT users_governance_role_check
+    CHECK (governance_role IS NULL OR governance_role IN ('analitik_danisman','yz_arge','izleyici'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE refresh_tokens DROP CONSTRAINT IF EXISTS refresh_tokens_subject_type_check;
+  ALTER TABLE refresh_tokens ADD CONSTRAINT refresh_tokens_subject_type_check
+    CHECK (subject_type IN ('user', 'admin', 'danisman', 'arge', 'izleyici'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Onaylı rezervasyonların iptal akışı: 'cancelled' status'u (mevcut DB'lerde CHECK genişletmesi).
+DO $$ BEGIN
+  ALTER TABLE bookings DROP CONSTRAINT IF EXISTS bookings_status_check;
+  ALTER TABLE bookings ADD CONSTRAINT bookings_status_check
+    CHECK (status IN ('pending', 'approved', 'rejected', 'feedback_requested', 'cancelled'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

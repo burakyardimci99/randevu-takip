@@ -61,6 +61,7 @@ const MAX_BODY = 2000;
 function roleLabelForUser(governanceRole: string | null): string {
   if (governanceRole === 'analitik_danisman') return 'Analitik Danışman';
   if (governanceRole === 'yz_arge') return 'YZ / Ar-Ge';
+  if (governanceRole === 'izleyici') return 'İzleyici';
   return 'Kullanıcı';
 }
 
@@ -91,7 +92,8 @@ export async function resolveActor(id: string, kind: ChatKind): Promise<ChatActo
  */
 export async function listContacts(me: ChatActor): Promise<ChatContact[]> {
 
-  const users = await dbAll(`SELECT id, full_name, governance_role, profile_photo FROM users WHERE status != 3`, []) as Array<{ id: string; full_name: string; governance_role: string | null; profile_photo: string | null }>;
+  // Fotoğraf base64 yerine URL — kişi listesi yanıtı MB'lara şişmesin.
+  const users = await dbAll(`SELECT id, full_name, governance_role, (profile_photo IS NOT NULL) AS has_photo FROM users WHERE status != 3`, []) as Array<{ id: string; full_name: string; governance_role: string | null; has_photo: boolean }>;
   const admins = await dbAll(`SELECT id, full_name FROM admins WHERE status != 3`, []) as Array<{ id: string; full_name: string }>;
 
   const contacts: ChatContact[] = [
@@ -100,7 +102,7 @@ export async function listContacts(me: ChatActor): Promise<ChatContact[]> {
       kind: 'user' as ChatKind,
       fullName: u.full_name,
       roleLabel: roleLabelForUser(u.governance_role),
-      profilePhoto: u.profile_photo,
+      profilePhoto: u.has_photo ? `/api/public/users/${u.id}/photo` : null,
       lastMessage: null as string | null,
       lastMessageAt: null as string | null,
       unread: 0,
@@ -117,24 +119,37 @@ export async function listContacts(me: ChatActor): Promise<ChatContact[]> {
     })),
   ].filter((c) => !(c.id === me.id && c.kind === me.kind));
 
+  // Önceden kişi başına 2 ayrı sorgu (2N+2 roundtrip) çalışıyordu; 200 kişide
+  // istek başına 400+ sorgu. İki toplu sorguya indirildi:
+  //  1) Karşı taraf bazında SON mesaj (DISTINCT ON)
+  //  2) Karşı taraf bazında okunmamış sayısı (GROUP BY)
+  const lastRows = await dbAll(
+    `SELECT DISTINCT ON (peer_id) peer_id, body, created_at FROM (
+       SELECT CASE WHEN sender_id = ? THEN recipient_id ELSE sender_id END AS peer_id,
+              body, created_at
+       FROM chat_messages
+       WHERE sender_id = ? OR recipient_id = ?
+     ) m
+     ORDER BY peer_id, created_at DESC`,
+    [me.id, me.id, me.id]
+  ) as Array<{ peer_id: string; body: string; created_at: string }>;
+  const lastByPeer = new Map(lastRows.map((r) => [r.peer_id, r]));
+
+  const unreadRows = await dbAll(
+    `SELECT sender_id, COUNT(*) AS c FROM chat_messages
+     WHERE recipient_id = ? AND read = 0
+     GROUP BY sender_id`,
+    [me.id]
+  ) as Array<{ sender_id: string; c: number }>;
+  const unreadByPeer = new Map(unreadRows.map((r) => [r.sender_id, Number(r.c)]));
+
   for (const c of contacts) {
-    const last = (await dbOne(
-      `SELECT body, created_at FROM chat_messages
-       WHERE (sender_id = ? AND recipient_id = ?)
-          OR (sender_id = ? AND recipient_id = ?)
-       ORDER BY created_at DESC LIMIT 1`,
-      [me.id, c.id, c.id, me.id]
-    )) as { body: string; created_at: string } | undefined;
+    const last = lastByPeer.get(c.id);
     if (last) {
       c.lastMessage = last.body;
       c.lastMessageAt = last.created_at;
     }
-    const unread = (await dbOne(
-      `SELECT COUNT(*) AS c FROM chat_messages
-       WHERE sender_id = ? AND recipient_id = ? AND read = 0`,
-      [c.id, me.id]
-    )) as { c: number };
-    c.unread = unread.c;
+    c.unread = unreadByPeer.get(c.id) ?? 0;
   }
 
   // Son mesajı olanlar üstte (en yeni), sonra alfabetik.

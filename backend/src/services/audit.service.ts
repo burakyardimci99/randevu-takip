@@ -36,6 +36,7 @@ export type AuditEventType =
   | 'admin.password_reset'
   | 'admin.password_changed'
   | 'user.update'
+  | 'user.data_export'
   | 'user.delete'
   | 'user.restore'
   | 'user.photo_uploaded'
@@ -54,7 +55,7 @@ export type AuditEventType =
   | 'rate_limit.exceeded'
   | 'csrf.failure';
 
-export type SubjectType = 'user' | 'admin' | 'danisman' | 'arge' | 'anonymous';
+export type SubjectType = 'user' | 'admin' | 'danisman' | 'arge' | 'izleyici' | 'anonymous';
 
 export interface AuditEvent {
   eventType: AuditEventType;
@@ -104,7 +105,17 @@ function isThrottledAudit(event: AuditEvent): boolean {
   return false;
 }
 
-export async function recordAudit(event: AuditEvent): Promise<void> {
+/**
+ * Audit kaydı — BİLİNÇLİ fire-and-forget: istek yanıtını bloklamaz, hatasını
+ * içeride yutar (yalnız loglar). Bu yüzden `void` döner; çağıranların await
+ * etmesi gerekmez (no-floating-promises bu sözleşmeyi görür).
+ * Yazımın tamamlanmasını beklemek gereken testler için recordAuditAsync kullanın.
+ */
+export function recordAudit(event: AuditEvent): void {
+  void recordAuditAsync(event);
+}
+
+export async function recordAuditAsync(event: AuditEvent): Promise<void> {
   if (isThrottledAudit(event)) return;
   try {
     await dbRun(`INSERT INTO audit_logs (id, event_type, subject_id, subject_type, ip_address, user_agent, success, details)

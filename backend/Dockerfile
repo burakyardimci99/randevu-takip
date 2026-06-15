@@ -7,6 +7,9 @@ FROM node:22-bookworm-slim
 
 WORKDIR /app
 
+# Saat dilimi: randevu/cron tarih hesapları TR gününe göre çalışır.
+ENV TZ=Europe/Istanbul
+
 # Native bağımlılıkların kaynaktan derlenmesi gerekirse diye build araçları.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \

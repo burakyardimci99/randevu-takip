@@ -8,6 +8,7 @@ import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
 import { RoomDetailModal } from '../components/RoomDetailModal';
+import { openDatePicker, ymdLocal } from '../lib/utils';
 import type { CreateBookingPayload, JoinWaitlistPayload, Room } from '../types';
 
 const CATEGORY_LABEL: Record<Room['roomType'], string> = {
@@ -96,7 +97,7 @@ export default function UserRooms() {
     setSubmitting(true);
     try {
       const res = await api.createBooking(payload);
-      toast.push('success', 'Randevu talebiniz admin onayına gönderildi.');
+      toast.push('success', 'Talebiniz başarıyla alındı ve onay sürecine iletildi. Sonuçlandığında bilgilendirileceksiniz.');
       // Otomatik duplicate-tespiti (#4): çok benzer mevcut proje varsa bilgilendir.
       if (res.duplicateWarning) {
         const d = res.duplicateWarning;
@@ -194,8 +195,9 @@ export default function UserRooms() {
             id="rooms-date"
             type="date"
             value={filterDate}
-            min={new Date().toISOString().slice(0, 10)}
+            min={ymdLocal()}
             onChange={(e) => setFilterDate(e.target.value)}
+            onClick={openDatePicker}
             className="px-3 py-1.5 rounded-lg border border-kt-gray-200 text-sm text-kt-green-800 focus:border-kt-violet-400 outline-none"
           />
           {filterDate && (

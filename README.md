@@ -86,7 +86,7 @@ Vite, `/api` isteklerini backend'e proxy eder.
 Üretim için ayrı, sertleştirilmiş stack (multi-stage image, non-root kullanıcı, dışa kapalı DB/backend portları, env'den zorunlu secret):
 
 ```bash
-cp .env.prod.example .env.prod    # değerleri doldur: güçlü parolalar, CSRF_SECRET, POLLINATIONS_TOKEN
+cp .env.prod.example .env.prod    # değerleri doldur: güçlü parolalar, CSRF_SECRET, ENCRYPTION_KEY, HUGGINGFACE_API_KEY
 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 # nginx :80 → statik frontend + /api reverse proxy → backend
 ```
@@ -120,33 +120,47 @@ JWT anahtarları image'e gömülmez; `backend/keys/*.pem` salt-okunur volume ile
 
 ## API Endpoint'leri
 
-### User
-- `POST /api/user/auth/login`
-- `POST /api/user/auth/refresh`
-- `POST /api/user/auth/logout`
-- `GET  /api/user/auth/me`
-- `GET  /api/user/rooms`
-- `GET  /api/user/bookings`
-- `POST /api/user/bookings`
-- `GET  /api/user/bookings/:id`
+Aşağıdaki liste başlıca uçları gösterir; sistem rol-bazlı router'lara bölünmüştür
+(`user`, `admin`, `governance`, `public`). Tam liste için `backend/src/routes/`.
 
-### Admin
-- `POST /api/admin/auth/login`
-- `POST /api/admin/auth/refresh`
-- `POST /api/admin/auth/logout`
-- `GET  /api/admin/auth/me`
-- `GET  /api/admin/bookings?status=...`
-- `GET  /api/admin/bookings/:id`
-- `POST /api/admin/bookings/:id/review` (action: approve | reject | request_feedback)
-- `GET  /api/admin/stats`
+### Auth (User / Admin ayrı)
+- `POST /api/{user|admin}/auth/login` · `…/refresh` · `…/logout` · `GET …/auth/me`
+- `POST /api/admin/auth/mfa/verify` — admin TOTP MFA challenge (kayıtlıysa zorunlu)
+
+### User (`/api/user/*`)
+- `GET|POST /bookings` · `GET|PUT /bookings/:id` · `POST /bookings/:id/cancel` (onaylı iptal) · `PUT /bookings/:id/progress` (ilerleme notu)
+- `GET /rooms` · `GET /rooms/appointment-heatmap` · `GET|POST /appointments` · `GET /dashboard`
+- `GET|POST /waitlist` · `POST /licenses/requests` · `POST /hardware/requests` · `POST /support/requests`
+- `POST /visuals` (görsel üretimi) · `GET /leaderboard` · showcase beğeni/yorum
+- `GET /export` · `DELETE /purge` (KVKK veri ihracı / hesap silme)
+
+### Admin (`/api/admin/*`) — GET'ler `izleyici`/danışman/arge için salt-okunur
+- `GET /bookings?status=…` · `GET /bookings/:id` · `POST /bookings/:id/review`
+- `GET /users` · `PUT|DELETE /users/:id` · `PATCH /users/:id/governance-role`
+- `GET /stats` · `GET /analytics` · `GET /audit` (+ CSV) · `GET /backups`
+- license/hardware/support talep incelemeleri · MFA enroll/disable
+
+### Governance (`/api/governance/*`) — yaşam döngüsü
+- yaşam döngüsü ilerlet/geri al, kalite kapıları, Stage/Production insan onayları, mühendis ataması, governance dashboard
+
+### Public (`/api/public/*`) — auth gerektirmez
+- `GET /users/:id` (profil) · `GET /users/:id/photo` · `GET /rooms/:id/kiosk` · `GET /visuals/:id/image`
 
 ## Veritabanı Şeması
 
-- `users`, `admins` — Auth (ayrı tablolar)
-- `rooms` — 25 İstanbul odası (Kadıköy-Moda, Beşiktaş-Bebek, …)
-- `bookings` — Kiralama istekleri (user_id, room_id, period, dates, project, status)
-- `refresh_tokens` — Rotation için SHA-256 hash ile saklı
-- `audit_logs` — Auth, authz, rate-limit, booking, feedback olayları
+Auth & çekirdek:
+- `users`, `admins` — Auth (ayrı tablolar; admin'de TOTP MFA alanları — secret AES-256-GCM şifreli)
+- `rooms` — 25 İstanbul odası · `bookings` — kiralama istekleri (status: pending/approved/rejected/feedback_requested/**cancelled**, lifecycle_stage, progress_note)
+- `appointments` — saatli randevular (scheduled/cancelled/completed)
+- `waitlist` — bekleme listesi · `refresh_tokens` — rotation için SHA-256 hash · `audit_logs` — denetim olayları
+
+Yönetişim & talepler:
+- `license_requests` (+ `license_request_items`) · `hardware_requests` · `support_requests`
+- `quality_gates` · `human_approvals` · `project_stage_events` — yaşam döngüsü zaman çizelgesi
+
+Etkileşim & sistem:
+- `showcase_likes`, `showcase_comments` · `notifications` · `project_embeddings` (benzerlik) · `visuals` (üretilen görseller)
+- `password_reset_tokens` · `schema_migrations` — versiyonlu migration kaydı (bkz. `backend/src/db/migrations/`)
 
 ## Lisans
 

@@ -22,7 +22,24 @@ interface MovableModalShellProps {
   onClose: () => void;
   /** Tailwind genişlik sınıfı, ör. 'max-w-2xl'. */
   maxWidthClass?: string;
+  /**
+   * Erişilebilirlik: panel içindeki başlık elemanının id'si. Verilirse
+   * dialog `aria-labelledby` ile o başlığı kullanır; verilmezse `aria-label`
+   * devreye girer.
+   */
+  labelledById?: string;
+  /** aria-labelledby yoksa kullanılacak erişilebilir başlık. */
+  ariaLabel?: string;
   children: ReactNode;
+}
+
+/** Panel içindeki odaklanabilir (görünür, disabled olmayan) öğeleri döndürür. */
+function getFocusable(container: HTMLElement): HTMLElement[] {
+  const sel =
+    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  return Array.from(container.querySelectorAll<HTMLElement>(sel)).filter(
+    (el) => el.offsetParent !== null || el === document.activeElement
+  );
 }
 
 const MIN_SCALE = 0.6;
@@ -35,11 +52,15 @@ export function MovableModalShell({
   open,
   onClose,
   maxWidthClass = 'max-w-2xl',
+  labelledById,
+  ariaLabel = 'İletişim kutusu',
   children,
 }: MovableModalShellProps) {
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const panelRef = useRef<HTMLDivElement>(null);
+  // Modal açılmadan önce odakta olan tetikleyici öğe — kapanışta odak geri döner.
+  const triggerRef = useRef<HTMLElement | null>(null);
   const dragState = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(
     null
   );
@@ -52,11 +73,56 @@ export function MovableModalShell({
     }
   }, [open]);
 
-  // Escape ile kapat.
+  // Açılışta odağı panele taşı; kapanışta tetikleyiciye geri döndür.
+  useEffect(() => {
+    if (!open) return;
+    triggerRef.current = (document.activeElement as HTMLElement) ?? null;
+    // İlk odaklanabilir öğeye, yoksa panelin kendisine (tabIndex=-1) odaklan.
+    const panel = panelRef.current;
+    if (panel) {
+      const focusables = getFocusable(panel);
+      (focusables[0] ?? panel).focus();
+    }
+    return () => {
+      // Kapanışta odağı, hâlâ DOM'da ise tetikleyiciye geri ver.
+      const t = triggerRef.current;
+      if (t && document.contains(t)) t.focus();
+    };
+  }, [open]);
+
+  // Escape ile kapat + Tab/Shift+Tab odak tuzağı (focus-trap).
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusables = getFocusable(panel);
+      if (focusables.length === 0) {
+        // Odaklanabilir öğe yoksa odak panel içinde kalsın.
+        e.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      // Panel dışına / sınırlardan döngüle.
+      if (e.shiftKey) {
+        if (active === first || active === panel || !panel.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (active === last || active === panel || !panel.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -114,12 +180,15 @@ export function MovableModalShell({
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
-      onClick={onClose}
     >
       <div
         ref={panelRef}
         data-testid="movable-modal-panel"
-        className={`bg-white rounded-2xl shadow-kt-card ${maxWidthClass} w-full max-h-[88vh] overflow-hidden flex flex-col animate-slide-up`}
+        role="dialog"
+        aria-modal="true"
+        {...(labelledById ? { 'aria-labelledby': labelledById } : { 'aria-label': ariaLabel })}
+        tabIndex={-1}
+        className={`bg-white rounded-2xl shadow-kt-card ${maxWidthClass} w-full max-h-[88vh] overflow-hidden flex flex-col animate-slide-up focus:outline-none`}
         style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})` }}
         onClick={(e) => e.stopPropagation()}
       >

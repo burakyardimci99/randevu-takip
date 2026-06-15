@@ -17,6 +17,12 @@
 # Dev stack docker-compose.yml → backend/Dockerfile kullanmaya devam eder; bu
 # dosya o akışı ETKİLEMEZ (compose explicit `context: ./backend` kullanır).
 # Build context = repo kökü (shared/ tip kaynağı için).
+#
+# TARANAN = DAĞITILAN: backend/Dockerfile.prod (docker-compose.prod.yml'in build
+# ettiği DAĞITILAN prod image'ı) AYNI sertleştirilmiş node:22-alpine recipe'ini
+# kullanır. İki dosya bilinçli olarak hizalıdır; tek fark, deploy edilen sürüm
+# (Dockerfile.prod) compose dışı ortamlar için TZ + HEALTHCHECK readiness probe'u
+# da içerir. Bu dosyada değişiklik yaparsan Dockerfile.prod'u da hizalı tut.
 # ============================================================================
 
 # ---- Stage 1: builder — TS derleme + üretim bağımlılıkları (musl native build) ----

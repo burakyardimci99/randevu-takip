@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 type ToastKind = 'success' | 'error' | 'info';
@@ -29,13 +29,27 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }, 4500);
   }, []);
 
+  // Sabit kimlikli context value: toast eklenip silindikçe consumer'ların
+  // (useCallback([toast]) + useEffect zincirleri) yeniden tetiklenmesini önler.
+  const value = useMemo(() => ({ push }), [push]);
+
   return (
-    <ToastContext.Provider value={{ push }}>
+    <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed top-6 right-6 z-[100] flex flex-col gap-2 max-w-md">
+      {/* Ekran okuyucu duyurusu: bilgi/başarı kibarca (polite), hata anında
+          (assertive) bildirilsin. Konteyner aria-live taşır; her toast kendi
+          role'ünü (status / alert) belirtir. */}
+      <div
+        className="fixed top-6 right-6 z-[100] flex flex-col gap-2 max-w-md"
+        role="region"
+        aria-label="Bildirimler"
+      >
         {items.map((t) => (
           <div
             key={t.id}
+            role={t.kind === 'error' ? 'alert' : 'status'}
+            aria-live={t.kind === 'error' ? 'assertive' : 'polite'}
+            aria-atomic="true"
             className={`px-5 py-3 rounded-xl shadow-kt-card animate-slide-up font-medium border ${
               t.kind === 'success'
                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200'

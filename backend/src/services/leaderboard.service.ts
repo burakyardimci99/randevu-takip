@@ -12,8 +12,14 @@
  */
 import { dbAll } from '../db/schema';
 
-/** Gün farkı (end-start+1) — pg tarih çıkarma. */
-const DAY_DIFF = '(b.end_date::date - b.start_date::date + 1)';
+/**
+ * Kullanım günü — takvim gün farkı, haftanın seçili gün oranıyla ölçeklenir.
+ * Yalnız Pzt (mask=1) kullanan 3 aylık booking ~90 değil ~13 gün sayılmalı;
+ * aksi halde leaderboard sistematik şişiyordu. bit_count yoksa (pg<14) yedek:
+ * length(replace((mask)::bit(7)::text,'0','')).
+ */
+const DAY_DIFF =
+  "ROUND((b.end_date::date - b.start_date::date + 1) * length(replace((b.weekday_mask)::bit(7)::text, '0', '')) / 7.0)";
 // Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
 import type { Leaderboard, LeaderboardUser, LeaderboardProject } from '@klab/shared';
 

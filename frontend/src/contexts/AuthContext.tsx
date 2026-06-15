@@ -15,6 +15,7 @@ interface AuthState {
   admin: AuthUser | null;
   danisman: AuthUser | null;
   arge: AuthUser | null;
+  izleyici: AuthUser | null;
   loading: boolean;
 }
 
@@ -22,6 +23,17 @@ interface AuthContextValue extends AuthState {
   login: (
     email: string,
     password: string
+  ) => Promise<{
+    kind: SubjectKind;
+    subject: AuthUser;
+    /** true ise oturum HENÜZ açılmadı — completeMfaLogin ile TOTP adımı gerekir. */
+    mfaRequired?: boolean;
+    mfaPendingToken?: string;
+  }>;
+  /** MFA ikinci adımı: TOTP/backup kodu doğrulanırsa tam oturumu açar. */
+  completeMfaLogin: (
+    pendingToken: string,
+    code: string
   ) => Promise<{ kind: SubjectKind; subject: AuthUser }>;
   register: (payload: {
     email: string;
@@ -38,7 +50,7 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const ALL_KINDS: SubjectKind[] = ['user', 'admin', 'danisman', 'arge'];
+const ALL_KINDS: SubjectKind[] = ['user', 'admin', 'danisman', 'arge', 'izleyici'];
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
@@ -46,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     admin: null,
     danisman: null,
     arge: null,
+    izleyici: null,
     loading: true,
   });
 
@@ -103,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         admin: null,
         danisman: null,
         arge: null,
+        izleyici: null,
         loading: false,
       };
       fresh[kind] = subject;
@@ -119,13 +133,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (email: string, password: string) => {
       const res = await api.login(email, password);
+      // MFA'lı admin: backend tam token vermedi — oturum kaydetme, TOTP adımına geç.
+      if (res.mfaRequired && res.mfaPendingToken) {
+        return {
+          kind: res.type,
+          subject: res.subject,
+          mfaRequired: true,
+          mfaPendingToken: res.mfaPendingToken,
+        };
+      }
       sessionStore.save(
         res.type,
-        { accessToken: res.accessToken, refreshToken: res.refreshToken, expiresIn: res.expiresIn },
+        { accessToken: res.accessToken!, expiresIn: res.expiresIn },
         res.subject
       );
       applySession(res.type, res.subject);
       return { kind: res.type, subject: res.subject };
+    },
+    [applySession]
+  );
+
+  const completeMfaLogin = useCallback(
+    async (pendingToken: string, code: string) => {
+      const res = await api.mfaLoginVerify(pendingToken, code);
+      sessionStore.save(
+        res.type,
+        { accessToken: res.accessToken, expiresIn: res.expiresIn },
+        res.subject
+      );
+      applySession(res.type, res.subject);
+      return { kind: res.type as SubjectKind, subject: res.subject };
     },
     [applySession]
   );
@@ -140,7 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api.register(payload);
       sessionStore.save(
         res.type,
-        { accessToken: res.accessToken, refreshToken: res.refreshToken, expiresIn: res.expiresIn },
+        { accessToken: res.accessToken, expiresIn: res.expiresIn },
         res.subject
       );
       applySession(res.type, res.subject);
@@ -154,7 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api.loginUser(email, password);
       sessionStore.save(
         'user',
-        { accessToken: res.accessToken, refreshToken: res.refreshToken, expiresIn: res.expiresIn },
+        { accessToken: res.accessToken, expiresIn: res.expiresIn },
         res.user
       );
       applySession('user', res.user);
@@ -167,7 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api.loginAdmin(email, password);
       sessionStore.save(
         'admin',
-        { accessToken: res.accessToken, refreshToken: res.refreshToken, expiresIn: res.expiresIn },
+        { accessToken: res.accessToken, expiresIn: res.expiresIn },
         res.admin
       );
       applySession('admin', res.admin);
@@ -191,8 +228,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ ...state, login, register, loginUser, loginAdmin, logout }),
-    [state, login, register, loginUser, loginAdmin, logout]
+    () => ({ ...state, login, completeMfaLogin, register, loginUser, loginAdmin, logout }),
+    [state, login, completeMfaLogin, register, loginUser, loginAdmin, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

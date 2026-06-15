@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useViewerKind } from '../hooks/useViewerKind';
 import { useToast } from './Toast';
 import { api } from '../services/api';
+import { ConfirmDialog } from './ConfirmDialog';
 import type { ShowcaseComment, ShowcaseItem, Visual } from '../types';
 
 function fmtRange(start: string, end: string): string {
@@ -56,6 +57,7 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
   const [liked, setLiked] = useState(false);
   const [likeStatusLoaded, setLikeStatusLoaded] = useState(false);
   const [showComments, setShowComments] = useState(false);
+  const [confirmDeleteCommentId, setConfirmDeleteCommentId] = useState<string | null>(null);
   const [commentsList, setCommentsList] = useState<ShowcaseComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentBody, setCommentBody] = useState('');
@@ -429,7 +431,7 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
                       </span>
                       {user?.id === c.userId && (
                         <button
-                          onClick={() => handleDeleteComment(c.id)}
+                          onClick={() => setConfirmDeleteCommentId(c.id)}
                           className="opacity-0 group-hover:opacity-100 ml-auto text-[10px] text-rose-500 hover:text-rose-700"
                           title="Yorumu sil"
                         >
@@ -455,7 +457,6 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
     {showDetail && createPortal(
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-        onClick={() => setShowDetail(false)}
       >
         <div
           className="bg-white rounded-2xl shadow-kt-card max-w-2xl w-full max-h-[90vh] overflow-y-auto"
@@ -556,7 +557,6 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
     {showPicker && createPortal(
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-        onClick={() => setShowPicker(false)}
       >
         <div
           className="bg-white rounded-2xl shadow-kt-card max-w-lg w-full max-h-[85vh] overflow-y-auto p-6"
@@ -626,6 +626,17 @@ export function ShowcaseCard({ item, authorId, likes, comments }: Props) {
       </div>,
       document.body
     )}
+      <ConfirmDialog
+        open={!!confirmDeleteCommentId}
+        title="Yorum silinsin mi?"
+        message="Yorumunuz kalıcı olarak silinecek. Bu işlem geri alınamaz."
+        confirmLabel="Evet, sil"
+        onConfirm={() => {
+          if (confirmDeleteCommentId) void handleDeleteComment(confirmDeleteCommentId);
+          setConfirmDeleteCommentId(null);
+        }}
+        onCancel={() => setConfirmDeleteCommentId(null)}
+      />
     </>
   );
 }

@@ -245,7 +245,6 @@ export function RoomWeekdayHeatmap({ kind = 'user' }: { kind?: SubjectKind }) {
       {selected && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/60 backdrop-blur-sm animate-fade-in"
-          onClick={() => setSelected(null)}
         >
           <div
             className="bg-white rounded-2xl shadow-kt-card max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col animate-slide-up"

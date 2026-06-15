@@ -9,8 +9,10 @@ import { login } from '../services/auth.service';
 import {
   revokeRefreshToken,
   rotateRefreshToken,
+  signAccessToken,
   verifyAccessToken,
 } from '../services/token.service';
+import { MFA_PENDING_TTL } from './auth.routes';
 import { recordAudit } from '../services/audit.service';
 import { authRateLimit } from '../middleware/security.middleware';
 import { requireAdmin } from '../middleware/auth.middleware';
@@ -35,6 +37,39 @@ router.post(
       const input = loginSchema.parse(req.body);
       const result = await login('admin', input.email, input.password);
 
+      // MFA aktifse tam token VERİLMEZ — kısa ömürlü pending token döner;
+      // tam oturum /api/auth/mfa/verify başarısında açılır (sunucu tarafı zorlama).
+      const mfaRequired = await isMfaRequired(result.subject.id);
+      if (mfaRequired) {
+        await revokeRefreshToken(result.tokens.refreshToken);
+        const { token: mfaPendingToken, ttl } = signAccessToken(
+          'admin',
+          {
+            sub: result.subject.id,
+            role: result.subject.role,
+            email: result.subject.email,
+            mfa: 'pending',
+          },
+          { ttlOverride: MFA_PENDING_TTL }
+        );
+        recordAudit({
+          eventType: 'auth.login.success',
+          subjectId: result.subject.id,
+          subjectType: 'admin',
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent') ?? null,
+          success: true,
+          details: { email: maskEmail(result.subject.email), mfaPending: true },
+        });
+        res.json({
+          mfaRequired: true,
+          mfaPendingToken,
+          expiresIn: ttl,
+          admin: result.subject,
+        });
+        return;
+      }
+
       recordAudit({
         eventType: 'auth.login.success',
         subjectId: result.subject.id,
@@ -47,16 +82,12 @@ router.post(
 
       setRefreshCookie(res, 'admin', result.tokens.refreshToken);
 
-      // MFA aktifse, frontend'i "verify gerekiyor" durumuna sok.
-      // Demo akış: MFA opt-in, login başarılı + mfaRequired=true sinyali.
-      const mfaRequired = await isMfaRequired(result.subject.id);
-
+      // Refresh token yalnız HttpOnly cookie'de — gövdede dönmez.
       res.json({
         accessToken: result.tokens.accessToken,
-        refreshToken: result.tokens.refreshToken,
         expiresIn: result.tokens.expiresIn,
         admin: result.subject,
-        mfaRequired,
+        mfaRequired: false,
       });
     } catch (err) {
       if (err instanceof HttpError) {
@@ -133,7 +164,6 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 
     res.json({
       accessToken: rotated.accessToken,
-      refreshToken: rotated.refreshToken,
       expiresIn: rotated.expiresIn,
     });
   } catch (err) {
@@ -144,9 +174,9 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 router.post('/logout', csrfProtection, requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const cookieToken = getRefreshCookie(req, 'admin');
-    if (cookieToken) revokeRefreshToken(cookieToken);
+    if (cookieToken) await revokeRefreshToken(cookieToken);
     const input = refreshSchema.safeParse(req.body);
-    if (input.success) revokeRefreshToken(input.data.refreshToken);
+    if (input.success) await revokeRefreshToken(input.data.refreshToken);
     clearRefreshCookie(res, 'admin');
     recordAudit({
       eventType: 'auth.logout',

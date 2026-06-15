@@ -27,6 +27,7 @@ import {
 } from '../services/visual-store.service';
 import { getRoomKiosk, listKioskRooms } from '../services/kiosk.service';
 import { HttpError } from '../middleware/error.middleware';
+import { readId } from '../utils/route-helpers';
 
 const router = Router();
 
@@ -65,11 +66,7 @@ router.get('/showcase/technologies', async (_req: Request, res: Response, next: 
 
 router.get('/users/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = String(req.params.id ?? '');
-    if (id.length < 8 || id.length > 40) {
-      next(new (require('../middleware/error.middleware').HttpError)(400, 'Geçersiz id.', 'INVALID_ID'));
-      return;
-    }
+    const id = readId(req, 'id', 'id');
     res.json({ profile: await getPublicProfile(id) });
   } catch (err) {
     next(err);
@@ -122,6 +119,38 @@ router.get('/visuals/:id/image', async (req: Request, res: Response, next: NextF
   }
 });
 
+/**
+ * Profil fotoğrafı — binary servis.
+ *
+ * Fotoğraflar DB'de base64 data URL olarak durur; önceden tüm liste
+ * yanıtlarına gömülüyordu (payload şişmesi: 60 kartlık public feed ~16MB).
+ * Artık listeler bu URL'i döner; tarayıcı cache'ler (1 saat).
+ * Public maruziyet yeni değil: aynı fotoğraflar public showcase feed'de
+ * zaten auth'suz servis ediliyordu. id nanoid — enumere edilemez.
+ */
+router.get('/users/:id/photo', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = readId(req, 'id', 'id');
+    const row = await dbOne(
+      'SELECT profile_photo FROM users WHERE id = ? AND status != 3',
+      [id]
+    ) as { profile_photo: string | null } | undefined;
+
+    const dataUrl = row?.profile_photo;
+    const JPEG_PREFIX = 'data:image/jpeg;base64,';
+    if (!dataUrl || !dataUrl.startsWith(JPEG_PREFIX)) {
+      res.status(404).end();
+      return;
+    }
+    const buf = Buffer.from(dataUrl.slice(JPEG_PREFIX.length), 'base64');
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(buf);
+  } catch (err) {
+    next(err);
+  }
+});
+
 /* ============ KIOSK — oda ekranı (#5b) ============ */
 
 /** Kiosk seçici için aktif odaların minimal listesi. */
@@ -139,10 +168,7 @@ router.get('/rooms', async (_req: Request, res: Response, next: NextFunction) =>
  */
 router.get('/rooms/:id/kiosk', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = String(req.params.id ?? '');
-    if (id.length < 8 || id.length > 40) {
-      throw new HttpError(400, 'Geçersiz oda id.', 'INVALID_ID');
-    }
+    const id = readId(req, 'id', 'oda id');
     const data = await getRoomKiosk(id);
     if (!data) {
       throw new HttpError(404, 'Oda bulunamadı.', 'ROOM_NOT_FOUND');

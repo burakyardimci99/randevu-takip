@@ -3,6 +3,15 @@
 // Buradan re-export edilir ki mevcut `from '../types'` importları değişmesin.
 // ============================================================
 import type {
+  SubjectKind,
+  UserGovernanceRole,
+  BookingStatus,
+  LifecycleStage,
+  Booking,
+  WaitlistStatus,
+  WaitlistEntry,
+  AppointmentStatus,
+  Appointment,
   VisualStatus,
   VisualVariant,
   ShowcaseItem,
@@ -12,14 +21,20 @@ import type {
   Leaderboard,
   LeaderboardUser,
   LeaderboardProject,
-  HeatmapCell,
-  HeatmapRoom,
-  RoomHeatmap,
   KioskRoom,
   KioskData,
 } from '@klab/shared';
 
 export type {
+  SubjectKind,
+  UserGovernanceRole,
+  BookingStatus,
+  LifecycleStage,
+  Booking,
+  WaitlistStatus,
+  WaitlistEntry,
+  AppointmentStatus,
+  Appointment,
   VisualStatus,
   VisualVariant,
   ShowcaseItem,
@@ -29,17 +44,9 @@ export type {
   Leaderboard,
   LeaderboardUser,
   LeaderboardProject,
-  HeatmapCell,
-  HeatmapRoom,
-  RoomHeatmap,
   KioskRoom,
   KioskData,
 };
-
-export type SubjectKind = 'user' | 'admin' | 'danisman' | 'arge';
-
-/** Kullanıcı için seçimli yönetişim rolü. NULL = sıradan kullanıcı. */
-export type UserGovernanceRole = 'analitik_danisman' | 'yz_arge';
 
 export interface AuthUser {
   id: string;
@@ -96,7 +103,8 @@ export interface AdminUserUpdatePayload extends ProfileUpdatePayload {
 
 export interface AuthTokens {
   accessToken: string;
-  refreshToken: string;
+  /** Cookie-only moda geçişte kaldırılıyor — refresh artık HttpOnly cookie'de yaşar. */
+  refreshToken?: string;
   expiresIn: number;
 }
 
@@ -140,68 +148,7 @@ export interface RoomWithOccupancy extends Room {
   pendingCount: number;
 }
 
-export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'feedback_requested';
 
-export interface Booking {
-  id: string;
-  userId: string;
-  userEmail?: string;
-  userFullName?: string;
-  /** Talep sahibinin profil fotoğrafı (base64 data URL) — admin talep detayında avatar. */
-  userPhoto?: string | null;
-  roomId: string;
-  roomCode: string;
-  roomName: string;
-  periodMonths: number;
-  /** Periyodik randevu — haftanın seçili günleri (1=Pzt..7=Paz). */
-  weekdays: number[];
-  startDate: string;
-  endDate: string;
-  projectName: string;
-  projectDescription: string;
-  helpNeeded: string;
-  technologies: string[];
-  status: BookingStatus;
-  adminFeedback: string | null;
-  reviewedBy: string | null;
-  reviewedAt: string | null;
-  /** Yaşam döngüsü aşaması — application → development → stage → production → live. */
-  lifecycleStage: LifecycleStage;
-  /** Mevcut aşamaya girilme zamanı. */
-  stageEnteredAt: string;
-  /** Review akışı: standard ya da swat (fast-track). */
-  reviewTrack: 'standard' | 'swat';
-  /** Kullanıcı bir sonraki aşamaya geçmek için talep oluşturduysa timestamp. */
-  stageAdvanceRequestedAt: string | null;
-  /** Kullanıcının talep notu (opsiyonel). */
-  stageAdvanceNote: string | null;
-  /** Kullanıcının projeye (envanter kartına) atadığı görsel — admin de görür. */
-  showcaseImageUrl: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** Günlük randevu (appointment) — onaylı booking üzerine eklenir. */
-export type AppointmentStatus = 'scheduled' | 'cancelled' | 'completed';
-
-export interface Appointment {
-  id: string;
-  bookingId: string;
-  userId: string;
-  userFullName?: string;
-  roomId: string;
-  roomCode: string;
-  roomName: string;
-  roomEquipment: string;
-  /** ISO 8601 datetime. */
-  startAt: string;
-  endAt: string;
-  title: string;
-  notes: string;
-  status: AppointmentStatus;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface AdminStats {
   total: number;
@@ -214,8 +161,8 @@ export interface AdminStats {
 export interface CreateBookingPayload {
   roomId: string;
   periodMonths: 1 | 2 | 3;
-  /** Haftanın seçili günleri (1=Pzt..7=Paz). En az 1. */
-  weekdays: number[];
+  /** Haftanın seçili günleri (1=Pzt..7=Paz). Verilmezse tüm hafta (ara gün seçimi flag'i kapalı). */
+  weekdays?: number[];
   startDate: string;
   projectName: string;
   projectDescription: string;
@@ -238,29 +185,6 @@ export interface ApiError {
  * WAITLIST
  * ============================================================ */
 
-export type WaitlistStatus = 'waiting' | 'promoted' | 'expired' | 'cancelled';
-
-export interface WaitlistEntry {
-  id: string;
-  userId: string;
-  userFullName?: string;
-  userEmail?: string;
-  roomId: string;
-  roomCode: string;
-  roomName: string;
-  periodMonths: number;
-  desiredStartDate: string;
-  projectName: string;
-  projectDescription: string;
-  helpNeeded: string;
-  technologies: string[];
-  position: number;
-  status: WaitlistStatus;
-  promotedBookingId: string | null;
-  notifiedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface JoinWaitlistPayload {
   roomId: string;
@@ -270,6 +194,8 @@ export interface JoinWaitlistPayload {
   projectDescription: string;
   helpNeeded: string;
   technologies: string[];
+  /** Haftanın seçili günleri (1=Pzt..7=Paz). Verilmezse tüm hafta. */
+  weekdays?: number[];
 }
 
 /* ============================================================
@@ -544,12 +470,7 @@ export type ReviewTrack = 'standard' | 'swat';
  * YÖNETİŞİM — yaşam döngüsü (AI Lab Vibe Coding Kılavuzu v2.1)
  * ============================================================ */
 
-export type LifecycleStage =
-  | 'application'
-  | 'development'
-  | 'stage'
-  | 'production'
-  | 'live';
+
 
 export type GovernanceLevel = 'basic' | 'full';
 export type GovernanceRole = 'analitik_danisman' | 'lab_muhendisi' | 'yz_arge';

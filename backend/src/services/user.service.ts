@@ -10,10 +10,10 @@
 import { dbAll, dbOne, dbRun, dbTx } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import type { AdminUserUpdateInput, ProfileUpdateInput } from '../validators/schemas';
-import { hashPassword } from './auth.service';
+import { hashPassword, invalidateSubjectCache } from './auth.service';
 import { revokeAllForSubject } from './token.service';
 
-export type UserGovernanceRole = 'analitik_danisman' | 'yz_arge';
+export type UserGovernanceRole = 'analitik_danisman' | 'yz_arge' | 'izleyici';
 
 export interface UserProfileDto {
   id: string;
@@ -183,8 +183,14 @@ export async function listAllUsers(filters: UserSearchFilters = {}): Promise<Use
   const where = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
   const limit = Math.min(Math.max(filters.limit ?? 200, 1), 500);
 
+  // Liste yanıtında base64 foto YOK (max 500 satır x 200KB şişme). has_photo
+  // bayrağıyla URL üretilir; tekil profil endpoint'leri base64 dönmeye devam eder.
+  const LIST_COLUMNS = PROFILE_COLUMNS.replace(
+    'profile_photo,',
+    '(profile_photo IS NOT NULL) AS has_photo,'
+  );
   const baseSql = `
-    SELECT ${PROFILE_COLUMNS},
+    SELECT ${LIST_COLUMNS},
            (SELECT COUNT(*) FROM bookings b WHERE b.user_id = users.id) AS booking_count,
            (SELECT COUNT(*) FROM bookings b WHERE b.user_id = users.id AND b.status = 'approved') AS approved_count,
            (SELECT COUNT(*) FROM bookings b WHERE b.user_id = users.id AND b.status IN ('pending', 'feedback_requested')) AS pending_count,
@@ -198,6 +204,7 @@ export async function listAllUsers(filters: UserSearchFilters = {}): Promise<Use
 
   let rows = await dbAll(baseSql, [...params]) as Array<
     UserRow & {
+      has_photo?: boolean;
       booking_count: number;
       approved_count: number;
       pending_count: number;
@@ -215,6 +222,7 @@ export async function listAllUsers(filters: UserSearchFilters = {}): Promise<Use
 
   return rows.map((r) => ({
     ...toDto(r),
+    profilePhoto: r.has_photo ? `/api/public/users/${r.id}/photo` : null,
     bookingCount: r.booking_count,
     approvedBookingCount: r.approved_count,
     pendingBookingCount: r.pending_count,
@@ -274,6 +282,8 @@ export async function adminUpdateUser(id: string, input: AdminUserUpdateInput): 
   params.push(id);
 
   await dbRun(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, [...params]);
+  // governance_role/status değişmiş olabilir — auth cache bayatlamasın.
+  invalidateSubjectCache(id);
   return await getUserByIdAdmin(id);
 }
 
@@ -295,6 +305,8 @@ export async function adminDeleteUser(id: string): Promise<{ deleted: boolean }>
     // Aktif refresh token'ları iptal et
     await dbRun(`UPDATE refresh_tokens SET revoked = 1 WHERE subject_id = ? AND subject_type = 'user'`, [id]);
   });
+  // Auth cache: devre dışı kullanıcı 30sn daha istek atamasın.
+  invalidateSubjectCache(id);
   return { deleted: true };
 }
 
@@ -308,6 +320,7 @@ export async function adminRestoreUser(id: string): Promise<UserProfileDto> {
   if (!exists) throw new HttpError(404, 'Kullanıcı bulunamadı.', 'USER_NOT_FOUND');
   if (exists.status === 1) return await getUserByIdAdmin(id);
   await dbRun(`UPDATE users SET status = 1, failed_login_count = 0, locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [id]);
+  invalidateSubjectCache(id);
   return await getUserByIdAdmin(id);
 }
 
@@ -329,5 +342,5 @@ export async function adminResetUserPassword(
        updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`, [passwordHash, id]);
 
-  revokeAllForSubject('user', id);
+  await revokeAllForSubject('user', id);
 }

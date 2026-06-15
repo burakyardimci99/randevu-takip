@@ -23,6 +23,7 @@ export const REFRESH_COOKIE_USER = 'klab_rt_user';
 export const REFRESH_COOKIE_ADMIN = 'klab_rt_admin';
 export const REFRESH_COOKIE_DANISMAN = 'klab_rt_danisman';
 export const REFRESH_COOKIE_ARGE = 'klab_rt_arge';
+const REFRESH_COOKIE_IZLEYICI = 'klab_rt_izleyici';
 
 import type { SubjectKind } from '../types/auth.types';
 
@@ -32,6 +33,7 @@ export function refreshCookieName(kind: SubjectKind): string {
     case 'admin': return REFRESH_COOKIE_ADMIN;
     case 'danisman': return REFRESH_COOKIE_DANISMAN;
     case 'arge': return REFRESH_COOKIE_ARGE;
+    case 'izleyici': return REFRESH_COOKIE_IZLEYICI;
   }
 }
 
@@ -78,6 +80,7 @@ const { generateToken, doubleCsrfProtection, invalidCsrfTokenError } = doubleCsr
     (req.cookies?.[REFRESH_COOKIE_ADMIN] as string | undefined) ??
     (req.cookies?.[REFRESH_COOKIE_DANISMAN] as string | undefined) ??
     (req.cookies?.[REFRESH_COOKIE_ARGE] as string | undefined) ??
+    (req.cookies?.[REFRESH_COOKIE_IZLEYICI] as string | undefined) ??
     (req.ip ?? 'anonymous'),
   cookieName: 'klab_csrf',
   cookieOptions: {

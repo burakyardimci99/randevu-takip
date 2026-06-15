@@ -172,7 +172,7 @@ export type ProfileUpdateInput = z.infer<typeof profileUpdateSchema>;
 export const adminUserUpdateSchema = profileUpdateSchema.extend({
   status: z.union([z.literal(1), z.literal(3)]).optional(),
   governanceRole: z
-    .union([z.literal('analitik_danisman'), z.literal('yz_arge'), z.null()])
+    .union([z.literal('analitik_danisman'), z.literal('yz_arge'), z.literal('izleyici'), z.null()])
     .optional(),
 });
 
@@ -208,6 +208,11 @@ export const createBookingSchema = z.object({
     .min(1, 'En az bir gün seçin.')
     .max(7)
     .optional(),
+});
+
+// Kullanıcı dashboard'u — ilerleme notu (boş string = notu temizle).
+export const bookingProgressSchema = z.object({
+  progressNote: z.string().trim().max(2000, 'İlerleme notu en fazla 2000 karakter olabilir.'),
 });
 
 // Görsel üretimi (gorsel_uretim entegrasyonu).
@@ -256,6 +261,12 @@ export const joinWaitlistSchema = z.object({
     .array(z.string().trim().min(1).max(40))
     .min(1, 'En az bir teknoloji seçin.')
     .max(20, 'En fazla 20 teknoloji seçilebilir.'),
+  // Haftanın hangi günleri (1=Pzt..7=Paz) — booking ile aynı semantik.
+  weekdays: z
+    .array(z.number().int().min(1).max(7))
+    .min(1, 'En az bir gün seçin.')
+    .max(7)
+    .optional(),
 });
 
 export type JoinWaitlistInput = z.infer<typeof joinWaitlistSchema>;

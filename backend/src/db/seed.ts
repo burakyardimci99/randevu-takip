@@ -142,7 +142,7 @@ interface DemoUserSeed {
   manager?: string;
   bio?: string;
   /** Yönetişim rolü — admin'in atadığı role demo amaçlı seed'de set. */
-  governanceRole?: 'analitik_danisman' | 'yz_arge';
+  governanceRole?: 'analitik_danisman' | 'yz_arge' | 'izleyici';
 }
 
 const DEMO_USERS: DemoUserSeed[] = [
@@ -158,6 +158,7 @@ const DEMO_USERS: DemoUserSeed[] = [
   { email: 'elif.celik@klab.test',    password: 'Elif1234!Pass',    fullName: 'Elif Çelik',      department: 'Veri Bilimleri',         title: 'Veri Mühendisi',             manager: 'Cem Aslan',         bio: 'Streaming pipeline\'lar (Kafka + Flink), data quality.' },
   { email: 'furkan.polat@klab.test',  password: 'Furkan1234!Pass',  fullName: 'Furkan Polat',    department: 'AI Lab',                 title: 'Computer Vision Mühendisi',  manager: 'Cem Aslan',         bio: 'OCR, doküman anlama, YOLO & DETR modelleri.' },
   { email: 'naz.yildiz@klab.test',    password: 'Naz1234!PassWord', fullName: 'Naz Yıldız',      department: 'Müşteri Deneyimi',       title: 'Servis Tasarımcısı',         manager: 'Pınar Korkmaz',     bio: 'End-to-end müşteri yolculuğu, journey map\'leme.' },
+  { email: 'izleyici@klab.test',      password: 'Izleyici1234!',    fullName: 'Gözlem Yetkilisi', department: 'Yönetim',               title: 'İzleyici',                   manager: 'AI Lab Yöneticisi', bio: 'Salt-okunur görüntüleme hesabı — doluluk ve talepleri izler.', governanceRole: 'izleyici' },
   { email: 'onur.acar@klab.test',     password: 'Onur1234!Pass',    fullName: 'Onur Acar',       department: 'Kurumsal Bankacılık',    title: 'Çözüm Mimarı',               manager: 'Berk Erdoğan',      bio: 'API entegrasyonları, açık bankacılık.' },
   { email: 'begum.kilic@klab.test',   password: 'Begum1234!Pass',   fullName: 'Begüm Kılıç',     department: 'AI Lab',                 title: 'Yazılım Geliştirici',        manager: 'Cem Aslan',         bio: 'FastAPI + PostgreSQL backend\'leri.' },
   { email: 'tolga.aydin@klab.test',   password: 'Tolga1234!Pass',   fullName: 'Tolga Aydın',     department: 'Risk Yönetimi',          title: 'Risk Direktörü',             manager: 'Pınar Korkmaz',     bio: 'Tüm risk modellerinin yönetimi.' },

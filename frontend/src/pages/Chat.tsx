@@ -62,7 +62,7 @@ export default function Chat() {
     if (auth.danisman) return 'danisman';
     if (auth.arge) return 'arge';
     return 'user';
-  }, [auth.admin, auth.danisman, auth.arge, auth.user]);
+  }, [auth.admin, auth.danisman, auth.arge]);
 
   const [contacts, setContacts] = useState<ChatContact[]>([]);
   const [search, setSearch] = useState('');
@@ -152,18 +152,23 @@ export default function Chat() {
   const openConversation = useCallback(
     async (contactId: string) => {
       setActiveId(contactId);
+      activeIdRef.current = contactId;
       setLoadingThread(true);
       try {
         const res = await api.chatConversation(kind, contactId);
+        // Hızlı konuşma değiştirmede yarış: kullanıcı bu istek dönmeden başka
+        // konuşmaya geçtiyse geç gelen eski yanıtı uygulama.
+        if (activeIdRef.current !== contactId) return;
         setMessages(res.messages);
         // Okunmamış rozetini lokalde sıfırla (server zaten okundu işaretledi).
         setContacts((prev) =>
           prev.map((c) => (c.id === contactId ? { ...c, unread: 0 } : c))
         );
       } catch (err) {
+        if (activeIdRef.current !== contactId) return;
         toast.push('error', (err as Error).message || 'Konuşma yüklenemedi.');
       } finally {
-        setLoadingThread(false);
+        if (activeIdRef.current === contactId) setLoadingThread(false);
       }
     },
     [kind, toast]
@@ -451,7 +456,6 @@ export default function Chat() {
       {showThemePicker && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-          onClick={() => setShowThemePicker(false)}
         >
           <div
             className="bg-white rounded-2xl shadow-kt-card max-w-lg w-full max-h-[85vh] overflow-y-auto p-6"

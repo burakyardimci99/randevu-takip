@@ -31,6 +31,11 @@ function buildAuthMiddleware(expectedKind: SubjectKind) {
 
     try {
       const decoded = verifyAccessToken(expectedKind, token);
+      // MFA tamamlanmamış ara token hiçbir korumalı endpoint'e giremez.
+      if (decoded.mfa === 'pending') {
+        next(new HttpError(401, 'MFA doğrulaması gerekli.', 'MFA_REQUIRED'));
+        return;
+      }
       const subject = await findSubjectById(expectedKind, decoded.sub);
       if (!subject) {
         next(new HttpError(401, 'Oturum geçersiz.', 'SUBJECT_NOT_FOUND'));
@@ -45,7 +50,7 @@ function buildAuthMiddleware(expectedKind: SubjectKind) {
         ...(expectedKind !== 'admin'
           ? {
               governanceRole:
-                (subject as { governance_role?: 'analitik_danisman' | 'yz_arge' | null })
+                (subject as { governance_role?: 'analitik_danisman' | 'yz_arge' | 'izleyici' | null })
                   .governance_role ?? null,
             }
           : {}),
@@ -74,6 +79,8 @@ export const requireAdmin = buildAuthMiddleware('admin');
 export const requireDanisman = buildAuthMiddleware('danisman');
 /** Sadece YZ / Ar-Ge kind'lı token kabul eder. */
 export const requireArge = buildAuthMiddleware('arge');
+/** Sadece İzleyici (salt-okunur görüntüleyici) kind'lı token kabul eder. */
+export const requireIzleyici = buildAuthMiddleware('izleyici');
 
 /**
  * Herhangi bir kimliği kabul eden guard — user / admin / danisman / arge.
@@ -91,10 +98,11 @@ export async function requireAnySubject(
     return;
   }
 
-  const KINDS: SubjectKind[] = ['user', 'admin', 'danisman', 'arge'];
+  const KINDS: SubjectKind[] = ['user', 'admin', 'danisman', 'arge', 'izleyici'];
   for (const kind of KINDS) {
     try {
       const decoded = verifyAccessToken(kind, token);
+      if (decoded.mfa === 'pending') continue; // MFA ara token'ı hiçbir guard'da geçerli değil
       const subject = await findSubjectById(kind, decoded.sub);
       if (!subject) continue;
       req.auth = {
@@ -105,7 +113,7 @@ export async function requireAnySubject(
         ...(kind !== 'admin'
           ? {
               governanceRole:
-                (subject as { governance_role?: 'analitik_danisman' | 'yz_arge' | null })
+                (subject as { governance_role?: 'analitik_danisman' | 'yz_arge' | 'izleyici' | null })
                   .governance_role ?? null,
             }
           : {}),
@@ -143,10 +151,13 @@ export async function requireStaff(
     return;
   }
 
-  const STAFF_KINDS: SubjectKind[] = ['admin', 'danisman', 'arge'];
+  // izleyici: salt-okunur personel — yalnız GET'ler requireStaff'tan geçer,
+  // tüm mutasyonlar requireAdmin istediği için veri değiştiremez.
+  const STAFF_KINDS: SubjectKind[] = ['admin', 'danisman', 'arge', 'izleyici'];
   for (const kind of STAFF_KINDS) {
     try {
       const decoded = verifyAccessToken(kind, token);
+      if (decoded.mfa === 'pending') continue; // MFA ara token'ı hiçbir guard'da geçerli değil
       const subject = await findSubjectById(kind, decoded.sub);
       if (!subject) continue;
       req.auth = {
@@ -157,7 +168,7 @@ export async function requireStaff(
         ...(kind !== 'admin'
           ? {
               governanceRole:
-                (subject as { governance_role?: 'analitik_danisman' | 'yz_arge' | null })
+                (subject as { governance_role?: 'analitik_danisman' | 'yz_arge' | 'izleyici' | null })
                   .governance_role ?? null,
             }
           : {}),

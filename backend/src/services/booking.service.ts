@@ -24,13 +24,12 @@ import {
   enqueueEmail,
 } from './notification.service';
 import { logger } from '../utils/logger';
+import { maskToWeekdays, weekdaysToMask } from '../utils/weekdays';
+import { addMonthsEndDate } from '../utils/dates';
 
-export type LifecycleStage =
-  | 'application'
-  | 'development'
-  | 'stage'
-  | 'production'
-  | 'live';
+import type { Booking as SharedBooking, LifecycleStage } from '@klab/shared';
+
+export type { LifecycleStage };
 
 export const LIFECYCLE_STAGE_ORDER: LifecycleStage[] = [
   'application',
@@ -40,51 +39,18 @@ export const LIFECYCLE_STAGE_ORDER: LifecycleStage[] = [
   'live',
 ];
 
-export interface BookingDto {
-  id: string;
-  userId: string;
-  userEmail?: string;
-  userFullName?: string;
-  /** Talep sahibinin profil fotoğrafı (base64 data URL) — admin talep detayında avatar. */
-  userPhoto?: string | null;
-  roomId: string;
-  roomName: string;
-  roomCode: string;
-  periodMonths: number;
-  /** Periyodik randevu — haftanın seçili günleri (1=Pzt..7=Paz). Tüm hafta = [1..7]. */
-  weekdays: number[];
-  startDate: string;
-  endDate: string;
-  projectName: string;
-  projectDescription: string;
-  helpNeeded: string;
-  technologies: string[];
-  status: 'pending' | 'approved' | 'rejected' | 'feedback_requested';
-  adminFeedback: string | null;
-  reviewedBy: string | null;
-  reviewedAt: string | null;
-  /** Yaşam döngüsü aşaması — application → development → stage → production → live. */
-  lifecycleStage: LifecycleStage;
-  /** Mevcut aşamaya girilme zamanı (SLA + audit). */
-  stageEnteredAt: string;
-  /** Review akışı: 'standard' (normal) veya 'swat' (fast-track). */
-  reviewTrack: 'standard' | 'swat';
-  /** Kullanıcı admin'den bir sonraki aşamaya ilerletme talebinde bulunduysa timestamp. */
-  stageAdvanceRequestedAt: string | null;
-  /** Talep gerekçesi/notu (opsiyonel). */
-  stageAdvanceNote: string | null;
-  /** Kullanıcının projeye (envanter kartına) atadığı görsel — admin de görebilsin. */
-  showcaseImageUrl: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+/**
+ * Booking DTO — TEK kaynak @klab/shared (frontend ile birebir aynı tip).
+ * Alan ekleme/değiştirme shared/index.d.ts üzerinden yapılır.
+ */
+export type BookingDto = SharedBooking;
 
 interface BookingRow {
   id: string;
   user_id: string;
   user_email?: string;
   user_full_name?: string;
-  user_photo?: string | null;
+  user_has_photo?: boolean;
   room_id: string;
   room_name: string;
   room_code: string;
@@ -96,7 +62,7 @@ interface BookingRow {
   project_description: string;
   help_needed: string;
   technologies: string;
-  status: 'pending' | 'approved' | 'rejected' | 'feedback_requested';
+  status: 'pending' | 'approved' | 'rejected' | 'feedback_requested' | 'cancelled';
   admin_feedback: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
@@ -106,6 +72,8 @@ interface BookingRow {
   stage_advance_requested_at: string | null;
   stage_advance_note: string | null;
   showcase_image_url: string | null;
+  progress_note?: string | null;
+  progress_updated_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -123,7 +91,8 @@ function rowToDto(r: BookingRow): BookingDto {
     userId: r.user_id,
     userEmail: r.user_email,
     userFullName: r.user_full_name,
-    userPhoto: r.user_photo,
+    // Base64 yerine cache'lenebilir URL — payload şişmesini önler.
+    userPhoto: r.user_has_photo ? `/api/public/users/${r.user_id}/photo` : null,
     roomId: r.room_id,
     roomName: r.room_name,
     roomCode: r.room_code,
@@ -145,38 +114,17 @@ function rowToDto(r: BookingRow): BookingDto {
     stageAdvanceRequestedAt: r.stage_advance_requested_at,
     stageAdvanceNote: r.stage_advance_note,
     showcaseImageUrl: r.showcase_image_url ?? null,
+    progressNote: r.progress_note ?? null,
+    progressUpdatedAt: r.progress_updated_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
-function addMonths(dateStr: string, months: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + months);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
+// Bitiş tarihi hesabı utils/dates'e taşındı (ay taşması kıskaçlı, waitlist ile ortak).
+const addMonths = addMonthsEndDate;
 
-const FULL_WEEK_MASK = 127; // Pzt..Paz tüm günler
-
-/** ISO gün dizisini (1=Pzt..7=Paz) 7-bit maskeye çevirir. Boş/undefined → tüm hafta. */
-function weekdaysToMask(weekdays?: number[]): number {
-  if (!weekdays || weekdays.length === 0) return FULL_WEEK_MASK;
-  let mask = 0;
-  for (const d of weekdays) {
-    if (d >= 1 && d <= 7) mask |= 1 << (d - 1);
-  }
-  return mask === 0 ? FULL_WEEK_MASK : mask;
-}
-
-/** Maskeyi ISO gün dizisine (1=Pzt..7=Paz) çevirir. */
-function maskToWeekdays(mask: number): number[] {
-  const days: number[] = [];
-  for (let d = 1; d <= 7; d++) {
-    if (mask & (1 << (d - 1))) days.push(d);
-  }
-  return days;
-}
+// Hafta günü ↔ maske yardımcıları utils/weekdays'e taşındı (waitlist ile paylaşılıyor).
 
 function isValidStartDate(dateStr: string): boolean {
   const today = new Date();
@@ -405,7 +353,7 @@ export async function deleteBooking(userId: string, bookingId: string): Promise<
     await dbRun('DELETE FROM bookings WHERE id = ?', [bookingId]);
     return existing.room_id;
   });
-  deleteBookingEmbedding(bookingId);
+  await deleteBookingEmbedding(bookingId);
 
   broadcastBooking({ type: 'booking.withdrawn', data: { bookingId } }, userId);
   broadcastToAdmins({ type: 'booking.withdrawn', data: { bookingId, roomId } });
@@ -413,9 +361,71 @@ export async function deleteBooking(userId: string, bookingId: string): Promise<
   return { deleted: true, roomId };
 }
 
+/**
+ * ONAYLI rezervasyon iptali — kullanıcı (sahibi) veya admin.
+ *
+ * deleteBooking'den farkı: approved kayıt SİLİNMEZ (tarih bütünlüğü/audit),
+ * status='cancelled' yapılır. Oda kapasitesi serbest kalır (çakışma sorguları
+ * yalnız pending/approved/feedback_requested sayar) ve bekleme listesi
+ * promotion'ı tetiklenir.
+ */
+export async function cancelApprovedBooking(
+  bookingId: string,
+  actor: { id: string; type: 'user' | 'admin' }
+): Promise<BookingDto> {
+  const roomId = await dbTx(async () => {
+    const existing = await dbOne(
+      `SELECT id, user_id, room_id, status FROM bookings WHERE id = ?`,
+      [bookingId]
+    ) as { id: string; user_id: string; room_id: string; status: string } | undefined;
+
+    if (!existing || (actor.type === 'user' && existing.user_id !== actor.id)) {
+      throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+    }
+    if (existing.status !== 'approved') {
+      throw new HttpError(409, 'Yalnız onaylı rezervasyonlar iptal edilebilir.', 'BOOKING_NOT_APPROVED');
+    }
+
+    await dbRun(
+      `UPDATE bookings SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [bookingId]
+    );
+    // Bu rezervasyona bağlı planlanmış saatli randevular da iptal edilir.
+    await dbRun(
+      `UPDATE appointments SET status = 'cancelled' WHERE booking_id = ? AND status = 'scheduled'`,
+      [bookingId]
+    );
+    return existing.room_id;
+  });
+
+  recordAudit({
+    eventType: 'booking.updated',
+    subjectId: actor.id,
+    subjectType: actor.type,
+    success: true,
+    details: { bookingId, action: 'cancel_approved', roomId },
+  });
+
+  const cancelled = await getBookingByIdAdmin(bookingId) as BookingDto;
+
+  broadcastBooking({ type: 'booking.withdrawn', data: { bookingId, cancelled: true } }, cancelled.userId);
+  broadcastToAdmins({ type: 'booking.withdrawn', data: { bookingId, roomId, cancelled: true } });
+
+  // Oda boşaldı — bekleme listesindeki ilk uygun kişiyi terfi ettir.
+  // Döngüsel import olmaması için dinamik import (waitlist → booking yönü zaten var).
+  try {
+    const { tryPromoteForRoom } = await import('./waitlist.service');
+    await tryPromoteForRoom(roomId);
+  } catch (err) {
+    logger.warn('cancel_promote_failed', { roomId, err: (err as Error).message });
+  }
+
+  return cancelled;
+}
+
 export async function listUserBookings(userId: string): Promise<BookingDto[]> {
   const rows = await dbAll(`SELECT b.*, r.name AS room_name, r.code AS room_code,
-              u.email AS user_email, u.full_name AS user_full_name, u.profile_photo AS user_photo
+              u.email AS user_email, u.full_name AS user_full_name, (u.profile_photo IS NOT NULL) AS user_has_photo
        FROM bookings b
        INNER JOIN rooms r ON r.id = b.room_id
        INNER JOIN users u ON u.id = b.user_id
@@ -424,9 +434,42 @@ export async function listUserBookings(userId: string): Promise<BookingDto[]> {
   return rows.map(rowToDto);
 }
 
+/**
+ * Kullanıcının kendi ilerleme notunu günceller (dashboard "ne üzerinde
+ * çalışıyorum" alanı). Yalnız sahibi ve yalnız onaylı booking'lerde.
+ */
+export async function updateBookingProgress(
+  userId: string,
+  bookingId: string,
+  progressNote: string
+): Promise<BookingDto> {
+  const existing = await dbOne(
+    `SELECT id, user_id, status FROM bookings WHERE id = ?`,
+    [bookingId]
+  ) as { id: string; user_id: string; status: string } | undefined;
+
+  if (!existing || existing.user_id !== userId) {
+    throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
+  }
+  if (existing.status !== 'approved') {
+    throw new HttpError(409, 'İlerleme notu yalnız onaylı rezervasyonlarda güncellenebilir.', 'BOOKING_NOT_APPROVED');
+  }
+
+  await dbRun(
+    `UPDATE bookings
+       SET progress_note = ?, progress_updated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [progressNote || null, bookingId]
+  );
+
+  const updated = await getBookingByIdForUser(userId, bookingId);
+  if (!updated) throw new HttpError(500, 'Booking güncellendi ama okunamadı.', 'INTERNAL');
+  return updated;
+}
+
 export async function getBookingByIdForUser(userId: string, bookingId: string): Promise<BookingDto | undefined> {
   const row = await dbOne(`SELECT b.*, r.name AS room_name, r.code AS room_code,
-              u.email AS user_email, u.full_name AS user_full_name, u.profile_photo AS user_photo
+              u.email AS user_email, u.full_name AS user_full_name, (u.profile_photo IS NOT NULL) AS user_has_photo
        FROM bookings b
        INNER JOIN rooms r ON r.id = b.room_id
        INNER JOIN users u ON u.id = b.user_id
@@ -437,11 +480,14 @@ export async function getBookingByIdForUser(userId: string, bookingId: string): 
 
 export async function listAllBookings(filters?: {
   status?: 'pending' | 'approved' | 'rejected' | 'feedback_requested';
+  /** Sayfalama — tablo büyüdükçe sınırsız SELECT pool'u kilitlemesin. */
+  limit?: number;
+  offset?: number;
 }): Promise<BookingDto[]> {
   let sql = `
     SELECT b.*,
            r.name AS room_name, r.code AS room_code,
-           u.email AS user_email, u.full_name AS user_full_name, u.profile_photo AS user_photo
+           u.email AS user_email, u.full_name AS user_full_name, (u.profile_photo IS NOT NULL) AS user_has_photo
     FROM bookings b
     INNER JOIN rooms r ON r.id = b.room_id
     INNER JOIN users u ON u.id = b.user_id
@@ -453,7 +499,9 @@ export async function listAllBookings(filters?: {
     params.push(filters.status);
   }
 
-  sql += ' ORDER BY b.created_at DESC';
+  sql += ' ORDER BY b.created_at DESC LIMIT ? OFFSET ?';
+  params.push(Math.min(Math.max(filters?.limit ?? 200, 1), 500));
+  params.push(Math.max(filters?.offset ?? 0, 0));
 
   const rows = await dbAll(sql, [...params]) as BookingRow[];
   return rows.map(rowToDto);
@@ -462,7 +510,7 @@ export async function listAllBookings(filters?: {
 export async function getBookingByIdAdmin(bookingId: string): Promise<BookingDto | undefined> {
   const row = await dbOne(`SELECT b.*,
               r.name AS room_name, r.code AS room_code,
-              u.email AS user_email, u.full_name AS user_full_name, u.profile_photo AS user_photo
+              u.email AS user_email, u.full_name AS user_full_name, (u.profile_photo IS NOT NULL) AS user_has_photo
        FROM bookings b
        INNER JOIN rooms r ON r.id = b.room_id
        INNER JOIN users u ON u.id = b.user_id
@@ -541,10 +589,12 @@ export async function reviewBooking(
 
         if (!dupe) {
           const wId = nanoid();
+          // weekday_mask de taşınır — promote edildiğinde kullanıcının seçtiği
+          // günler korunur (önceden kaybolup tüm haftaya yayılıyordu).
           await dbRun(`INSERT INTO waitlist (
                id, user_id, room_id, period_months, desired_start_date,
-               project_name, project_description, help_needed, technologies, position, status
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`, [wId,
+               project_name, project_description, help_needed, technologies, weekday_mask, position, status
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`, [wId,
             existing.user_id,
             existing.room_id,
             existing.period_months,
@@ -553,6 +603,7 @@ export async function reviewBooking(
             existing.project_description,
             existing.help_needed,
             existing.technologies,
+            existing.weekday_mask,
             position]);
         }
 
@@ -648,7 +699,7 @@ export async function reviewBooking(
       body: `"${reviewed.projectName}" (${reviewed.roomCode}) — Taleplerim sayfasından görüntüle.`,
       link: '/bookings',
     });
-  });
+  }).catch((err) => logger.warn('booking_review_notify_failed', { err: (err as Error).message }));
 
   // Eğer reject ya da feedback_requested ile slot serbest kaldıysa,
   // waitlist promotion tetikle (oda durum değişimi).
@@ -782,7 +833,7 @@ export async function adminDeleteBooking(
     await dbRun('DELETE FROM bookings WHERE id = ?', [bookingId]);
     return existing;
   });
-  deleteBookingEmbedding(bookingId);
+  await deleteBookingEmbedding(bookingId);
 
   recordAudit({
     eventType: 'booking.admin_deleted',

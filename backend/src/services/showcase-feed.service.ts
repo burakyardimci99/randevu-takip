@@ -39,7 +39,7 @@ interface ShowcaseRow {
   theme: string;
   user_id: string;
   full_name: string;
-  profile_photo: string | null;
+  has_photo?: boolean;
   period_months: number;
   start_date: string;
   end_date: string;
@@ -63,7 +63,7 @@ async function queryItems(): Promise<ShowcaseItem[]> {
               b.period_months, b.start_date, b.end_date, b.showcase_highlight,
               b.reviewed_at, b.user_id, b.showcase_image_url,
               r.code AS room_code, r.name AS room_name, r.district, r.neighborhood, r.theme,
-              u.full_name, u.profile_photo
+              u.full_name, (u.profile_photo IS NOT NULL) AS has_photo
        FROM bookings b
        INNER JOIN rooms r ON r.id = b.room_id
        INNER JOIN users u ON u.id = b.user_id
@@ -83,7 +83,7 @@ async function queryItems(): Promise<ShowcaseItem[]> {
     theme: r.theme,
     authorId: r.user_id,
     authorFullName: r.full_name,
-    authorPhoto: r.profile_photo,
+    authorPhoto: r.has_photo ? `/api/public/users/${r.user_id}/photo` : null,
     periodMonths: r.period_months,
     startDate: r.start_date,
     endDate: r.end_date,

@@ -2,10 +2,7 @@
  * Oda servisi: oda listesi ve uygunluk hesaplaması.
  */
 import { dbAll, dbOne } from '../db/schema';
-// Paylaşılan DTO (backend↔frontend tek kaynak) — #6.
-import type { HeatmapCell, HeatmapRoom, RoomHeatmap } from '@klab/shared';
-
-export type { HeatmapCell, HeatmapRoom, RoomHeatmap };
+import { ymdLocal } from '../utils/dates';
 
 export interface RoomDto {
   id: string;
@@ -65,7 +62,7 @@ export async function listRooms(date?: string): Promise<RoomDto[]> {
               room_type AS "roomType", specs
        FROM rooms WHERE is_active = 1 ORDER BY code`, []) as RoomRow[];
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = ymdLocal();
 
   const activeBookings = await dbAll(`SELECT room_id, weekday_mask, start_date, end_date FROM bookings
        WHERE status IN ('approved', 'pending', 'feedback_requested')
@@ -89,8 +86,13 @@ export async function listRooms(date?: string): Promise<RoomDto[]> {
 
   // Gün-bazlı doluluk: oda ancak haftanın 7 günü de dolu ise "müsait değil".
   // Kısmi (örn. yalnız Pzt+Çar) booking'lerde oda kalan günler için bookable kalır.
+  //
+  // YALNIZ BUGÜNÜ KAPSAYAN booking'ler maskelenir: gelecekte başlayacak veya
+  // ayrık dönemlerdeki kayıtların maskelerini OR'lamak, aralarında tamamen boş
+  // olan odayı "dolu" gösteriyordu (6 ay sonraki booking bugünü kilitliyordu).
   const occ = new Map<string, { mask: number; maxEnd: string }>();
   for (const b of activeBookings) {
+    if (b.start_date > today) continue; // henüz başlamadı — bugünkü uygunluğu etkilemez
     const cur = occ.get(b.room_id);
     if (!cur) {
       occ.set(b.room_id, { mask: b.weekday_mask, maxEnd: b.end_date });
@@ -162,7 +164,7 @@ interface OccupantRow {
  */
 export async function getRoomsWithOccupancy(): Promise<RoomWithOccupancy[]> {
   const rooms = await listRooms();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = ymdLocal();
 
   const rows = await dbAll(`SELECT b.id, b.room_id, b.user_id, b.project_name, b.period_months,
               b.start_date, b.end_date, b.status,
@@ -201,62 +203,6 @@ export async function getRoomsWithOccupancy(): Promise<RoomWithOccupancy[]> {
   });
 }
 
-/* ============================================================
- * ODA × HAFTANIN GÜNÜ MÜSAİTLİK ISI-HARİTASI (#5c)
- * ============================================================ */
-
-/**
- * Oda × haftanın günü doluluk ısı-haritası. Tarih aralığı [from,to] (varsayılan:
- * bugün..+30g) ile ÖRTÜŞEN aktif booking'ler (pending/approved/feedback_requested),
- * her odanın her günü (weekday_mask biti) için sayılır. Gün-bazlı modelin doğal
- * görselleştirmesi: hangi oda hangi günler yoğun.
- */
-export async function getRoomWeekdayHeatmap(opts: { from?: string; to?: string }): Promise<RoomHeatmap> {
-  const today = new Date().toISOString().slice(0, 10);
-  const valid = (d?: string): d is string => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d);
-
-  const from = valid(opts.from) ? opts.from : today;
-  const to = valid(opts.to)
-    ? opts.to
-    : new Date(new Date(`${from}T00:00:00Z`).getTime() + 30 * 86400000).toISOString().slice(0, 10);
-
-  const rooms = await dbAll(`SELECT id, code, name, theme, room_type AS "roomType"
-       FROM rooms WHERE is_active = 1 ORDER BY code`, []) as Array<{ id: string; code: string; name: string; theme: string; roomType: HeatmapRoom['roomType'] }>;
-
-  // [from,to] ile örtüşen aktif booking'ler (NOT (end < from OR start > to)).
-  const bookings = await dbAll(`SELECT room_id, weekday_mask FROM bookings
-       WHERE status IN ('approved', 'pending', 'feedback_requested')
-         AND NOT (end_date < ? OR start_date > ?)`, [from, to]) as Array<{ room_id: string; weekday_mask: number }>;
-
-  const counts = new Map<string, number[]>();
-  for (const b of bookings) {
-    let arr = counts.get(b.room_id);
-    if (!arr) {
-      arr = [0, 0, 0, 0, 0, 0, 0];
-      counts.set(b.room_id, arr);
-    }
-    for (let wd = 1; wd <= 7; wd++) {
-      if ((b.weekday_mask & (1 << (wd - 1))) !== 0) arr[wd - 1]++;
-    }
-  }
-
-  let maxCount = 0;
-  const resultRooms: HeatmapRoom[] = rooms.map((r) => {
-    const arr = counts.get(r.id) ?? [0, 0, 0, 0, 0, 0, 0];
-    const days: HeatmapCell[] = arr.map((count, i) => {
-      if (count > maxCount) maxCount = count;
-      return { weekday: i + 1, count };
-    });
-    return {
-      roomId: r.id,
-      code: r.code,
-      name: r.name,
-      theme: r.theme,
-      roomType: r.roomType,
-      days,
-      total: arr.reduce((a, c) => a + c, 0),
-    };
-  });
-
-  return { rooms: resultRooms, from, to, maxCount, weekdays: [1, 2, 3, 4, 5, 6, 7] };
-}
+// NOT: Eski "oda × haftanın günü" (weekday_mask) ısı-haritası KALDIRILDI. Aktif UI
+// gerçek randevulara dayanan appointment.service.getRoomAppointmentHeatmap'i kullanır;
+// eski sürüm dar tarih penceresinde pencere-dışı günleri de sayan bir hataya sahipti.

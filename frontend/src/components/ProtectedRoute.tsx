@@ -31,10 +31,12 @@ export function ProtectedRoute({ kind, children }: ProtectedRouteProps) {
         ? auth.danisman
         : k === 'arge'
           ? auth.arge
-          : auth.user;
+          : k === 'izleyici'
+            ? auth.izleyici
+            : auth.user;
   const me =
     kind === 'any'
-      ? auth.admin ?? auth.danisman ?? auth.arge ?? auth.user
+      ? auth.admin ?? auth.danisman ?? auth.arge ?? auth.izleyici ?? auth.user
       : Array.isArray(kind)
         ? (kind.map(slot).find(Boolean) ?? null)
         : slot(kind);

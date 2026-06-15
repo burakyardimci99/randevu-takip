@@ -13,6 +13,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { Appointment, Booking, CreateBookingPayload, Room } from '../types';
 
 function fmtDate(iso: string): string {
@@ -29,12 +30,15 @@ export default function UserBookings() {
   const [submitting, setSubmitting] = useState(false);
   const [withdrawing, setWithdrawing] = useState<string | null>(null);
   const [confirmWithdraw, setConfirmWithdraw] = useState<Booking | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState<Booking | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   // Detay modal — booking'in tüm context'i, lifecycle ve thread tek modal'da (read-only view).
   const [detailId, setDetailId] = useState<string | null>(null);
   const selectedDetail = detailId ? bookings.find((b) => b.id === detailId) ?? null : null;
 
   // Randevu state'i: hangi booking için modal açık + booking → randevu listesi map'i
   const [scheduling, setScheduling] = useState<Booking | null>(null);
+  const [confirmCancelApptId, setConfirmCancelApptId] = useState<string | null>(null);
   const [appointmentsByBooking, setAppointmentsByBooking] = useState<
     Record<string, Appointment[]>
   >({});
@@ -98,7 +102,7 @@ export default function UserBookings() {
   async function requestStageAdvance(bookingId: string, note?: string) {
     try {
       await api.requestStageAdvance(bookingId, note);
-      toast.push('success', 'Aşama ilerletme talebiniz admin\'e iletildi.');
+      toast.push('success', 'Aşama ilerletme talebiniz alındı ve onay sürecine iletildi.');
       await load();
     } catch (err) {
       toast.push('error', (err as Error).message || 'Talep oluşturulamadı.');
@@ -138,13 +142,27 @@ export default function UserBookings() {
     setSubmitting(true);
     try {
       await api.updateBooking(editing.id, payload);
-      toast.push('success', 'Talebiniz güncellendi ve yeniden admin onayına gönderildi.');
+      toast.push('success', 'Talebiniz güncellendi ve yeniden onay sürecine iletildi. Sonuçlandığında bilgilendirileceksiniz.');
       setEditing(null);
       await load();
     } catch (err) {
       toast.push('error', (err as Error).message || 'Güncelleme başarısız.');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function doCancelApproved(booking: Booking) {
+    setCancelling(true);
+    try {
+      await api.cancelApprovedBooking(booking.id);
+      toast.push('info', 'Rezervasyonunuz iptal edildi. Oda diğer kullanıcılara açıldı.');
+      setConfirmCancel(null);
+      await load();
+    } catch (err) {
+      toast.push('error', (err as Error).message || 'İptal başarısız.');
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -277,7 +295,7 @@ export default function UserBookings() {
                     booking={b}
                     appointments={appointmentsByBooking[b.id] ?? []}
                     onAdd={() => setScheduling(b)}
-                    onCancel={cancelAppointment}
+                    onCancel={(id) => setConfirmCancelApptId(id)}
                   />
                 )}
 
@@ -329,9 +347,22 @@ export default function UserBookings() {
                       </button>
                     </div>
                   )}
-                  {!modifiable && (
+                  {b.status === 'approved' && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmCancel(b)}
+                      disabled={cancelling}
+                      className="btn text-sm bg-red-50 text-red-700 hover:bg-red-100 border border-red-100"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+                      </svg>
+                      Rezervasyonu İptal Et
+                    </button>
+                  )}
+                  {!modifiable && b.status !== 'approved' && (
                     <span className="text-xs text-kt-gray-400 italic">
-                      Onaylanmış/reddedilmiş talepler değiştirilemez.
+                      Reddedilmiş/iptal edilmiş talepler değiştirilemez.
                     </span>
                   )}
                 </div>
@@ -375,7 +406,6 @@ export default function UserBookings() {
       {confirmWithdraw && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-kt-green-950/70 backdrop-blur-sm animate-fade-in"
-          onClick={() => !withdrawing && setConfirmWithdraw(null)}
         >
           <div
             className="bg-white rounded-2xl shadow-kt-card max-w-md w-full p-6 animate-slide-up"
@@ -416,6 +446,28 @@ export default function UserBookings() {
         </div>,
         document.body
       )}
+      <ConfirmDialog
+        open={!!confirmCancel}
+        title="Rezervasyon iptal edilsin mi?"
+        message={`"${confirmCancel?.projectName ?? ''}" projesinin ${confirmCancel?.roomCode ?? ''} rezervasyonu iptal edilecek. Bu işlem geri alınamaz; oda diğer kullanıcılara ve bekleme listesine açılır.`}
+        confirmLabel="Evet, iptal et"
+        loading={cancelling}
+        onConfirm={() => {
+          if (confirmCancel) void doCancelApproved(confirmCancel);
+        }}
+        onCancel={() => setConfirmCancel(null)}
+      />
+      <ConfirmDialog
+        open={!!confirmCancelApptId}
+        title="Randevu iptal edilsin mi?"
+        message="Bu saatli randevu iptal edilecek. Bu işlem geri alınamaz."
+        confirmLabel="Evet, iptal et"
+        onConfirm={() => {
+          if (confirmCancelApptId) void cancelAppointment(confirmCancelApptId);
+          setConfirmCancelApptId(null);
+        }}
+        onCancel={() => setConfirmCancelApptId(null)}
+      />
     </AppShell>
   );
 }

@@ -90,8 +90,30 @@ describe('joinWaitlist', () => {
   });
 });
 
+describe('weekday_mask', () => {
+  it('yalnız farklı günlerde çakışan booking varsa sıraya yazılma reddedilir (oda o günler müsait)', async () => {
+    // Bloklayıcı booking yalnız Pzt-Cum (mask 31) — Cmt+Paz (weekdays 6,7) boş.
+    await dbRun('UPDATE bookings SET weekday_mask = 31 WHERE id = ?', [BLOCKING_BOOKING]);
+    await expect(joinWaitlist(USER_B, {
+        roomId: ROOM,
+        periodMonths: 1,
+        desiredStartDate: futureDate(10),
+        projectName: 'Haftasonu boş',
+        projectDescription: 'Cmt+Paz boş olduğu için sıraya değil booking akışına gitmeli.',
+        helpNeeded: 'Yok',
+        technologies: ['Claude'],
+        weekdays: [6, 7],
+      })).rejects.toThrow(/ROOM_AVAILABLE|müsait/i);
+    await dbRun('UPDATE bookings SET weekday_mask = 127 WHERE id = ?', [BLOCKING_BOOKING]);
+  });
+});
+
 describe('tryPromoteForRoom', () => {
-  it('bloklayıcı booking silinirse waitlist head promote olur', async () => {
+  it('bloklayıcı booking silinirse waitlist head promote olur ve weekday_mask korunur', async () => {
+    // Entry'nin gün seçimini daralt (Pzt+Çar = mask 5) — promote edilen booking
+    // bu maskeyle açılmalı (önceki bug: DEFAULT 127 ile tüm haftaya yayılıyordu).
+    await dbRun(`UPDATE waitlist SET weekday_mask = 5 WHERE user_id = ? AND room_id = ?`, [USER_B, ROOM]);
+
     // Bloklayıcı booking'i sil
     await dbRun('DELETE FROM bookings WHERE id = ?', [BLOCKING_BOOKING]);
 
@@ -104,14 +126,15 @@ describe('tryPromoteForRoom', () => {
     expect(myEntry?.status).toBe('promoted');
     expect(myEntry?.promotedBookingId).toBeTruthy();
 
-    // Yeni booking gerçekten oluştu mu?
+    // Yeni booking gerçekten oluştu mu? weekday_mask taşındı mı?
     const newBooking = (await dbOne(
-      `SELECT id, user_id, status FROM bookings WHERE id = ?`,
+      `SELECT id, user_id, status, weekday_mask FROM bookings WHERE id = ?`,
       [myEntry!.promotedBookingId!]
-    )) as { id: string; user_id: string; status: string } | undefined;
+    )) as { id: string; user_id: string; status: string; weekday_mask: number } | undefined;
     expect(newBooking).toBeDefined();
     expect(newBooking?.user_id).toBe(USER_B);
     expect(newBooking?.status).toBe('pending');
+    expect(newBooking?.weekday_mask).toBe(5);
   });
 });
 

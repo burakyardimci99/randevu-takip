@@ -14,7 +14,6 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod';
 import { requireAnySubject } from '../middleware/auth.middleware';
 import { csrfProtection } from '../middleware/cookie-auth';
-import { HttpError } from '../middleware/error.middleware';
 import {
   listContacts,
   listConversation,
@@ -25,6 +24,7 @@ import {
   type ChatKind,
 } from '../services/chat.service';
 import { broadcastToSubject } from '../services/sse.service';
+import { readId } from '../utils/route-helpers';
 
 const router = Router();
 router.use(csrfProtection);
@@ -34,14 +34,6 @@ router.use(requireAnySubject);
 function actorFromReq(req: Request): ChatActor {
   const kind: ChatKind = req.auth!.subjectType === 'admin' ? 'admin' : 'user';
   return { id: req.auth!.subjectId, kind };
-}
-
-function parsePeerId(raw: unknown): string {
-  const id = typeof raw === 'string' ? raw : '';
-  if (!id || id.length < 8 || id.length > 40) {
-    throw new HttpError(400, 'Geçersiz kişi id.', 'INVALID_ID');
-  }
-  return id;
 }
 
 const sendSchema = z.object({
@@ -74,7 +66,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const me = actorFromReq(req);
-      const peerId = parsePeerId(req.params.peerId);
+      const peerId = readId(req, 'peerId', 'kişi id');
       const messages = await listConversation(me, peerId);
       const marked = await markConversationRead(me, peerId);
       res.json({ messages, markedRead: marked });
@@ -90,7 +82,7 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const me = actorFromReq(req);
-      const peerId = parsePeerId(req.params.peerId);
+      const peerId = readId(req, 'peerId', 'kişi id');
       const marked = await markConversationRead(me, peerId);
       res.json({ markedRead: marked });
     } catch (err) {

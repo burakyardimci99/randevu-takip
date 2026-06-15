@@ -11,6 +11,7 @@ import { AppShell } from '../components/AppShell';
 import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { WaitlistEntry } from '../types';
 
 function statusBadge(status: WaitlistEntry['status']): { label: string; cls: string } {
@@ -35,6 +36,8 @@ export default function UserWaitlist() {
   const [entries, setEntries] = useState<WaitlistEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  // Çift onay: geri alınamaz işlemler onaylanmadan çalışmaz.
+  const [confirmAction, setConfirmAction] = useState<{ kind: 'cancel' | 'remove'; id: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -152,7 +155,7 @@ export default function UserWaitlist() {
                         </div>
                       </div>
                       <button
-                        onClick={() => handleCancel(e.id)}
+                        onClick={() => setConfirmAction({ kind: 'cancel', id: e.id })}
                         disabled={cancelling === e.id}
                         className="px-4 py-2 rounded-xl border border-rose-200 text-rose-700 text-sm font-semibold hover:bg-rose-50 transition-colors disabled:opacity-60"
                       >
@@ -220,7 +223,7 @@ export default function UserWaitlist() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => handleRemove(e.id)}
+                        onClick={() => setConfirmAction({ kind: 'remove', id: e.id })}
                         disabled={cancelling === e.id}
                         className="btn-ghost text-rose-600 text-xs shrink-0"
                         title="Bu kaydı listeden kaldır"
@@ -235,6 +238,25 @@ export default function UserWaitlist() {
           )}
         </div>
       )}
+      <ConfirmDialog
+        open={!!confirmAction}
+        title={confirmAction?.kind === 'cancel' ? 'Sıradan çıkılsın mı?' : 'Kayıt kaldırılsın mı?'}
+        message={
+          confirmAction?.kind === 'cancel'
+            ? 'Bekleme listesindeki sıranız iptal edilecek. Bu işlem geri alınamaz; tekrar sıraya girerseniz en sona eklenirsiniz.'
+            : 'Bu geçmiş kayıt listenizden kalıcı olarak kaldırılacak.'
+        }
+        confirmLabel={confirmAction?.kind === 'cancel' ? 'Evet, sıradan çık' : 'Evet, kaldır'}
+        loading={!!cancelling}
+        onConfirm={() => {
+          if (!confirmAction) return;
+          const { kind, id } = confirmAction;
+          void (kind === 'cancel' ? handleCancel(id) : handleRemove(id)).finally(() =>
+            setConfirmAction(null)
+          );
+        }}
+        onCancel={() => setConfirmAction(null)}
+      />
     </AppShell>
   );
 }

@@ -411,7 +411,6 @@ export default function AdminRooms() {
       {reassign && createPortal(
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
-          onClick={() => !submitting && setReassign(null)}
         >
           <div
             className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-slide-up"
@@ -471,7 +470,6 @@ export default function AdminRooms() {
       {reassignUser && createPortal(
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
-          onClick={() => !submitting && setReassignUser(null)}
         >
           <div
             className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 animate-slide-up flex flex-col max-h-[90vh]"
@@ -579,7 +577,6 @@ export default function AdminRooms() {
       {del && createPortal(
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4"
-          onClick={() => !submitting && setDel(null)}
         >
           <div
             className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-slide-up"

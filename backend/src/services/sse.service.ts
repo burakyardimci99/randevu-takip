@@ -23,6 +23,8 @@ interface SseClient {
   res: Response;
   subjectId: string;
   subjectType: SubjectKind;
+  /** Heartbeat timer — her silme noktasında clearInterval şart (sızıntı). */
+  ping?: NodeJS.Timeout;
 }
 
 const clients = new Map<string, SseClient>();
@@ -51,6 +53,14 @@ export interface SsePayload {
  * Tüm bağlı client'lara filter ile yayın yap.
  * Filter: predicate fonksiyonu — hangi client'lara gidecek.
  */
+/** Client'ı kayıttan düşür + heartbeat timer'ını temizle (sızıntı önleme). */
+function dropClient(id: string): void {
+  const c = clients.get(id);
+  if (!c) return;
+  if (c.ping) clearInterval(c.ping);
+  clients.delete(id);
+}
+
 export function broadcast(
   payload: SsePayload,
   filter: (client: SseClient) => boolean = () => true
@@ -59,10 +69,17 @@ export function broadcast(
   for (const client of clients.values()) {
     if (!filter(client)) continue;
     try {
+      // write() ölü sokete senkron throw etmez; destroyed/writable kontrolü
+      // half-open bağlantıları da yakalar. Hata yolunda ping interval'i de
+      // temizlenir — önceden timer + Response referansı sızıyordu.
+      if (client.res.destroyed || !client.res.writable) {
+        dropClient(client.id);
+        continue;
+      }
       client.res.write(data);
     } catch (err) {
       logger.warn('sse_write_failed', { clientId: client.id, err: (err as Error).message });
-      clients.delete(client.id);
+      dropClient(client.id);
     }
   }
 }
@@ -115,7 +132,7 @@ function extractToken(req: Request): { kind: SubjectKind; token: string } | null
  * denenmezse governance dashboard'ları realtime stream alamaz (401).
  */
 function verifyAny(token: string): { kind: SubjectKind; sub: string } | null {
-  const KINDS: SubjectKind[] = ['user', 'admin', 'danisman', 'arge'];
+  const KINDS: SubjectKind[] = ['user', 'admin', 'danisman', 'arge', 'izleyici'];
   for (const kind of KINDS) {
     try {
       const decoded = verifyAccessToken(kind, token);
@@ -155,6 +172,7 @@ export function initSseRoutes(app: Express): void {
       subjectType: verified.kind,
     };
     clients.set(id, client);
+    res.on('error', () => dropClient(id));
 
     // Hello mesajı
     res.write(`event: hello\ndata: ${JSON.stringify({ id, kind: verified.kind })}\n\n`);
@@ -162,16 +180,19 @@ export function initSseRoutes(app: Express): void {
     // Her 25 saniyede ping (load balancer timeout korunması)
     const ping = setInterval(() => {
       try {
+        if (res.destroyed || !res.writable) {
+          dropClient(id);
+          return;
+        }
         res.write(`event: ping\ndata: ${JSON.stringify({ t: Date.now() })}\n\n`);
       } catch {
-        clearInterval(ping);
-        clients.delete(id);
+        dropClient(id);
       }
     }, 25_000);
+    client.ping = ping;
 
     req.on('close', () => {
-      clearInterval(ping);
-      clients.delete(id);
+      dropClient(id);
       logger.info('sse_client_disconnected', { id, total: clients.size });
     });
 
@@ -194,6 +215,7 @@ export function activeClientCount(): number {
  */
 export function closeAllSse(): void {
   for (const client of clients.values()) {
+    if (client.ping) clearInterval(client.ping);
     try {
       client.res.end();
     } catch {

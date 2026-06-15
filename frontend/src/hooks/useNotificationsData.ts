@@ -11,6 +11,17 @@ import { useRealtimeEvents } from './useRealtimeEvents';
 import { api } from '../services/api';
 import type { AppNotification, SubjectKind } from '../types';
 
+/**
+ * Modül-seviyesi kısa ömürlü cache — AppShell her sayfa geçişinde remount
+ * olduğundan hook her navigasyonda sıfırdan fetch atıyordu. 15sn'lik cache
+ * navigasyonlar arası veriyi taşır; SSE event'i gelirse zaten tazelenir.
+ */
+const NOTIF_CACHE_TTL_MS = 15_000;
+const notifCache = new Map<
+  SubjectKind,
+  { items: AppNotification[]; unread: number; messageUnread: number; at: number }
+>();
+
 export interface NotificationsData {
   items: AppNotification[];
   /** Okunmamış kalıcı bildirim sayısı. */
@@ -23,9 +34,11 @@ export interface NotificationsData {
 }
 
 export function useNotificationsData(kind: SubjectKind): NotificationsData {
-  const [items, setItems] = useState<AppNotification[]>([]);
-  const [unread, setUnread] = useState(0);
-  const [messageUnread, setMessageUnread] = useState(0);
+  const cached = notifCache.get(kind);
+  const fresh = !!cached && Date.now() - cached.at < NOTIF_CACHE_TTL_MS;
+  const [items, setItems] = useState<AppNotification[]>(fresh ? cached.items : []);
+  const [unread, setUnread] = useState(fresh ? cached.unread : 0);
+  const [messageUnread, setMessageUnread] = useState(fresh ? cached.messageUnread : 0);
 
   const load = useCallback(async () => {
     try {
@@ -36,19 +49,29 @@ export function useNotificationsData(kind: SubjectKind): NotificationsData {
       setItems(notif.items);
       setUnread(notif.unread);
       setMessageUnread(chat.unread);
+      notifCache.set(kind, {
+        items: notif.items,
+        unread: notif.unread,
+        messageUnread: chat.unread,
+        at: Date.now(),
+      });
     } catch {
       // sessiz — bildirim merkezi kritik yol değil
     }
   }, [kind]);
 
   useEffect(() => {
-    void load();
+    // Cache tazeyse mount'ta yeniden fetch etme (navigasyonlar arası).
+    const c = notifCache.get(kind);
+    if (!c || Date.now() - c.at >= NOTIF_CACHE_TTL_MS) void load();
     const t = window.setInterval(() => void load(), 60_000);
     return () => window.clearInterval(t);
-  }, [load]);
+  }, [load, kind]);
 
-  // Real-time: ilgili bir event gelince listeyi tazele.
-  useRealtimeEvents(kind, () => {
+  // Real-time: İLGİLİ bir event gelince tazele — ping/hello kalp atışları
+  // değil (önceden her 25sn'lik ping'de tam refetch tetikleniyordu).
+  useRealtimeEvents(kind, (type) => {
+    if (type === 'ping' || type === 'hello') return;
     void load();
   });
 

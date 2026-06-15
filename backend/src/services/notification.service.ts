@@ -107,7 +107,9 @@ async function sendNow(msg: EmailMessage): Promise<void> {
       to: maskEmail(msg.to),
       err: (err as Error).message,
     });
-    // Production'da queue retry yapacak — exception fırlatma
+    // Hata YUTULMAZ: queue'nun retry mekanizması ancak handler throw ederse
+    // tetiklenir (önceden sessizce yutuluyordu → 3-deneme retry hiç çalışmıyordu).
+    throw err;
   }
 }
 
@@ -167,11 +169,15 @@ export function bookingReviewedEmail(args: {
     feedback_requested: '💬 Düzeltme istendi',
   };
   const title = titleMap[args.status];
-  const greeting = `Merhaba ${escapeHtml(args.toName.split(' ')[0] ?? '')},`;
+  // HTML'de escape'li, text'te HAM ad: escape edilmiş ad text gövdede
+  // "O&#x27;Brien" gibi entity kalıntısı bırakıyordu.
+  const firstName = args.toName.split(' ')[0] ?? '';
+  const greeting = `Merhaba ${escapeHtml(firstName)},`;
+  const greetingText = `Merhaba ${firstName},`;
   const projectLine = `<strong>${escapeHtml(args.projectName)}</strong> (${escapeHtml(args.roomCode)})`;
 
   let bodyHtml = `<p>${greeting}</p>`;
-  let bodyText = `${greeting.replace(/<[^>]+>/g, '')}\n\n`;
+  let bodyText = `${greetingText}\n\n`;
 
   if (args.status === 'approved') {
     bodyHtml += `<p>${projectLine} randevu talebiniz <strong style="color:#10B981;">onaylandı</strong>. Tarihinizde odanız hazır olacak.</p>`;
@@ -210,7 +216,11 @@ export function waitlistPromotedEmail(args: {
   roomCode: string;
 }): EmailMessage {
   const title = '🎉 Sıranız geldi';
-  const greeting = `Merhaba ${escapeHtml(args.toName.split(' ')[0] ?? '')},`;
+  // HTML'de escape'li, text'te HAM ad: escape edilmiş ad text gövdede
+  // "O&#x27;Brien" gibi entity kalıntısı bırakıyordu.
+  const firstName = args.toName.split(' ')[0] ?? '';
+  const greeting = `Merhaba ${escapeHtml(firstName)},`;
+  const greetingText = `Merhaba ${firstName},`;
   const bodyHtml = `
     <p>${greeting}</p>
     <p>Bekleme listesindeki <strong>${escapeHtml(args.projectName)}</strong>
@@ -237,7 +247,11 @@ export function passwordResetEmail(args: {
   resetUrl: string;
 }): EmailMessage {
   const title = '🔐 Parola sıfırlama';
-  const greeting = `Merhaba ${escapeHtml(args.toName.split(' ')[0] ?? '')},`;
+  // HTML'de escape'li, text'te HAM ad: escape edilmiş ad text gövdede
+  // "O&#x27;Brien" gibi entity kalıntısı bırakıyordu.
+  const firstName = args.toName.split(' ')[0] ?? '';
+  const greeting = `Merhaba ${escapeHtml(firstName)},`;
+  const greetingText = `Merhaba ${firstName},`;
   const bodyHtml = `
     <p>${greeting}</p>
     <p>Hesabın için bir parola sıfırlama talebi aldık. Yeni parola belirlemek
@@ -251,7 +265,7 @@ export function passwordResetEmail(args: {
     <p style="margin-top:16px;color:#6B7280;font-size:12px;">
       Bu talebi sen yapmadıysan bu e-postayı yok sayabilirsin — parolan değişmez.
     </p>`;
-  const bodyText = `${greeting.replace(/<[^>]+>/g, '')}\n\nParola sıfırlama bağlantın (1 saat geçerli):\n${args.resetUrl}\n\nBu talebi sen yapmadıysan yok say.`;
+  const bodyText = `${greetingText}\n\nParola sıfırlama bağlantın (1 saat geçerli):\n${args.resetUrl}\n\nBu talebi sen yapmadıysan yok say.`;
   return {
     to: args.to,
     subject: `[KLAB] ${title}`,
@@ -273,11 +287,15 @@ export function licenseReviewedEmail(args: {
     feedback_requested: '💬 Lisans başvurunuz için düzeltme istendi',
   };
   const title = titleMap[args.status];
-  const greeting = `Merhaba ${escapeHtml(args.toName.split(' ')[0] ?? '')},`;
+  // HTML'de escape'li, text'te HAM ad: escape edilmiş ad text gövdede
+  // "O&#x27;Brien" gibi entity kalıntısı bırakıyordu.
+  const firstName = args.toName.split(' ')[0] ?? '';
+  const greeting = `Merhaba ${escapeHtml(firstName)},`;
+  const greetingText = `Merhaba ${firstName},`;
   const titleLine = `<strong>${escapeHtml(args.requestTitle)}</strong>`;
 
   let bodyHtml = `<p>${greeting}</p>`;
-  let bodyText = `${greeting.replace(/<[^>]+>/g, '')}\n\n`;
+  let bodyText = `${greetingText}\n\n`;
 
   if (args.status === 'approved') {
     bodyHtml += `<p>${titleLine} lisans başvurunuz <strong style="color:#10B981;">onaylandı</strong>. İlgili ekip lisans tahsisi için yönlendirilecek.</p>`;

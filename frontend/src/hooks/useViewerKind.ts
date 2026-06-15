@@ -14,5 +14,6 @@ export function useViewerKind(): SubjectKind {
   if (auth.admin) return 'admin';
   if (auth.danisman) return 'danisman';
   if (auth.arge) return 'arge';
+  if (auth.izleyici) return 'izleyici';
   return 'user';
 }

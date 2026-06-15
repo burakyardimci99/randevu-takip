@@ -8,6 +8,8 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { JoinWaitlistPayload, Room } from '../types';
+import { openDatePicker, ymdLocal } from '../lib/utils';
+import { FEATURES } from '../constants/features';
 
 const TECH_OPTIONS = [
   'Claude', 'GPT', 'Gemini', 'OpenAI', 'LangChain', 'LlamaIndex',
@@ -15,7 +17,7 @@ const TECH_OPTIONS = [
   'Postgres', 'SQLite', 'Redis', 'Docker', 'Kubernetes',
 ];
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => ymdLocal();
 
 interface Props {
   room: Room | null;
@@ -32,6 +34,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
   const [projectDescription, setProjectDescription] = useState('');
   const [helpNeeded, setHelpNeeded] = useState('');
   const [technologies, setTechnologies] = useState<string[]>([]);
+  const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]); // varsayılan: hafta içi
   const [customTech, setCustomTech] = useState('');
 
   useEffect(() => {
@@ -42,6 +45,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
       setProjectDescription('');
       setHelpNeeded('');
       setTechnologies([]);
+      setWeekdays([1, 2, 3, 4, 5]);
       setCustomTech('');
     }
   }, [open]);
@@ -51,6 +55,11 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
   const toggleTech = (t: string) => {
     setTechnologies((prev) =>
       prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+    );
+  };
+  const toggleWeekday = (d: number) => {
+    setWeekdays((prev) =>
+      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]
     );
   };
   const addCustom = () => {
@@ -64,6 +73,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!room) return;
+    if (FEATURES.weekdaySelection && weekdays.length === 0) return;
     onSubmit({
       roomId: room.id,
       periodMonths,
@@ -72,6 +82,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
       projectDescription: projectDescription.trim(),
       helpNeeded: helpNeeded.trim(),
       technologies,
+      weekdays: FEATURES.weekdaySelection ? [...weekdays].sort((a, b) => a - b) : undefined,
     });
   }
 
@@ -80,7 +91,6 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
       role="dialog"
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onClick={() => !loading && onClose()}
     >
       <div
         className="bg-white rounded-2xl shadow-kt-card max-w-lg w-full max-h-[90vh] overflow-y-auto"
@@ -107,6 +117,9 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
         </header>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <p className="text-xs text-kt-gray-500">
+            <span className="text-red-500">*</span> işaretli alanlar zorunludur.
+          </p>
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
             Bu oda şu an dolu. Sıraya yazıldığınızda, oda boşalır boşalmaz
             otomatik randevu talebi oluşturulur ve sizi bilgilendiririz.
@@ -114,7 +127,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Periyot</label>
+              <label className="label">Periyot<span className="text-red-500 ml-0.5" aria-hidden="true">*</span></label>
               <div className="flex gap-2">
                 {[1, 2, 3].map((m) => (
                   <button
@@ -133,20 +146,59 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
               </div>
             </div>
             <div>
-              <label className="label">İstenen başlangıç tarihi</label>
+              <label className="label">İstenen başlangıç tarihi<span className="text-red-500 ml-0.5" aria-hidden="true">*</span></label>
               <input
                 type="date"
-                className="input"
+                className="input cursor-pointer"
                 value={desiredStartDate}
                 min={todayISO()}
                 onChange={(e) => setDesiredStartDate(e.target.value)}
+                onClick={openDatePicker}
                 required
               />
             </div>
           </div>
 
+          {FEATURES.weekdaySelection && (
           <div>
-            <label className="label">Proje adı</label>
+            <label className="label">
+              Hangi günler?<span className="text-red-500 ml-0.5" aria-hidden="true">*</span> <span className="text-kt-gray-400 font-normal">(periyot boyunca)</span>
+            </label>
+            <div className="grid grid-cols-7 gap-1.5">
+              {[
+                { d: 1, l: 'Pzt' },
+                { d: 2, l: 'Sal' },
+                { d: 3, l: 'Çar' },
+                { d: 4, l: 'Per' },
+                { d: 5, l: 'Cum' },
+                { d: 6, l: 'Cmt' },
+                { d: 7, l: 'Paz' },
+              ].map(({ d, l }) => (
+                <button
+                  type="button"
+                  key={d}
+                  onClick={() => toggleWeekday(d)}
+                  className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                    weekdays.includes(d)
+                      ? 'bg-kt-gold-500 text-white shadow-kt-gold'
+                      : 'bg-kt-gray-100 text-kt-green-700 hover:bg-kt-gray-200'
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-kt-gray-500 mt-1.5">
+              Sıranız geldiğinde oda yalnızca seçtiğiniz günler için rezerve edilir.
+            </p>
+            {weekdays.length === 0 && (
+              <p className="text-xs text-red-600 mt-1">En az bir gün seçin.</p>
+            )}
+          </div>
+          )}
+
+          <div>
+            <label className="label">Proje adı<span className="text-red-500 ml-0.5" aria-hidden="true">*</span></label>
             <input
               type="text"
               className="input"
@@ -154,12 +206,12 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
               onChange={(e) => setProjectName(e.target.value)}
               maxLength={120}
               required
-              placeholder="örn: Vibe coding asistanı"
+              placeholder="örn: AI Destekli Bütçe Asistanı"
             />
           </div>
 
           <div>
-            <label className="label">Proje açıklaması (vibe coding fikri)</label>
+            <label className="label">Proje açıklaması<span className="text-red-500 ml-0.5" aria-hidden="true">*</span></label>
             <textarea
               className="input min-h-[100px]"
               value={projectDescription}
@@ -175,7 +227,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
           </div>
 
           <div>
-            <label className="label">Hangi konuda destek istiyorsun?</label>
+            <label className="label">Hangi konularda desteğe ihtiyacınız var?<span className="text-red-500 ml-0.5" aria-hidden="true">*</span></label>
             <textarea
               className="input min-h-[80px]"
               value={helpNeeded}
@@ -188,7 +240,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
           </div>
 
           <div>
-            <label className="label">Teknolojiler</label>
+            <label className="label">Teknolojiler<span className="text-red-500 ml-0.5" aria-hidden="true">*</span></label>
             <div className="flex flex-wrap gap-1.5 mb-2">
               {TECH_OPTIONS.map((t) => (
                 <button
@@ -209,7 +261,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
               <input
                 type="text"
                 className="input flex-1"
-                placeholder="Kendi teknoloji ekle..."
+                placeholder="Farklı bir teknoloji ekleyin..."
                 value={customTech}
                 onChange={(e) => setCustomTech(e.target.value)}
                 onKeyDown={(e) => {

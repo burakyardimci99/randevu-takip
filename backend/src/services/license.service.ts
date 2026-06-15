@@ -13,8 +13,9 @@
  * - Lisanslı teknolojiler için sabit `LICENSE_CATALOG` map var.
  * - Bir user'ın aktif/pending/feedback booking'lerinden `technologies`
  *   listelerini topla → dedup → her bir lisanslı teknoloji için cost ekle.
- * - Status='approved' VE bugün start..end aralığında ise "aktif" sayılır;
- *   pending/feedback "talep edilen" sayılır.
+ * - "Aktif" tanımı: status IN (approved, pending, feedback_requested) VE
+ *   end_date >= bugün. Gelecekte başlayacak booking'ler de taahhüt edilmiş
+ *   maliyet olarak rapora dahildir (bilinçli).
  *
  * Güvenlik:
  *  - SQL parameterized (app_security §3).
@@ -22,6 +23,7 @@
  *  - Çıktıda PII (e-posta) sadece admin'e döner — public değil.
  */
 import { dbAll } from '../db/schema';
+import { ymdLocal } from '../utils/dates';
 
 /**
  * Lisans kataloğu. Anahtar: küçük harfli + normalleştirilmiş teknoloji adı.
@@ -162,7 +164,7 @@ interface BookingRow {
  * AND end_date >= bugün (geçmiş booking'ler lisans tutmaz).
  */
 export async function getLicenseReport(): Promise<LicenseReport> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = ymdLocal();
 
   const rows = await dbAll(`SELECT b.id AS booking_id, b.user_id, b.technologies, b.status,
               b.start_date, b.end_date,
@@ -215,18 +217,20 @@ export async function getLicenseReport(): Promise<LicenseReport> {
     }
     userEntry.activeBookingCount += 1;
 
-    // Her teknoloji için lisans lookup
+    // Her teknoloji için lisans lookup. DEDUP KANONİK İSİM üzerinden:
+    // katalogda alias anahtarlar var ('copilot' + 'github copilot' aynı ürün) —
+    // ham string ile dedup aynı lisansı iki kez sayıp bütçeyi şişiriyordu.
     const seenInBooking = new Set<string>();
     for (const techRaw of techs) {
-      const key = normalize(techRaw);
-      if (seenInBooking.has(key)) continue;
-      seenInBooking.add(key);
-
       const info = lookupLicense(techRaw);
       if (!info) continue; // tanınmayan teknoloji → skip
 
-      // User entry'sinde bu lisans daha önce sayıldı mı?
-      const existing = userEntry.licenses.find((l) => normalize(l.technology) === key);
+      const key = normalize(info.name);
+      if (seenInBooking.has(key)) continue;
+      seenInBooking.add(key);
+
+      // User entry'sinde bu lisans daha önce sayıldı mı? (kanonik isimle)
+      const existing = userEntry.licenses.find((l) => normalize(l.name) === key);
       if (existing) {
         existing.bookingCount += 1;
       } else {

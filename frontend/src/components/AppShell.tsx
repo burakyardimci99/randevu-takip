@@ -36,6 +36,15 @@ export interface NavItem {
 
 const USER_NAV: NavItem[] = [
   {
+    to: '/dashboard',
+    label: 'Panom',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
+      </svg>
+    ),
+  },
+  {
     to: '/rooms',
     label: 'Odalar',
     icon: (
@@ -336,11 +345,27 @@ export const ARGE_NAV: NavItem[] = [
   ...STAFF_VIEW_NAV,
 ];
 
+/** İzleyici nav — genel bakış + read-only admin görünümleri. */
+export const IZLEYICI_NAV: NavItem[] = [
+  {
+    to: '/izleyici',
+    label: 'Genel Bakış',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+      </svg>
+    ),
+  },
+  ...STAFF_VIEW_NAV,
+];
+
 /** Bir kind için varsayılan nav listesini döndürür. */
 function navForKind(kind: SubjectKind): NavItem[] {
   if (kind === 'admin') return ADMIN_NAV;
   if (kind === 'danisman') return DANISMAN_NAV;
   if (kind === 'arge') return ARGE_NAV;
+  if (kind === 'izleyici') return IZLEYICI_NAV;
   return USER_NAV;
 }
 
@@ -368,7 +393,9 @@ export function AppShell({
         ? auth.danisman
         : kind === 'arge'
           ? auth.arge
-          : auth.user;
+          : kind === 'izleyici'
+            ? auth.izleyici
+            : auth.user;
 
   // Kullanıcı profil fotoğrafını header avatarında göster (yalnız 'user' kind).
   const [userPhoto, setUserPhoto] = useState<string | null>(cachedUserPhoto);
@@ -392,6 +419,14 @@ export function AppShell({
   const location = useLocation();
   const notif = useNotificationsData(kind);
   const { markItemRead } = notif;
+
+  // Mobil (md altı) açılır navigasyon menüsü durumu.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Rota değişince mobil menüyü kapat (kullanıcı bir öğeye tıklayınca).
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
 
   // Açık olan bölümün okunmamış bildirimleri okundu işaretlenir → menü rozeti
   // temizlenir. notif.items bağımlılıkta: bildirimler navigasyondan SONRA
@@ -431,7 +466,9 @@ export function AppShell({
         ? '/danisman'
         : kind === 'arge'
           ? '/arge'
-          : '/profile');
+          : kind === 'izleyici'
+            ? '/izleyici'
+            : '/profile');
   const effectiveRoleLabel =
     roleLabel ??
     (kind === 'admin'
@@ -440,7 +477,9 @@ export function AppShell({
         ? 'Analitik Danışman'
         : kind === 'arge'
           ? 'YZ / Ar-Ge'
-          : 'Kullanıcı');
+          : kind === 'izleyici'
+            ? 'İzleyici'
+            : 'Kullanıcı');
 
   async function handleLogout() {
     try {
@@ -454,6 +493,13 @@ export function AppShell({
 
   return (
     <div className="min-h-screen flex flex-col bg-ai-light relative">
+      {/* Erişilebilirlik: klavye kullanıcısı için "İçeriğe atla" — yalnız odaklanınca görünür. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-[200] focus:px-4 focus:py-2 focus:rounded-lg focus:bg-kt-gold-400 focus:text-kt-green-950 focus:font-semibold focus:shadow-kt-card"
+      >
+        İçeriğe atla
+      </a>
       <header className="bg-gradient-to-r from-kt-green-950 via-kt-green-900 to-kt-green-950 border-b border-kt-gold-400/20 sticky top-0 z-40 shadow-glow-blue">
         {/* AI neural overlay */}
         <div className="absolute inset-0 bg-neural-grid-dark opacity-30 pointer-events-none" />
@@ -466,6 +512,25 @@ export function AppShell({
 
           <div className="flex items-center gap-2 md:gap-3 shrink-0">
             {nav}
+            {/* Mobil (md altı) hamburger — açılır navigasyon menüsünü kontrol eder. */}
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen((o) => !o)}
+              className="md:hidden p-2 rounded-lg hover:bg-white/10 text-white/80 hover:text-kt-gold-300 transition-colors"
+              aria-label="Menü"
+              aria-expanded={mobileNavOpen}
+              aria-controls="mobile-nav-menu"
+            >
+              {mobileNavOpen ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
             <button
               onClick={() => {
                 const evt = new KeyboardEvent('keydown', { key: 'k', metaKey: true });
@@ -517,9 +582,12 @@ export function AppShell({
           </div>
         </div>
 
-        {/* Ana navigasyon — ikinci satır. Sığdığında ortalı, taşınca yatay kaydırılır.
-            Logo + sağ kontroller üst satırda kaldığından "Çıkış" her zaman görünür. */}
-        <nav className="border-t border-kt-gold-400/15 px-6 py-2 overflow-x-auto scrollbar-thin relative">
+        {/* Ana navigasyon — ikinci satır (masaüstü, md ve üstü). Sığdığında ortalı,
+            taşınca yatay kaydırılır. md altında gizlenir; yerine hamburger menü gelir. */}
+        <nav
+          aria-label="Ana navigasyon"
+          className="hidden md:block border-t border-kt-gold-400/15 px-6 py-2 overflow-x-auto scrollbar-thin relative"
+        >
           <div className="flex items-center gap-1 mx-auto w-max">
             {items.map((item) => {
               const badge = badgeCount(item.to);
@@ -548,9 +616,86 @@ export function AppShell({
             })}
           </div>
         </nav>
+
+        {/* Mobil açılır navigasyon menüsü (md altı) — hamburger ile kontrol edilir.
+            Nav öğeleri + profil çipi + komut paleti burada erişilebilir. */}
+        {mobileNavOpen && (
+          <nav
+            id="mobile-nav-menu"
+            aria-label="Mobil navigasyon"
+            className="md:hidden border-t border-kt-gold-400/15 px-4 py-3 relative max-h-[70vh] overflow-y-auto scrollbar-thin"
+          >
+            <div className="flex flex-col gap-1">
+              {items.map((item) => {
+                const badge = badgeCount(item.to);
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === '/admin' || item.to === '/rooms'}
+                    onClick={() => setMobileNavOpen(false)}
+                    className={({ isActive }) =>
+                      `px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2.5 transition-colors ${
+                        isActive
+                          ? 'bg-kt-gold-400/15 text-kt-gold-300 ring-1 ring-kt-gold-400/40'
+                          : 'text-white/70 hover:text-kt-gold-300 hover:bg-white/5'
+                      }`
+                    }
+                  >
+                    {item.icon}
+                    <span className="flex-1">{item.label}</span>
+                    {badge > 0 && (
+                      <span className="min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">
+                        {badge > 9 ? '9+' : badge}
+                      </span>
+                    )}
+                  </NavLink>
+                );
+              })}
+
+              {/* Komut paleti — masaüstünde sağ üstte; mobilde menü içinde. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  const evt = new KeyboardEvent('keydown', { key: 'k', metaKey: true });
+                  window.dispatchEvent(evt);
+                }}
+                className="px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2.5 text-white/70 hover:text-kt-gold-300 hover:bg-white/5 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <span className="flex-1 text-left">Ara (Komut paleti)</span>
+                <kbd className="text-[10px] bg-white/10 px-1 py-0.5 rounded">⌘K</kbd>
+              </button>
+
+              {/* Profil çipi — masaüstünde 2xl'de görünür; mobilde menü içinde. */}
+              <Link
+                to={effectiveProfileLink}
+                onClick={() => setMobileNavOpen(false)}
+                className="mt-1 px-3 py-2 rounded-lg flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-kt-gold-400/30 transition-all"
+              >
+                <div className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-kt-gold-400 to-kt-gold-600 text-kt-green-950 flex items-center justify-center font-bold text-xs shadow-glow-cyan shrink-0">
+                  {kind === 'admin' ? (
+                    <img src="/admin-pp.png" alt="" className="w-full h-full object-cover" />
+                  ) : userPhoto ? (
+                    <img src={userPhoto} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    me?.fullName?.split(' ').map((p) => p[0]).slice(0, 2).join('') ?? '??'
+                  )}
+                </div>
+                <div className="text-xs min-w-0">
+                  <div className="font-semibold text-white leading-tight truncate">{me?.fullName}</div>
+                  <div className="text-kt-gold-300/80 leading-tight">{effectiveRoleLabel}</div>
+                </div>
+              </Link>
+            </div>
+          </nav>
+        )}
       </header>
 
-      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-6 py-8 animate-fade-in">
+      <main id="main-content" tabIndex={-1} className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-6 py-8 animate-fade-in focus:outline-none">
         {children}
       </main>
 

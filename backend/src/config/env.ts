@@ -7,6 +7,12 @@ import 'dotenv/config';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+// Saat dilimi politikası: sistem TR sahası için çalışır — tarih sınırları
+// (randevu başlangıç/bitiş, cron expiry, "bugün" kontrolleri) Europe/Istanbul
+// gününe göre hesaplanmalı. Container'lar TZ env'iyle başlar (compose/Dockerfile);
+// bu satır TZ verilmeden çalıştırılan ortamlar için güvenlik ağıdır.
+process.env.TZ ??= 'Europe/Istanbul';
+
 function requireEnv(key: string): string {
   const value = process.env[key];
   if (!value || value.trim().length === 0) {

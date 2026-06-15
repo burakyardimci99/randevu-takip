@@ -39,7 +39,10 @@ function getKeyBundle(kind: SubjectKind): KeyBundle {
   // Bu sayede danisman token'ı /api/user/* üzerinde verifyAccessToken'da
   // audience mismatch ile reddedilir (token cross-role kullanım engellenir).
   const audSuffix =
-    kind === 'danisman' ? '-danisman' : kind === 'arge' ? '-arge' : '';
+    kind === 'danisman' ? '-danisman'
+    : kind === 'arge' ? '-arge'
+    : kind === 'izleyici' ? '-izleyici'
+    : '';
   return {
     privateKey: config.userJwtPrivateKey,
     publicKey: config.userJwtPublicKey,
@@ -57,18 +60,20 @@ export interface IssuedTokens {
 
 export function signAccessToken(
   kind: SubjectKind,
-  payload: Omit<JwtPayload, 'type'>
+  payload: Omit<JwtPayload, 'type'>,
+  opts?: { ttlOverride?: number }
 ): { token: string; ttl: number } {
   const bundle = getKeyBundle(kind);
+  const ttl = opts?.ttlOverride ?? bundle.accessTtl;
   const options: SignOptions = {
     algorithm: 'RS256',
-    expiresIn: bundle.accessTtl,
+    expiresIn: ttl,
     issuer: config.jwtIssuer,
     audience: bundle.audience,
   };
   const fullPayload: JwtPayload = { ...payload, type: kind };
   const token = jwt.sign(fullPayload, bundle.privateKey, options);
-  return { token, ttl: bundle.accessTtl };
+  return { token, ttl };
 }
 
 function hashToken(raw: string): string {

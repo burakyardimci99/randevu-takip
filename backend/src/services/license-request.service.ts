@@ -664,7 +664,8 @@ export async function listUserLicenseRequests(userId: string): Promise<LicenseRe
  * ============================================================ */
 
 export async function listAdminLicenseRequests(
-  statusFilter?: LicenseRequestStatus
+  statusFilter?: LicenseRequestStatus,
+  page?: { limit?: number; offset?: number }
 ): Promise<LicenseRequestWithUser[]> {
   const params: unknown[] = [];
   let where = '';
@@ -672,6 +673,8 @@ export async function listAdminLicenseRequests(
     where = 'WHERE lr.status = ?';
     params.push(statusFilter);
   }
+  params.push(Math.min(Math.max(page?.limit ?? 200, 1), 500));
+  params.push(Math.max(page?.offset ?? 0, 0));
 
   const rows = await dbAll(`${SELECT_ADMIN_REQUEST}
        ${where}
@@ -681,7 +684,8 @@ export async function listAdminLicenseRequests(
            WHEN 'feedback_requested' THEN 1
            ELSE 2
          END,
-         lr.created_at DESC`, [...params]) as DbRowWithUser[];
+         lr.created_at DESC
+       LIMIT ? OFFSET ?`, [...params]) as DbRowWithUser[];
   const itemMap = await loadItemsForRequests(rows.map((r) => r.id));
   return Promise.all(rows.map((r) => rowToLicenseRequestWithUser(r, itemMap.get(r.id) ?? [])));
 }

@@ -62,9 +62,10 @@ function tableFor(kind: SubjectKind): 'users' | 'admins' {
 }
 
 /** Yönetişim kind'ı (danisman/arge) için user kaydının governance_role'ü eşleşmeli. */
-function expectedGovernanceRoleFor(kind: SubjectKind): 'analitik_danisman' | 'yz_arge' | null {
+function expectedGovernanceRoleFor(kind: SubjectKind): 'analitik_danisman' | 'yz_arge' | 'izleyici' | null {
   if (kind === 'danisman') return 'analitik_danisman';
   if (kind === 'arge') return 'yz_arge';
+  if (kind === 'izleyici') return 'izleyici';
   return null;
 }
 
@@ -106,7 +107,7 @@ export interface LoginResult {
     email: string;
     fullName: string;
     role: string;
-    governanceRole?: 'analitik_danisman' | 'yz_arge' | null;
+    governanceRole?: 'analitik_danisman' | 'yz_arge' | 'izleyici' | null;
   };
   locked: boolean;
 }
@@ -142,11 +143,11 @@ export async function login(
   }
 
   if (!passwordOk) {
-    incrementFailedLogin(kind, record.id, record.failed_login_count);
+    await incrementFailedLogin(kind, record.id, record.failed_login_count);
     throw new HttpError(401, GENERIC_AUTH_ERROR, 'AUTH_FAILED');
   }
 
-  resetFailedLogin(kind, record.id);
+  await resetFailedLogin(kind, record.id);
 
   const governanceRole =
     kind === 'user' ? (record as UserRecord).governance_role ?? null : undefined;
@@ -230,25 +231,59 @@ export async function registerUser(input: RegisterInput): Promise<{ id: string; 
   return { id, email: normalizedEmail, fullName: input.fullName.trim() };
 }
 
-export async function findSubjectById(kind: SubjectKind, id: string): Promise<SubjectRecord | undefined> {
-  const table = tableFor(kind);
-  const row = await dbOne(`SELECT * FROM ${table} WHERE id = ? AND status = 1 LIMIT 1`, [id]) as SubjectRecord | undefined;
-  if (!row) return undefined;
+/**
+ * Auth lookup cache — findSubjectById HER authenticated istekte çağrılır;
+ * SELECT * ile 200KB'a varan profile_photo dahil tüm satırı çekiyordu.
+ * Kısa TTL'li cache + dar kolon listesi: DB yükü ve payload düşer.
+ * Kullanıcıyı etkileyen admin işlemleri (devre dışı bırakma, rol değişimi,
+ * purge) invalidateSubjectCache ile anında düşürür.
+ */
+const SUBJECT_CACHE_TTL_MS = 30_000;
+const subjectCache = new Map<string, { row: SubjectRecord | undefined; expiresAt: number }>();
 
-  // Yönetişim kind'ları için governance_role eşleşmesi şart — DB'de role
-  // değiştirilmişse eski token geçersizleşir.
-  const expectedRole = expectedGovernanceRoleFor(kind);
-  if (expectedRole !== null) {
-    const actual = (row as UserRecord).governance_role ?? null;
-    if (actual !== expectedRole) return undefined;
+export function invalidateSubjectCache(id?: string): void {
+  if (!id) {
+    subjectCache.clear();
+    return;
   }
-  // Normal user için governance_role NULL olmalı; varsa danisman/arge kind'ına
-  // yönlendirilmiş, 'user' token'ı yanlış kişide.
-  if (kind === 'user') {
-    const actual = (row as UserRecord).governance_role ?? null;
-    if (actual !== null) return undefined;
+  for (const key of subjectCache.keys()) {
+    if (key.endsWith(`:${id}`)) subjectCache.delete(key);
   }
-  return row;
+}
+
+export async function findSubjectById(kind: SubjectKind, id: string): Promise<SubjectRecord | undefined> {
+  const cacheKey = `${kind}:${id}`;
+  const cached = subjectCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.row;
+
+  const table = tableFor(kind);
+  // Yalnız auth katmanının ihtiyaç duyduğu kolonlar — profile_photo/bio gibi
+  // büyük alanlar BİLİNÇLİ dışarıda (gereken yer kendisi çeker).
+  const cols =
+    table === 'users'
+      ? 'id, email, full_name, role, status, locked_until, failed_login_count, governance_role'
+      : 'id, email, full_name, role, status, locked_until, failed_login_count';
+  const row = await dbOne(`SELECT ${cols} FROM ${table} WHERE id = ? AND status = 1 LIMIT 1`, [id]) as SubjectRecord | undefined;
+
+  let result: SubjectRecord | undefined = row;
+  if (row) {
+    // Yönetişim kind'ları için governance_role eşleşmesi şart — DB'de role
+    // değiştirilmişse eski token geçersizleşir.
+    const expectedRole = expectedGovernanceRoleFor(kind);
+    if (expectedRole !== null) {
+      const actual = (row as UserRecord).governance_role ?? null;
+      if (actual !== expectedRole) result = undefined;
+    }
+    // Normal user için governance_role NULL olmalı; varsa danisman/arge kind'ına
+    // yönlendirilmiş, 'user' token'ı yanlış kişide.
+    if (kind === 'user') {
+      const actual = (row as UserRecord).governance_role ?? null;
+      if (actual !== null) result = undefined;
+    }
+  }
+
+  subjectCache.set(cacheKey, { row: result, expiresAt: Date.now() + SUBJECT_CACHE_TTL_MS });
+  return result;
 }
 
 /**
@@ -275,10 +310,10 @@ export async function unifiedLogin(email: string, password: string): Promise<Log
     }
     const ok = await argon2.verify(adminRecord.password_hash, password).catch(() => false);
     if (ok) {
-      resetFailedLogin('admin', adminRecord.id);
+      await resetFailedLogin('admin', adminRecord.id);
       // Tek-aktif-oturum politikası (C1 savunması): yeni login → eski refresh
       // token'ları (her kind'da) revoke.
-      revokeAllForSubjectAllKinds(adminRecord.id);
+      await revokeAllForSubjectAllKinds(adminRecord.id);
       const accessPayload = { sub: adminRecord.id, role: adminRecord.role, email: adminRecord.email };
       const { token: accessToken, ttl } = signAccessToken('admin', accessPayload);
       const { token: refreshToken } = await issueRefreshToken('admin', adminRecord.id);
@@ -289,7 +324,7 @@ export async function unifiedLogin(email: string, password: string): Promise<Log
         locked: false,
       };
     }
-    incrementFailedLogin('admin', adminRecord.id, adminRecord.failed_login_count);
+    await incrementFailedLogin('admin', adminRecord.id, adminRecord.failed_login_count);
     // Don't fall through to user table — admin password failure is final
     throw new HttpError(401, GENERIC_AUTH_ERROR, 'AUTH_FAILED');
   }
@@ -312,15 +347,15 @@ export async function unifiedLogin(email: string, password: string): Promise<Log
 
   const ok = await argon2.verify(userRecord.password_hash, password).catch(() => false);
   if (!ok) {
-    incrementFailedLogin('user', userRecord.id, userRecord.failed_login_count);
+    await incrementFailedLogin('user', userRecord.id, userRecord.failed_login_count);
     throw new HttpError(401, GENERIC_AUTH_ERROR, 'AUTH_FAILED');
   }
 
-  resetFailedLogin('user', userRecord.id);
+  await resetFailedLogin('user', userRecord.id);
   // Tek-aktif-oturum politikası (C1 savunması): yeni login → tüm eski refresh
   // token'lar (her kind) revoke. Demo+intranet senaryosunda multi-device beklenmediği
   // için ek güvenlik olarak tek aktif oturum tutulur.
-  revokeAllForSubjectAllKinds(userRecord.id);
+  await revokeAllForSubjectAllKinds(userRecord.id);
   const governanceRole = (userRecord as UserRecord).governance_role ?? null;
   // Yönetişim rolüne göre token kind'ı belirlenir — danisman/arge için ayrı
   // audience'lı token üretilir, bu token user/admin endpoint'lerinde geçmez.
@@ -329,7 +364,9 @@ export async function unifiedLogin(email: string, password: string): Promise<Log
       ? 'danisman'
       : governanceRole === 'yz_arge'
         ? 'arge'
-        : 'user';
+        : governanceRole === 'izleyici'
+          ? 'izleyici'
+          : 'user';
   const accessPayload = {
     sub: userRecord.id,
     role: userRecord.role,

@@ -190,13 +190,13 @@ export async function deleteStoredFiles(id: string): Promise<void> {
 }
 
 /** Saklanan dosyayı (id+seed) bulur; yoksa null. */
-async function findStored(id: string, seed: number): Promise<{ absPath: string; contentType: string } | null> {
+async function findStored(id: string, seed: number): Promise<{ absPath: string; contentType: string; size: number } | null> {
   for (const ext of KNOWN_EXTS) {
     const p = storedPath(id, seed, ext);
     try {
       const s = await stat(p);
       if (s.isFile()) {
-        return { absPath: p, contentType: EXT_TO_CONTENT_TYPE[ext] ?? 'application/octet-stream' };
+        return { absPath: p, contentType: EXT_TO_CONTENT_TYPE[ext] ?? 'application/octet-stream', size: s.size };
       }
     } catch {
       /* sıradaki uzantı */
@@ -214,9 +214,11 @@ export async function serveStoredImage(res: Response, id: string, seed: number):
   const found = await findStored(id, seed);
   if (!found) return false;
 
-  const size = (await stat(found.absPath)).size;
+  // İkinci stat YOK (TOCTOU): eşzamanlı silmede ENOENT 500'e dönüşüyordu —
+  // findStored'un stat sonucundaki boyut kullanılır; silinme yarışı stream
+  // error handler'ında zaten ele alınır.
   res.setHeader('Content-Type', found.contentType);
-  res.setHeader('Content-Length', String(size));
+  res.setHeader('Content-Length', String(found.size));
   // (id, seed) → sabit baytlar → uzun süreli, immutable cache.
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   res.setHeader('X-Content-Type-Options', 'nosniff');

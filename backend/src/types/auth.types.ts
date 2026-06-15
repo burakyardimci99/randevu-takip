@@ -14,14 +14,14 @@
  * refresh cookie path'lerine düşer — birinden alınan token diğer endpoint'lere
  * geçerli değildir.
  */
-export type SubjectKind = 'user' | 'admin' | 'danisman' | 'arge';
+export type SubjectKind = 'user' | 'admin' | 'danisman' | 'arge' | 'izleyici';
 
 /** Auth flow'larında HTTP kind eşlemesi — login response.type, refresh cookie vs. */
-export const SUBJECT_KINDS: readonly SubjectKind[] = ['user', 'admin', 'danisman', 'arge'] as const;
+export const SUBJECT_KINDS: readonly SubjectKind[] = ['user', 'admin', 'danisman', 'arge', 'izleyici'] as const;
 
 /** Bir SubjectKind'ın user-side mi (auth.middleware için kullanılır) admin-side mi. */
 export function isUserSideKind(k: SubjectKind): boolean {
-  return k === 'user' || k === 'danisman' || k === 'arge';
+  return k === 'user' || k === 'danisman' || k === 'arge' || k === 'izleyici';
 }
 
 export interface UserRecord {
@@ -30,7 +30,7 @@ export interface UserRecord {
   password_hash: string;
   full_name: string;
   role: 'user';
-  governance_role: 'analitik_danisman' | 'yz_arge' | null;
+  governance_role: 'analitik_danisman' | 'yz_arge' | 'izleyici' | null;
   department: string | null;
   title: string | null;
   manager: string | null;
@@ -63,7 +63,13 @@ export interface JwtPayload {
   role: string;
   email: string;
   /** User'lar için yönetişim rolü (varsa). Admin'ler için undefined. */
-  governanceRole?: 'analitik_danisman' | 'yz_arge' | null;
+  governanceRole?: 'analitik_danisman' | 'yz_arge' | 'izleyici' | null;
+  /**
+   * MFA'lı admin login'inin ara aşaması. 'pending' taşıyan token YALNIZCA
+   * /auth/mfa/verify'da geçerlidir; tüm guard'lar reddeder. TOTP doğrulanınca
+   * claim'siz (tam yetkili) token verilir.
+   */
+  mfa?: 'pending';
 }
 
 export interface AuthContext {
@@ -72,10 +78,11 @@ export interface AuthContext {
   email: string;
   role: string;
   /** Sadece user'lar için anlamlı. */
-  governanceRole?: 'analitik_danisman' | 'yz_arge' | null;
+  governanceRole?: 'analitik_danisman' | 'yz_arge' | 'izleyici' | null;
 }
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- Express Request augmentation bunu gerektirir
   namespace Express {
     interface Request {
       auth?: AuthContext;

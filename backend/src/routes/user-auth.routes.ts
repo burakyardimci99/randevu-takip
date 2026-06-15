@@ -47,9 +47,9 @@ router.post(
 
       setRefreshCookie(res, 'user', result.tokens.refreshToken);
 
+      // Refresh token yalnız HttpOnly cookie'de — gövdede dönmez.
       res.json({
         accessToken: result.tokens.accessToken,
-        refreshToken: result.tokens.refreshToken,
         expiresIn: result.tokens.expiresIn,
         user: result.subject,
       });
@@ -128,7 +128,6 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 
     res.json({
       accessToken: rotated.accessToken,
-      refreshToken: rotated.refreshToken,
       expiresIn: rotated.expiresIn,
     });
   } catch (err) {
@@ -139,10 +138,10 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 router.post('/logout', csrfProtection, requireUser, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const cookieToken = getRefreshCookie(req, 'user');
-    if (cookieToken) revokeRefreshToken(cookieToken);
+    if (cookieToken) await revokeRefreshToken(cookieToken);
     const input = refreshSchema.safeParse(req.body);
     if (input.success) {
-      revokeRefreshToken(input.data.refreshToken);
+      await revokeRefreshToken(input.data.refreshToken);
     }
     clearRefreshCookie(res, 'user');
     recordAudit({

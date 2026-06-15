@@ -69,6 +69,27 @@ beforeAll(async () => {
       JSON.stringify(['GPT']),
     ]
   );
+
+  // Diğer kişisel veri tabloları — genişletilmiş purge kapsamı (KVKK).
+  await dbRun(
+    `INSERT INTO chat_messages (id, sender_id, sender_kind, recipient_id, recipient_kind, body)
+     VALUES (?, ?, 'user', ?, 'admin', 'KVKK test mesajı')`,
+    [nanoid(), USER_ID, nanoid()]
+  );
+  await dbRun(
+    `INSERT INTO showcase_comments (id, booking_id, user_id, user_full_name, body)
+     VALUES (?, ?, ?, 'Veri Sahibi', 'KVKK test yorumu')`,
+    [nanoid(), BOOKING_APPROVED, USER_ID]
+  );
+  await dbRun(
+    `INSERT INTO notifications (id, recipient_id, recipient_type, category, title, body)
+     VALUES (?, ?, 'user', 'system', 'KVKK', 'test bildirimi')`,
+    [nanoid(), USER_ID]
+  );
+  await dbRun(
+    `INSERT INTO support_requests (id, user_id, description) VALUES (?, ?, 'KVKK destek talebi açıklaması')`,
+    [nanoid(), USER_ID]
+  );
 });
 
 afterAll(async () => {
@@ -124,6 +145,26 @@ describe('purgeUser — Right to be Forgotten', () => {
     )) as { project_description: string; status: string };
     expect(approved.status).toBe('approved'); // hala kayıtlı
     expect(approved.project_description).toContain('silindi');
+  });
+
+  it('sohbet, yorum, bildirim ve destek talepleri de temizlenir (genişletilmiş kapsam)', async () => {
+    const chat = await dbOne(
+      `SELECT COUNT(*) AS c FROM chat_messages WHERE sender_id = ? OR recipient_id = ?`,
+      [USER_ID, USER_ID]
+    ) as { c: number };
+    expect(Number(chat.c)).toBe(0);
+    const comments = await dbOne(
+      `SELECT COUNT(*) AS c FROM showcase_comments WHERE user_id = ?`, [USER_ID]
+    ) as { c: number };
+    expect(Number(comments.c)).toBe(0);
+    const notifs = await dbOne(
+      `SELECT COUNT(*) AS c FROM notifications WHERE recipient_id = ?`, [USER_ID]
+    ) as { c: number };
+    expect(Number(notifs.c)).toBe(0);
+    const support = await dbOne(
+      `SELECT COUNT(*) AS c FROM support_requests WHERE user_id = ?`, [USER_ID]
+    ) as { c: number };
+    expect(Number(support.c)).toBe(0);
   });
 
   it('refresh tokenlar revoke edilir', async () => {

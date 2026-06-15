@@ -388,7 +388,6 @@ export default function Profile() {
       {showBgPicker && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-          onClick={() => setShowBgPicker(false)}
         >
           <div
             className="bg-white rounded-2xl shadow-kt-card max-w-lg w-full max-h-[85vh] overflow-y-auto p-6"
@@ -418,7 +417,7 @@ export default function Profile() {
                 sayfasından oluştur.
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {profile?.profileBackgroundUrl && (
                   <button
                     onClick={() => applyBg(null)}

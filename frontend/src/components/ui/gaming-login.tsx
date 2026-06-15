@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock, User, ShieldCheck, Home, BrainCircuit, FlaskConical } from 'lucide-react';
 
 interface LoginFormProps {
@@ -10,7 +11,7 @@ interface LoginFormProps {
   onPasswordChange: (v: string) => void;
   onRememberChange: (v: boolean) => void;
   onSubmit: (e: React.FormEvent) => void;
-  onDemoFill?: (which: 'user' | 'admin' | 'danisman' | 'arge') => void;
+  onDemoFill?: (which: 'user' | 'admin' | 'danisman' | 'arge' | 'izleyici') => void;
   onHomeClick?: () => void;
   registerHref?: string;
   forgotHref?: string;
@@ -25,6 +26,8 @@ interface FormInputProps {
   icon: React.ReactNode;
   type: string;
   id: string;
+  /** Erişilebilir etiket — görsel olarak gizli (sr-only) <label>. */
+  label: string;
   placeholder: string;
   value: string;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -47,9 +50,12 @@ interface ToggleSwitchProps {
   id: string;
 }
 
-const FormInput: React.FC<FormInputProps> = ({ icon, type, id, placeholder, value, onChange, autoComplete, maxLength, disabled, required }) => {
+const FormInput: React.FC<FormInputProps> = ({ icon, type, id, label, placeholder, value, onChange, autoComplete, maxLength, disabled, required }) => {
   return (
     <div className="relative">
+      {/* Görsel tasarımı bozmadan ekran okuyucu için gerçek etiket
+          (placeholder etiket yerine geçmez). */}
+      <label htmlFor={id} className="sr-only">{label}</label>
       <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">{icon}</div>
       <input
         id={id}
@@ -164,6 +170,7 @@ const LoginForm: React.FC<LoginFormProps> = ({
         <form onSubmit={onSubmit} className="space-y-5" autoComplete="on">
           <FormInput
             id="email"
+            label="E-posta adresi"
             icon={<Mail className="text-white/60" size={18} />}
             type="email"
             placeholder="E-posta adresin"
@@ -178,6 +185,7 @@ const LoginForm: React.FC<LoginFormProps> = ({
           <div className="relative">
             <FormInput
               id="password"
+              label="Parola"
               icon={<Lock className="text-white/60" size={18} />}
               type={showPassword ? 'text' : 'password'}
               placeholder="Parola"
@@ -193,7 +201,7 @@ const LoginForm: React.FC<LoginFormProps> = ({
               className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white focus:outline-none transition-colors"
               onClick={() => setShowPassword((v) => !v)}
               aria-label={showPassword ? 'Parolayı gizle' : 'Parolayı göster'}
-              tabIndex={-1}
+              aria-pressed={showPassword}
             >
               {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
             </button>
@@ -215,9 +223,9 @@ const LoginForm: React.FC<LoginFormProps> = ({
                 Beni hatırla
               </label>
             </div>
-            <a href={forgotHref} className="text-sm text-white/70 hover:text-kt-gold-300 transition-colors">
+            <Link to={forgotHref} className="text-sm text-white/70 hover:text-kt-gold-300 transition-colors">
               Parolanı mı unuttun?
-            </a>
+            </Link>
           </div>
 
           <button type="submit" disabled={loading} className="btn-pill-primary btn-pill-md w-full">
@@ -270,6 +278,14 @@ const LoginForm: React.FC<LoginFormProps> = ({
                   onClick={() => onDemoFill('arge')}
                 />
               )}
+              {onDemoFill && (
+                <QuickButton
+                  icon={<Eye size={18} />}
+                  label="İzleyici"
+                  title="İzleyici (salt-okunur) demo hesabını doldur (Gözlem Yetkilisi)"
+                  onClick={() => onDemoFill('izleyici')}
+                />
+              )}
               {onHomeClick && (
                 <QuickButton
                   icon={<Home size={18} />}
@@ -284,9 +300,9 @@ const LoginForm: React.FC<LoginFormProps> = ({
 
         <p className="mt-8 text-center text-sm text-white/60">
           Hesabın yok mu?{' '}
-          <a href={registerHref} className="font-semibold text-kt-gold-300 hover:text-kt-gold-200 transition-colors">
+          <Link to={registerHref} className="font-semibold text-kt-gold-300 hover:text-kt-gold-200 transition-colors">
             Kayıt ol →
-          </a>
+          </Link>
         </p>
       </div>
     </div>

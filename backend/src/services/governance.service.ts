@@ -304,8 +304,8 @@ export async function advanceLifecycle(
        WHERE id = ?`, [next, requestId]);
 
     // Yeni aşama insan onayı gerektiriyorsa bekleyen onayı aç.
-    if (next === 'stage') createPendingApproval(requestId, 'stage');
-    if (next === 'production') createPendingApproval(requestId, 'production');
+    if (next === 'stage') await createPendingApproval(requestId, 'stage');
+    if (next === 'production') await createPendingApproval(requestId, 'production');
 
     await recordStageEvent({
       requestId,
@@ -324,7 +324,7 @@ export async function advanceLifecycle(
  * Lab Mühendisi atar (kılavuz: ortam ataması).
  */
 export async function assignEngineer(requestId: string, engineerId: string): Promise<void> {
-  loadLifecycleRow(requestId); // varlık kontrolü
+  await loadLifecycleRow(requestId); // varlık kontrolü
   await dbRun(`UPDATE license_requests
      SET assigned_engineer_id = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`, [engineerId, requestId]);

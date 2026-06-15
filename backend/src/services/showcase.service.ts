@@ -42,7 +42,7 @@ export async function getLikeStatus(bookingId: string, userId: string | null): P
 }
 
 export async function toggleLike(bookingId: string, userId: string): Promise<LikeStatus> {
-  assertShowcaseable(bookingId);
+  await assertShowcaseable(bookingId);
 
   const existing = await dbOne('SELECT id FROM showcase_likes WHERE booking_id = ? AND user_id = ?', [bookingId, userId]) as { id: string } | undefined;
 
@@ -114,7 +114,7 @@ export async function postComment(args: {
   userFullName: string;
   body: string;
 }): Promise<ShowcaseComment> {
-  assertShowcaseable(args.bookingId);
+  await assertShowcaseable(args.bookingId);
   const body = args.body.trim();
   if (body.length < 1 || body.length > 1000) {
     throw new HttpError(400, 'Yorum 1-1000 karakter olmalı.', 'VALIDATION');
