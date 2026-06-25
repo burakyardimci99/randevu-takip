@@ -151,7 +151,7 @@ export default function UserWaitlist() {
                         </div>
                         <h3 className="font-bold text-kt-green-900 truncate">{e.projectName}</h3>
                         <div className="text-xs text-kt-gray-500 mt-0.5">
-                          {fmtDate(e.desiredStartDate)} · {e.periodMonths} ay
+                          {fmtDate(e.desiredStartDate)} – {fmtDate(e.desiredEndDate)} · {e.periodMonths} ay
                         </div>
                       </div>
                       <button

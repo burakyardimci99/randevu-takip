@@ -1,10 +1,10 @@
 /**
- * Oda × gün doluluk ısı-haritası — APPOINTMENT (saatli randevu) tabanlı (#5/#6).
+ * Oda × gün doluluk ısı-haritası — ONAYLI BOOKING rezervasyonu tabanlı.
  *
- *  - Haftalık görünüm (Pzt–Paz); ‹ Bugün › butonlarıyla hafta ileri/geri (#6).
- *  - Hücre = o gün o odadaki randevu sayısı; renk yoğunluğu sayı/maks oranı.
- *  - Hücreye tıklayınca o odanın o gün HANGİ SAATLERDE dolu olduğu açılır (#5).
- *  - Realtime: randevu eklenince/iptal olunca ısı haritası otomatik yenilenir (#5).
+ *  - Haftalık görünüm (Pzt–Paz); ‹ Bugün › butonlarıyla hafta ileri/geri.
+ *  - Hücre = o gün o odayı kaplayan onaylı rezervasyon sayısı; renk yoğunluğu sayı/maks oranı.
+ *  - Hücreye tıklayınca o gün hangi PROJELER'in odayı kapladığı (kullanıcı + tarih aralığı) açılır.
+ *  - Realtime: booking onaylanınca/değişince ısı haritası otomatik yenilenir.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -29,8 +29,8 @@ function addDays(d: Date, n: number): Date {
   x.setDate(x.getDate() + n);
   return x;
 }
-function fmtHM(iso: string): string {
-  return new Date(iso).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+function fmtD(dateStr: string): string {
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
 }
 
 /** count/max oranına göre hücre rengi (cyan yoğunluk). */
@@ -55,6 +55,7 @@ export function RoomWeekdayHeatmap({ kind = 'user' }: { kind?: SubjectKind }) {
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
   const [data, setData] = useState<RoomApptHeatmap | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<SelectedCell | null>(null);
 
   const from = ymd(weekStart);
@@ -62,11 +63,13 @@ export function RoomWeekdayHeatmap({ kind = 'user' }: { kind?: SubjectKind }) {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await api.roomAppointmentHeatmap({ from, to });
       setData(res);
-    } catch {
+    } catch (e) {
       setData(null);
+      setError((e as Error)?.message || 'Isı haritası yüklenemedi.');
     } finally {
       setLoading(false);
     }
@@ -158,8 +161,22 @@ export function RoomWeekdayHeatmap({ kind = 'user' }: { kind?: SubjectKind }) {
 
       {loading ? (
         <div className="h-64 animate-pulse bg-kt-gray-100 rounded-lg" />
+      ) : error ? (
+        <div className="py-6 text-center space-y-2">
+          <div className="text-sm text-red-600">Isı haritası yüklenemedi.</div>
+          <div className="text-[11px] text-kt-gray-400">{error}</div>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="text-xs font-semibold text-cyan-700 underline hover:text-cyan-900"
+          >
+            Tekrar dene
+          </button>
+        </div>
       ) : !data || data.rooms.length === 0 ? (
-        <div className="text-sm text-kt-gray-500 italic py-6 text-center">Veri yok.</div>
+        <div className="text-sm text-kt-gray-500 italic py-6 text-center">
+          Bu hafta için onaylı rezervasyon yok.
+        </div>
       ) : (
         <div className="overflow-x-auto scrollbar-thin">
           <table className="w-full border-separate" style={{ borderSpacing: '3px' }}>
@@ -209,8 +226,8 @@ export function RoomWeekdayHeatmap({ kind = 'user' }: { kind?: SubjectKind }) {
                           } ${isSel ? 'ring-2 ring-cyan-600' : ''}`}
                           title={
                             active
-                              ? `${room.name} · ${cell.date}: ${cell.count} randevu — saatleri görmek için tıkla`
-                              : `${room.name} · ${cell.date}: randevu yok`
+                              ? `${room.name} · ${cell.date}: ${cell.count} rezervasyon — detay için tıkla`
+                              : `${room.name} · ${cell.date}: rezervasyon yok`
                           }
                         >
                           {active ? cell.count : ''}
@@ -252,14 +269,14 @@ export function RoomWeekdayHeatmap({ kind = 'user' }: { kind?: SubjectKind }) {
           >
             <div className="p-4 border-b border-kt-gray-100 bg-gradient-to-r from-cyan-600 to-cyan-700 text-white flex items-start justify-between gap-3">
               <div>
-                <div className="text-[11px] uppercase tracking-wider opacity-90">Dolu saatler</div>
+                <div className="text-[11px] uppercase tracking-wider opacity-90">Dolu rezervasyonlar</div>
                 <h3 className="text-lg font-bold">
                   <span className="font-mono opacity-90">{selected.room.code}</span> {selected.room.name}
                 </h3>
                 <div className="text-xs opacity-90 mt-0.5">
                   {new Date(`${selected.day.date}T00:00:00`).toLocaleDateString('tr-TR', {
                     weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
-                  })}{' '}· {selected.day.count} randevu
+                  })}{' '}· {selected.day.count} rezervasyon
                 </div>
               </div>
               <button
@@ -273,14 +290,14 @@ export function RoomWeekdayHeatmap({ kind = 'user' }: { kind?: SubjectKind }) {
             </div>
             <div className="overflow-y-auto scrollbar-thin p-4 space-y-2">
               {selected.day.slots.length === 0 ? (
-                <div className="text-sm text-kt-gray-500 italic py-2">Bu gün için randevu yok.</div>
+                <div className="text-sm text-kt-gray-500 italic py-2">Bu gün için rezervasyon yok.</div>
               ) : (
                 [...selected.day.slots]
                   .sort((a, b) => a.start.localeCompare(b.start))
                   .map((s, i) => (
                     <div key={i} className="flex items-center gap-3 border border-cyan-200 bg-cyan-50/50 rounded-lg p-2.5">
-                      <div className="text-sm font-bold text-cyan-800 tabular-nums whitespace-nowrap">
-                        {fmtHM(s.start)}–{fmtHM(s.end)}
+                      <div className="text-xs font-bold text-cyan-800 tabular-nums whitespace-nowrap">
+                        {fmtD(s.start)}–{fmtD(s.end)}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-kt-green-900 truncate">{s.title}</div>

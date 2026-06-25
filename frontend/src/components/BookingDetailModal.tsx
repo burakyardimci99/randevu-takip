@@ -140,17 +140,15 @@ export function BookingDetailModal({
     reset();
   }
 
-  // Review aksiyonları (approve/reject/feedback) — Admin her durumda, Danışman pending VE
-  // feedback_requested durumlarında (backend governance.service.ts bu iki status'ü beraber SLA'ye dahil ediyor).
-  // Onaylanmış/Reddedilmiş bir talep yine admin tarafından re-review yapılabilir.
+  // ÇİFT ONAY: talep HEM admin HEM analitik (danışman) onayı ister. Yalnız
+  // değerlendirilebilir durumlar (pending / feedback_requested) incelenir; sonuçlanmış
+  // (approved/rejected) talep yeniden incelenmez (backend BOOKING_NOT_REVIEWABLE).
+  // Onaylı talebi geri almak için "iptal" akışı kullanılır.
   const reviewable =
     !!onReview &&
-    (viewerRole === 'admin' ||
-      (viewerRole === 'danisman' &&
-        (booking.status === 'pending' || booking.status === 'feedback_requested')));
-  const isReReview =
-    viewerRole === 'admin' &&
-    (booking.status === 'approved' || booking.status === 'rejected');
+    (booking.status === 'pending' || booking.status === 'feedback_requested') &&
+    (viewerRole === 'admin' || viewerRole === 'danisman');
+  const isReReview = false;
 
   // Yaşam döngüsü görünürlüğü: onaylı booking için admin, arge, kullanıcı görür (read-only kullanıcı için).
   const showLifecycle =
@@ -172,6 +170,28 @@ export function BookingDetailModal({
               </div>
               <h2 className="text-2xl font-bold mb-2">{booking.projectName}</h2>
               <StatusBadge status={booking.status} />
+              {/* Çift onay durumu — admin + analitik kararları (bekleyen talepler). */}
+              {(booking.status === 'pending' || booking.status === 'feedback_requested') && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                  {([
+                    ['Admin', booking.adminDecision],
+                    ['Analitik', booking.analystDecision],
+                  ] as const).map(([label, dec]) => (
+                    <span
+                      key={label}
+                      className={`px-2 py-0.5 rounded-md font-semibold ${
+                        dec === 'approved'
+                          ? 'bg-emerald-500/30 text-emerald-50'
+                          : dec === 'rejected'
+                            ? 'bg-red-500/30 text-red-50'
+                            : 'bg-white/15 text-white/80'
+                      }`}
+                    >
+                      {label}: {dec === 'approved' ? '✓ onayladı' : dec === 'rejected' ? '✕ reddetti' : '⏳ bekliyor'}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <button
               onClick={onClose}

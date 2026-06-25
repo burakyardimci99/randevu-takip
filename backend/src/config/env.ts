@@ -74,6 +74,15 @@ export interface AppConfig {
   authRateLimitMax: number;
 
   logLevel: string;
+
+  /**
+   * Haftanın tek tek günlerini seçerek rezervasyon (ara gün seçimi).
+   * Frontend FEATURES.weekdaySelection ile aynı semantik (FEATURE_WEEKDAY_SELECTION).
+   * KAPALI (varsayılan): rezervasyon tüm haftayı kapsar → oda müsaitliği TARİH
+   * bazlı hesaplanır (bugünü kapsayan herhangi bir booking odayı doldurur).
+   * AÇIK: gün-bazlı (weekday_mask) kısmi müsaitlik.
+   */
+  weekdaySelection: boolean;
 }
 
 function loadConfig(): AppConfig {
@@ -128,6 +137,8 @@ function loadConfig(): AppConfig {
     authRateLimitMax: optionalInt('AUTH_RATE_LIMIT_MAX', 10),
 
     logLevel: process.env.LOG_LEVEL ?? 'info',
+
+    weekdaySelection: process.env.FEATURE_WEEKDAY_SELECTION === 'true',
   };
 }
 

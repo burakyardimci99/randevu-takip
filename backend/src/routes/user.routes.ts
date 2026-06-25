@@ -23,7 +23,7 @@ import {
   borrowBookSchema,
   requestExtensionSchema,
 } from '../validators/schemas';
-import { listRooms } from '../services/room.service';
+import { listRooms, getRoomAvailability } from '../services/room.service';
 import {
   createBooking,
   deleteBooking,
@@ -127,9 +127,29 @@ router.put('/profile', async (req: Request, res: Response, next: NextFunction) =
 
 router.get('/rooms', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Opsiyonel takvim filtresi: ?date=YYYY-MM-DD → uygunluk o güne göre.
-    const date = typeof req.query.date === 'string' ? req.query.date : undefined;
-    res.json({ rooms: await listRooms(date) });
+    // Opsiyonel tarih ARALIĞI filtresi: ?from=YYYY-MM-DD&to=YYYY-MM-DD → uygunluk
+    // o aralığın tamamına göre. Geriye uyum: ?date= tek-gün (from=to=date).
+    const q = req.query;
+    const from = typeof q.from === 'string' ? q.from : (typeof q.date === 'string' ? q.date : undefined);
+    const to = typeof q.to === 'string' ? q.to : undefined;
+    res.json({ rooms: await listRooms(from, to) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Oda müsaitlik detayı (boş günler + dolu tarih aralıkları + dolu saatler).
+// Kart açılınca "müsait vakitler" göstergesi için. PII döndürmez.
+router.get('/rooms/:id/availability', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const from = typeof req.query.from === 'string' ? req.query.from : undefined;
+    const to = typeof req.query.to === 'string' ? req.query.to : undefined;
+    const avail = await getRoomAvailability(String(req.params.id ?? ''), { from, to });
+    if (!avail) {
+      res.status(404).json({ error: 'Oda bulunamadı.', code: 'ROOM_NOT_FOUND' });
+      return;
+    }
+    res.json(avail);
   } catch (err) {
     next(err);
   }
@@ -673,7 +693,7 @@ router.post(
         },
       });
 
-      // Admin'lere yeni başvuru e-postası — otomatik reddedilen başvurular hariç.
+      // Admin'lere yeni başvuru in-app bildirimi — otomatik reddedilen başvurular hariç.
       if (created.status !== 'rejected') {
         void (async () => {
           try {

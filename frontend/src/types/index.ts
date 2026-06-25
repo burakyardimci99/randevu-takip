@@ -133,6 +133,37 @@ export interface Room {
   specs: string | null;
   isAvailable: boolean;
   nextAvailableDate: string | null;
+  /** Bugün itibarıyla boş (rezerve edilebilir) haftanın günleri (1=Pzt..7=Paz). */
+  availableWeekdays: number[];
+}
+
+/** Oda müsaitlik detayı — kart açılınca "müsait vakitler" göstergesi için. */
+export interface RoomBusyRange {
+  startDate: string;
+  endDate: string;
+  weekdays: number[];
+}
+
+export interface RoomAvailabilityDay {
+  date: string;
+  slots: Array<{ start: string; end: string }>;
+}
+
+export interface RoomAvailability {
+  roomId: string;
+  isAvailable: boolean;
+  nextAvailableDate: string | null;
+  availableWeekdays: number[];
+  busyRanges: RoomBusyRange[];
+  /** Bugünden itibaren rezerve edilebilir boş tarih aralıkları (dolu pencerelerden önce/arasında). */
+  freeGaps: Array<{ startDate: string; endDate: string }>;
+  /** Oda bugün müsaitse, gelecekteki en yakın dolu pencere (bilgi notu için). */
+  nextOccupiedWindow: { startDate: string; endDate: string } | null;
+  /** Oda bugün doluysa, doluluk bittikten sonraki en erken müsait tarih. */
+  earliestAvailableAfter: string | null;
+  appointments: RoomAvailabilityDay[];
+  from: string;
+  to: string;
 }
 
 /** Admin "Odalar" görünümü — bir odadaki aktif booking. */
@@ -171,6 +202,8 @@ export interface CreateBookingPayload {
   /** Haftanın seçili günleri (1=Pzt..7=Paz). Verilmezse tüm hafta (ara gün seçimi flag'i kapalı). */
   weekdays?: number[];
   startDate: string;
+  /** Manuel (esnek/kısa) bitiş tarihi. Verilmezse start + periyot türetilir. */
+  endDate?: string;
   projectName: string;
   projectDescription: string;
   helpNeeded: string;
@@ -197,6 +230,8 @@ export interface JoinWaitlistPayload {
   roomId: string;
   periodMonths: 1 | 2 | 3;
   desiredStartDate: string;
+  /** Manuel (periyottan kısa) bitiş tarihi. Verilmezse start + periyot türetilir. */
+  desiredEndDate?: string;
   projectName: string;
   projectDescription: string;
   helpNeeded: string;

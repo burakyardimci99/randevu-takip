@@ -15,7 +15,11 @@ import {
   createBooking,
   deleteBooking,
   updateBooking,
+  reviewBooking,
+  getBookingByIdAdmin,
 } from '../src/services/booking.service';
+import { addMonthsEndDate } from '../src/utils/dates';
+import { createBookingSchema } from '../src/validators/schemas';
 import { HttpError } from '../src/middleware/error.middleware';
 
 const USER_A = nanoid();
@@ -74,6 +78,27 @@ describe('createBooking', () => {
         helpNeeded: 'Hiçbiri',
         technologies: ['GPT'],
       })).rejects.toThrow(HttpError);
+  });
+
+  it('çakışma hatası "ne zamana kadar dolu" + en erken müsait tarihi içerir', async () => {
+    try {
+      await createBooking(USER_B, {
+        roomId: ROOM,
+        periodMonths: 1,
+        startDate: futureDate(8),
+        projectName: 'Çakışan Proje',
+        projectDescription: 'Çakışma mesajını doğrulayan test booking açıklaması.',
+        helpNeeded: 'Hiçbiri',
+        technologies: ['GPT'],
+      });
+      throw new Error('beklenmeyen: çakışma hatası fırlatmadı');
+    } catch (e) {
+      expect(e).toBeInstanceOf(HttpError);
+      const msg = (e as HttpError).message;
+      expect(msg).toMatch(/dolu/i);
+      expect(msg).toMatch(/En erken/i); // en erken müsait tarih bilgisi
+      expect(msg).toMatch(/\d{2}\.\d{2}\.\d{4}/); // DD.MM.YYYY tarih(ler)i
+    }
   });
 
   it('aynı oda + farklı (çakışmayan) tarihte ikinci booking oluşturulabilir', async () => {
@@ -137,5 +162,151 @@ describe('Status kısıtı', () => {
         helpNeeded: 'Hiçbiri',
         technologies: ['Claude'],
       })).rejects.toThrow(/NOT_EDITABLE|düzenlenemez/i);
+  });
+});
+
+describe('çift onay (admin + analitik, paralel, veto)', () => {
+  const DA_ROOM = nanoid();
+  const ADMIN_ID = nanoid();
+  const ANALYST_ID = nanoid();
+
+  beforeAll(async () => {
+    await dbRun(`INSERT INTO rooms (id, code, name, district, neighborhood, capacity) VALUES (?, ?, ?, 'T','M',4)`, [
+      DA_ROOM, 'DA-01', 'Dual Onay Oda',
+    ]);
+  });
+
+  async function makeBooking(startOffset: number): Promise<string> {
+    const b = await createBooking(USER_A, {
+      roomId: DA_ROOM,
+      periodMonths: 1,
+      startDate: futureDate(startOffset),
+      projectName: 'Çift onay projesi',
+      projectDescription: 'Çift onay senaryosu için yeterli uzunlukta açıklama metni.',
+      helpNeeded: 'Yok',
+      technologies: ['Claude'],
+    });
+    return b.id;
+  }
+
+  it('admin önce onaylar → pending; sonra analitik onaylar → approved', async () => {
+    const id = await makeBooking(10);
+    const r1 = await reviewBooking(ADMIN_ID, id, { action: 'approve' }, 'admin');
+    expect(r1.booking.status).toBe('pending');
+    expect(r1.approvalState.adminDecision).toBe('approved');
+    expect(r1.approvalState.analystDecision).toBeNull();
+
+    const r2 = await reviewBooking(ANALYST_ID, id, { action: 'approve' }, 'danisman');
+    expect(r2.booking.status).toBe('approved');
+    expect(r2.booking.lifecycleStage).toBe('development');
+    expect(r2.approvalState.adminDecision).toBe('approved');
+    expect(r2.approvalState.analystDecision).toBe('approved');
+  });
+
+  it('paralel: analitik önce onaylasa da ikisi tamamlanınca approved', async () => {
+    const id = await makeBooking(60);
+    const r1 = await reviewBooking(ANALYST_ID, id, { action: 'approve' }, 'danisman');
+    expect(r1.booking.status).toBe('pending');
+    expect(r1.approvalState.analystDecision).toBe('approved');
+
+    const r2 = await reviewBooking(ADMIN_ID, id, { action: 'approve' }, 'admin');
+    expect(r2.booking.status).toBe('approved');
+  });
+
+  it('veto: admin onaylasa bile analitik reddederse anında rejected', async () => {
+    const id = await makeBooking(110);
+    await reviewBooking(ADMIN_ID, id, { action: 'approve' }, 'admin');
+    const r2 = await reviewBooking(ANALYST_ID, id, { action: 'reject' }, 'danisman');
+    expect(r2.booking.status).toBe('rejected');
+    expect(r2.approvalState.analystDecision).toBe('rejected');
+  });
+
+  it('request_feedback her iki kararı sıfırlar', async () => {
+    const id = await makeBooking(160);
+    await reviewBooking(ADMIN_ID, id, { action: 'approve' }, 'admin');
+    const r2 = await reviewBooking(ANALYST_ID, id, { action: 'request_feedback', feedback: 'Lütfen kapsamı netleştirin.' }, 'danisman');
+    expect(r2.booking.status).toBe('feedback_requested');
+    expect(r2.approvalState.adminDecision).toBeNull();
+    expect(r2.approvalState.analystDecision).toBeNull();
+  });
+
+  it('sonuçlanmış talep tekrar incelenemez (BOOKING_NOT_REVIEWABLE)', async () => {
+    const id = await makeBooking(210);
+    await reviewBooking(ADMIN_ID, id, { action: 'approve' }, 'admin');
+    await reviewBooking(ANALYST_ID, id, { action: 'approve' }, 'danisman'); // approved
+    await expect(
+      reviewBooking(ADMIN_ID, id, { action: 'reject' }, 'admin')
+    ).rejects.toThrow(/sonuçlandırılmış|NOT_REVIEWABLE/i);
+    // Onaylı kalmalı.
+    const after = await getBookingByIdAdmin(id);
+    expect(after?.status).toBe('approved');
+  });
+});
+
+describe('esnek/kısa süreli randevu (manuel endDate)', () => {
+  const ROOM_FX = nanoid();
+  beforeAll(async () => {
+    await dbRun(`INSERT INTO rooms (id, code, name, district, neighborhood, capacity) VALUES (?, ?, 'Esnek','T','M',4)`, [
+      ROOM_FX, 'FX-01',
+    ]);
+  });
+
+  it('manuel kısa bitiş kullanılır (periyot-türevi yerine)', async () => {
+    const start = futureDate(5);
+    const shortEnd = futureDate(12); // ~1 hafta, 1 aydan kısa
+    const b = await createBooking(USER_A, {
+      roomId: ROOM_FX,
+      periodMonths: 1,
+      startDate: start,
+      endDate: shortEnd,
+      projectName: 'Kısa süreli iş',
+      projectDescription: 'Bir haftalık kısa süreli randevu testi açıklaması.',
+      helpNeeded: 'Yok',
+      technologies: ['Claude'],
+    });
+    expect(b.endDate).toBe(shortEnd);
+    expect(b.endDate < addMonthsEndDate(start, 1)).toBe(true); // periyottan kısa
+  });
+
+  it('manuel bitiş yoksa periyottan türetilir', async () => {
+    const start = futureDate(120);
+    const b = await createBooking(USER_A, {
+      roomId: ROOM_FX,
+      periodMonths: 2,
+      startDate: start,
+      projectName: 'Standart süre',
+      projectDescription: 'Manuel bitiş verilmeyen standart periyot testi açıklaması.',
+      helpNeeded: 'Yok',
+      technologies: ['Claude'],
+    });
+    expect(b.endDate).toBe(addMonthsEndDate(start, 2));
+  });
+
+  it('validator: bitiş başlangıçtan önce olamaz', () => {
+    const res = createBookingSchema.safeParse({
+      roomId: 'x'.repeat(10),
+      periodMonths: 1,
+      startDate: '2026-08-10',
+      endDate: '2026-08-05', // başlangıçtan önce
+      projectName: 'Ters tarih',
+      projectDescription: 'Bitiş başlangıçtan önce — reddedilmeli, yeterli uzunlukta.',
+      helpNeeded: 'Yardım gerek.',
+      technologies: ['Claude'],
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it('validator: periyot dışı UZUN bitiş kabul edilir (üst sınır yok)', () => {
+    const res = createBookingSchema.safeParse({
+      roomId: 'x'.repeat(10),
+      periodMonths: 1,
+      startDate: '2026-08-10',
+      endDate: '2027-02-10', // 1 ay periyot ama 6 ay bitiş → serbest
+      projectName: 'Uzun süre',
+      projectDescription: 'Periyottan uzun ama üst sınır yok — kabul, yeterli uzunlukta.',
+      helpNeeded: 'Yardım gerek.',
+      technologies: ['Claude'],
+    });
+    expect(res.success).toBe(true);
   });
 });

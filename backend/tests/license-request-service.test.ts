@@ -6,7 +6,6 @@
  *  - updateLicenseRequest: IDOR + finalized-state reddi + feedback→pending geçişi
  *  - reviewLicenseRequest: state machine (approve/reject/feedback) + finalized reddi
  */
-process.env.DISABLE_EMAIL = '1';
 import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';
@@ -76,6 +75,31 @@ describe('createLicenseRequest', () => {
     expect(r.technicalStack).toBe('Python, FastAPI');
   });
 
+  it('SADELEŞTİRİLMİŞ form: yalnız çekirdek alanlarla (ad/amaç/araç/süre) talep oluşur', async () => {
+    // Opsiyonel alanlar hiç gönderilmez — server null/varsayılan yazmalı.
+    const r = await createLicenseRequest(USER_A, {
+      requestTitle: 'Minimal Talep Başlığı',
+      reason: 'Sadeleştirilmiş form ile gönderilen çekirdek başvuru gerekçesi.',
+      items: [{ licenseKey: 'custom', licenseName: 'Tek Araç', vendor: null, category: null }],
+      durationMonths: 6,
+    });
+    expect(r.status).toBe('pending'); // involvesRealData verilmedi → otomatik red YOK
+    expect(r.requestTitle).toBe('Minimal Talep Başlığı');
+    expect(r.durationMonths).toBe(6);
+    expect(r.items).toHaveLength(1);
+    // Gönderilmeyen opsiyonel alanlar null kalmalı.
+    expect(r.expectedBenefit).toBeNull();
+    expect(r.successCriteria).toBeNull();
+    expect(r.projectType).toBeNull();
+    expect(r.dataToUse).toBeNull();
+    expect(r.technicalStack).toBeNull();
+    expect(r.estimatedDurationDays).toBeNull();
+    expect(r.usesExternalApi).toBeNull(); // verilmedi → null
+    expect(r.involvesRealData).toBe(false); // verilmedi → false (otomatik red tetiklenmez)
+    // projectType verilmediğinde governance 'basic' (poc varsayılanı).
+    expect(r.governanceLevel).toBe('basic');
+  });
+
   it('çoklu araç gönderilince junction tablosuna sıralı yazar', async () => {
     const r = await createLicenseRequest(
       USER_A,
@@ -132,6 +156,32 @@ describe('updateLicenseRequest', () => {
     expect(updated.items).toHaveLength(1);
     expect(updated.items[0]!.licenseName).toBe('Tek Araç');
     expect(updated.status).toBe('pending');
+  });
+
+  it('SADELEŞTİRİLMİŞ güncelleme: gönderilmeyen opsiyonel alanlar KORUNUR (veri kaybı yok)', async () => {
+    // Eski tarz dolu talep — tüm opsiyonel alanlar dolu, integration → governance 'full'.
+    const created = await createLicenseRequest(
+      USER_A,
+      validInput({
+        projectType: 'integration',
+        expectedBenefit: 'Eski beklenen fayda metni korunmalı.',
+        dataToUse: 'Eski veri tanımı korunmalı.',
+      })
+    );
+    expect(created.governanceLevel).toBe('full');
+    // Sadeleştirilmiş form: yalnız çekirdek alanları gönder (opsiyoneller undefined).
+    const updated = await updateLicenseRequest(USER_A, created.id, {
+      requestTitle: 'Yalnız başlık güncellendi 55555',
+      reason: created.reason,
+      items: created.items,
+      durationMonths: created.durationMonths,
+    });
+    expect(updated.requestTitle).toBe('Yalnız başlık güncellendi 55555');
+    // Gönderilmeyen opsiyonel alanlar ESKİ değerini korumalı (silinmemeli).
+    expect(updated.expectedBenefit).toBe('Eski beklenen fayda metni korunmalı.');
+    expect(updated.dataToUse).toBe('Eski veri tanımı korunmalı.');
+    expect(updated.projectType).toBe('integration');
+    expect(updated.governanceLevel).toBe('full'); // downgrade YOK
   });
 
   it('feedback_requested talebi güncellenince statü pending olur', async () => {

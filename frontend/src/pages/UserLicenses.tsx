@@ -1,12 +1,14 @@
 /**
  * Lisanslarım sayfası — AI Lab proje başvurusu + yönetişim yaşam döngüsü.
  *
- * Başvuru Formu (PNG 4.1.1 + Yönetişim Kılavuzu v2.1):
- *  1. Talep Adı / Kullanım Amacı
- *  2. Beklenen Fayda / Başarı Kriteri / Tahmini Süre
- *  3. AI Araç / Lisans Talebi (çoklu)
- *  4. Proje Detayları — tür, dış API, kullanılacak veri, gerçek veri beyanı
- *  5. Lisans kullanım süresi
+ * Başvuru Formu (SADELEŞTİRİLMİŞ — yalnızca çekirdek/zorunlu alanlar):
+ *  1. Talep Adı (ad) / Kullanım Amacı (amaç)
+ *  2. AI Araç / Lisans Talebi — araç (çoklu)
+ *  3. Lisans kullanım süresi
+ *
+ * Eski opsiyonel alanlar (beklenen fayda, başarı kriteri, proje türü, kullanılacak
+ * veri, dış API, gerçek veri beyanı, teknik yığın, tahmini süre) formdan kaldırıldı;
+ * geçmiş başvurularda doluysa salt-okunur gösterilir.
  *
  * Onaylanan başvuru bir "proje"ye dönüşür ve yaşam döngüsünü
  * (development → stage → production → live) izler.
@@ -24,7 +26,6 @@ import type {
 import { QualityGatesPanel } from '../components/governance/QualityGatesPanel';
 import { ApprovalsPanel } from '../components/governance/ApprovalsPanel';
 import { SecurityRulesCard } from '../components/governance/SecurityRulesCard';
-import { GateWizard } from '../components/governance/GateWizard';
 import { SlaBadge } from '../components/governance/SlaBadge';
 
 interface CatalogItem {
@@ -50,19 +51,6 @@ const DURATION_OPTIONS: Array<{ value: 1 | 3 | 6 | 12; label: string }> = [
   { value: 3, label: '3 ay' },
   { value: 6, label: '6 ay' },
   { value: 12, label: '1 yıl' },
-];
-
-const PROJECT_TYPE_OPTIONS: Array<{ value: ProjectType; label: string; desc: string }> = [
-  {
-    value: 'poc',
-    label: 'Deneysel (PoC)',
-    desc: 'Fikrin uygulanabilirliğini ölçen kısa süreli prototip.',
-  },
-  {
-    value: 'integration',
-    label: 'Kuruma Entegre',
-    desc: 'Operasyonel sistemlere entegre edilecek üretim adayı.',
-  },
 ];
 
 function statusBadge(status: LicenseRequestStatus) {
@@ -108,22 +96,14 @@ export default function UserLicenses() {
   // yere çıkıyordu ("talep gitse bile uyarı çıkıyor").
   const [triedSubmit, setTriedSubmit] = useState(false);
 
-  // Form state — Başvuru Formu
+  // Form state — Sadeleştirilmiş Başvuru Formu (ad / amaç / araç / süre)
   const [requestTitle, setRequestTitle] = useState('');
   const [reason, setReason] = useState(''); // Kullanım Amacı
-  const [expectedBenefit, setExpectedBenefit] = useState('');
-  const [successCriteria, setSuccessCriteria] = useState('');
   const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
   const [catalogPick, setCatalogPick] = useState<string>('');
   const [customName, setCustomName] = useState('');
   const [customVendor, setCustomVendor] = useState('');
-  const [projectType, setProjectType] = useState<ProjectType | ''>('');
-  const [estimatedDurationDays, setEstimatedDurationDays] = useState<string>('');
-  const [dataToUse, setDataToUse] = useState('');
-  const [technicalStack, setTechnicalStack] = useState('');
   const [durationMonths, setDurationMonths] = useState<1 | 3 | 6 | 12>(3);
-  const [usesExternalApi, setUsesExternalApi] = useState(false);
-  const [involvesRealData, setInvolvesRealData] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // Yönetişim detayı — açık olan başvuru + bundle önbelleği
@@ -221,23 +201,13 @@ export default function UserLicenses() {
     setSelectedItems((prev) => prev.filter((s) => s.uid !== uid));
   }
 
-  const estDays = estimatedDurationDays.trim();
-  const estDaysNum = estDays ? Number(estDays) : null;
-  const estDaysValid =
-    estDays === '' ||
-    (Number.isFinite(estDaysNum) && Number.isInteger(estDaysNum) && estDaysNum! >= 1 && estDaysNum! <= 365);
-
   // Eksik zorunlu alanlar — tek kaynak: hem buton durumu hem kullanıcıya gösterilen
   // liste bundan türer (kullanıcı "neden gönderilmiyor" sorusunu yaşamasın).
+  // Sadeleştirilmiş form: yalnızca ad / amaç / araç zorunlu (süre her zaman seçili).
   const missingFields: string[] = [];
-  if (requestTitle.trim().length < 5) missingFields.push('Başvuru başlığı (en az 5 karakter)');
+  if (requestTitle.trim().length < 5) missingFields.push('Talep adı (en az 5 karakter)');
   if (reason.trim().length < 20) missingFields.push('Kullanım amacı (en az 20 karakter)');
-  if (expectedBenefit.trim().length < 20) missingFields.push('Beklenen fayda (en az 20 karakter)');
-  if (successCriteria.trim().length < 20) missingFields.push('Başarı kriteri (en az 20 karakter)');
   if (selectedItems.length < 1) missingFields.push('En az bir araç/lisans ekleyin');
-  if (projectType === '') missingFields.push('Proje tipini seçin (PoC veya Entegrasyon)');
-  if (!estDaysValid) missingFields.push('Tahmini süre 1–365 gün arasında olmalı');
-  if (dataToUse.trim().length < 10) missingFields.push('Kullanılacak veri açıklaması (en az 10 karakter)');
   const canSubmit = missingFields.length === 0;
 
   function resetForm() {
@@ -245,19 +215,11 @@ export default function UserLicenses() {
     setTriedSubmit(false);
     setRequestTitle('');
     setReason('');
-    setExpectedBenefit('');
-    setSuccessCriteria('');
     setSelectedItems([]);
     setCatalogPick('');
     setCustomName('');
     setCustomVendor('');
-    setProjectType('');
-    setEstimatedDurationDays('');
-    setDataToUse('');
-    setTechnicalStack('');
     setDurationMonths(3);
-    setUsesExternalApi(false);
-    setInvolvesRealData(false);
   }
 
   /** Bir başvuruyu forma yükleyip düzenleme moduna geçer. */
@@ -265,8 +227,6 @@ export default function UserLicenses() {
     setEditingId(r.id);
     setRequestTitle(r.requestTitle ?? '');
     setReason(r.reason);
-    setExpectedBenefit(r.expectedBenefit ?? '');
-    setSuccessCriteria(r.successCriteria ?? '');
     const sourceItems =
       r.items.length > 0
         ? r.items
@@ -284,13 +244,7 @@ export default function UserLicenses() {
     setCatalogPick('');
     setCustomName('');
     setCustomVendor('');
-    setProjectType(r.projectType ?? '');
-    setEstimatedDurationDays(r.estimatedDurationDays != null ? String(r.estimatedDurationDays) : '');
-    setDataToUse(r.dataToUse ?? '');
-    setTechnicalStack(r.technicalStack ?? '');
     setDurationMonths(r.durationMonths);
-    setUsesExternalApi(r.usesExternalApi ?? false);
-    setInvolvesRealData(r.involvesRealData ?? false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -308,39 +262,24 @@ export default function UserLicenses() {
     }
     setSubmitting(true);
     try {
+      // Sadeleştirilmiş payload — yalnızca çekirdek alanlar (ad/amaç/araç/süre).
       const payload = {
         requestTitle: requestTitle.trim(),
         reason: reason.trim(),
-        expectedBenefit: expectedBenefit.trim(),
-        successCriteria: successCriteria.trim(),
         items: selectedItems.map((s) => ({
           licenseKey: s.isCustom ? 'custom' : (s.catalogKey ?? 'custom'),
           licenseName: s.name,
           vendor: s.vendor,
           category: s.category,
         })),
-        projectType: projectType as ProjectType,
-        estimatedDurationDays: estDaysNum,
-        dataToUse: dataToUse.trim(),
-        technicalStack: technicalStack.trim() || null,
         durationMonths,
-        usesExternalApi,
-        involvesRealData,
       };
       if (editingId) {
-        const res = await api.updateLicenseRequest(editingId, payload);
-        if (res.request.status === 'rejected') {
-          toast.push('error', 'Başvuru güncellendi ancak gerçek veri beyanı nedeniyle otomatik reddedildi.');
-        } else {
-          toast.push('success', 'Başvurun güncellendi ve yeniden değerlendirmeye gönderildi.');
-        }
+        await api.updateLicenseRequest(editingId, payload);
+        toast.push('success', 'Başvurun güncellendi ve yeniden değerlendirmeye gönderildi.');
       } else {
-        const res = await api.createLicenseRequest(payload);
-        if (res.request.status === 'rejected') {
-          toast.push('error', 'Başvuru gerçek veri / üretim erişimi beyanı nedeniyle otomatik reddedildi (Kılavuz §5).');
-        } else {
-          toast.push('success', 'Başvurun admin onayına gönderildi.');
-        }
+        await api.createLicenseRequest(payload);
+        toast.push('success', 'Başvurun admin onayına gönderildi.');
       }
       resetForm();
       setBundles({});
@@ -456,82 +395,10 @@ export default function UserLicenses() {
               </div>
             </fieldset>
 
-            {/* ============ 2) Beklentiler ============ */}
-            <fieldset className="space-y-5">
-              <legend className="text-sm font-bold uppercase tracking-wider text-kt-green-800 mb-2">
-                2) Beklentiler
-              </legend>
-
-              <div>
-                <label htmlFor="expected-benefit" className="label">
-                  Beklenen Fayda <span className="text-red-500">*</span>
-                  <span className="text-xs text-kt-gray-400 font-normal ml-2">
-                    ({expectedBenefit.trim().length}/1000, min 20)
-                  </span>
-                </label>
-                <textarea
-                  id="expected-benefit"
-                  className="textarea"
-                  placeholder="Ölçülebilir fayda: süre tasarrufu, maliyet azaltma, kalite iyileştirme vb."
-                  value={expectedBenefit}
-                  onChange={(e) => setExpectedBenefit(e.target.value)}
-                  maxLength={1000}
-                  rows={3}
-                  disabled={submitting}
-                  required
-                />
-              </div>
-
-              <div>
-                <label htmlFor="success-criteria" className="label">
-                  Başarı Kriteri <span className="text-red-500">*</span>
-                  <span className="text-xs text-kt-gray-400 font-normal ml-2">
-                    ({successCriteria.trim().length}/1000, min 20)
-                  </span>
-                </label>
-                <textarea
-                  id="success-criteria"
-                  className="textarea"
-                  placeholder="Projenin başarılı sayılacağı ölçülebilir metrikler ve hedef değerler (örn. F1 ≥ 0.85)."
-                  value={successCriteria}
-                  onChange={(e) => setSuccessCriteria(e.target.value)}
-                  maxLength={1000}
-                  rows={3}
-                  disabled={submitting}
-                  required
-                />
-              </div>
-
-              <div>
-                <label htmlFor="estimated-duration-days" className="label">
-                  Tahmini Süre{' '}
-                  <span className="text-xs text-kt-gray-400 font-normal ml-1">
-                    (önerilen, gün)
-                  </span>
-                </label>
-                <input
-                  id="estimated-duration-days"
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  max={365}
-                  step={1}
-                  className={`input max-w-[200px] ${!estDaysValid ? 'border-red-400' : ''}`}
-                  placeholder="örn. 45"
-                  value={estimatedDurationDays}
-                  onChange={(e) => setEstimatedDurationDays(e.target.value)}
-                  disabled={submitting}
-                />
-                <p className="text-xs text-kt-gray-500 mt-1">
-                  Projenin tamamlanma süresi tahmini (gün). 1–365 arası bir sayı.
-                </p>
-              </div>
-            </fieldset>
-
-            {/* ============ 3) AI Araç / Lisans (çoklu) ============ */}
+            {/* ============ 2) AI Araç / Lisans (çoklu) ============ */}
             <fieldset className="space-y-3">
               <legend className="text-sm font-bold uppercase tracking-wider text-kt-green-800 mb-2">
-                3) AI Araç / Lisans Talebi <span className="text-red-500">*</span>
+                2) AI Araç / Lisans Talebi <span className="text-red-500">*</span>
               </legend>
               <p className="text-xs text-kt-gray-500 -mt-1">
                 Kullanılmak istenen araçlar (Cursor, Copilot, Claude, GPT-4 vb.).
@@ -629,152 +496,10 @@ export default function UserLicenses() {
               )}
             </fieldset>
 
-            {/* ============ 4) Proje Detayları ============ */}
-            <fieldset className="space-y-5">
-              <legend className="text-sm font-bold uppercase tracking-wider text-kt-green-800 mb-2">
-                4) Proje Detayları
-              </legend>
-
-              {/* Proje Türü */}
-              <div>
-                <div className="label">
-                  Proje Türü <span className="text-red-500">*</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {PROJECT_TYPE_OPTIONS.map((opt) => (
-                    <label
-                      key={opt.value}
-                      className={`cursor-pointer rounded-xl border-2 p-4 transition-all ${
-                        projectType === opt.value
-                          ? 'border-kt-green-500 bg-kt-green-50 shadow-kt-green'
-                          : 'border-kt-gray-200 bg-white hover:border-kt-green-300'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="project-type"
-                        value={opt.value}
-                        checked={projectType === opt.value}
-                        onChange={() => setProjectType(opt.value)}
-                        disabled={submitting}
-                        className="sr-only"
-                      />
-                      <div className="font-bold text-kt-green-900 mb-1">{opt.label}</div>
-                      <div className="text-xs text-kt-gray-600 leading-relaxed">{opt.desc}</div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* Dış servis / API erişimi */}
-              <div>
-                <div className="label">
-                  Dış servis / API erişimi var mı? <span className="text-red-500">*</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { value: false, label: 'Hayır, bağımsız' },
-                    { value: true, label: 'Evet, dış servis / API kullanıyor' },
-                  ].map((opt) => (
-                    <button
-                      key={String(opt.value)}
-                      type="button"
-                      onClick={() => setUsesExternalApi(opt.value)}
-                      disabled={submitting}
-                      className={`px-4 py-2 rounded-xl font-semibold text-sm transition-colors border ${
-                        usesExternalApi === opt.value
-                          ? 'bg-kt-green-600 text-white border-kt-green-600 shadow-kt-green'
-                          : 'bg-white text-kt-green-800 border-kt-gray-200 hover:border-kt-green-400'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Kalite kapısı sihirbazı — proje türü + dış API'ye tepki verir */}
-              <GateWizard projectType={projectType} usesExternalApi={usesExternalApi} />
-
-              {/* Kullanılacak Veri */}
-              <div>
-                <label htmlFor="data-to-use" className="label">
-                  Kullanılacak Veri <span className="text-red-500">*</span>
-                  <span className="text-xs text-kt-gray-400 font-normal ml-2">
-                    ({dataToUse.trim().length}/500, min 10)
-                  </span>
-                </label>
-                <textarea
-                  id="data-to-use"
-                  className="textarea"
-                  placeholder="Sentetik mi, açık veri mi? Veri kaynağını ve niteliğini açıkla."
-                  value={dataToUse}
-                  onChange={(e) => setDataToUse(e.target.value)}
-                  maxLength={500}
-                  rows={2}
-                  disabled={submitting}
-                  required
-                />
-              </div>
-
-              {/* Gerçek veri beyanı — otomatik red */}
-              <div
-                className={`rounded-xl border-2 p-4 transition-colors ${
-                  involvesRealData
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-kt-gray-200 bg-white'
-                }`}
-              >
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={involvesRealData}
-                    onChange={(e) => setInvolvesRealData(e.target.checked)}
-                    disabled={submitting}
-                    className="mt-0.5 w-4 h-4 accent-red-600"
-                  />
-                  <div>
-                    <div className="text-sm font-semibold text-kt-green-900">
-                      Bu proje gerçek banka verisi, üretim sistemi veya AD/LDAP erişimi içeriyor.
-                    </div>
-                    <div className="text-xs text-kt-gray-600 mt-0.5">
-                      AI Lab izole bir ortamdır; yalnızca sentetik veya kamuya açık veri
-                      kullanılabilir.
-                    </div>
-                  </div>
-                </label>
-                {involvesRealData && (
-                  <div className="mt-3 text-xs font-semibold text-red-800 bg-red-100 border border-red-300 rounded-lg px-3 py-2">
-                    ⛔ Bu kriterleri içeren başvurular Yönetişim Kılavuzu §5 gereği
-                    <strong> otomatik reddedilir</strong>. Devam edersen başvuru kayda
-                    geçer ama anında reddedilir.
-                  </div>
-                )}
-              </div>
-
-              {/* Teknik Yığın */}
-              <div>
-                <label htmlFor="technical-stack" className="label">
-                  Teknik Yığın Tercihi{' '}
-                  <span className="text-xs text-kt-gray-400 font-normal ml-1">(önerilen)</span>
-                </label>
-                <textarea
-                  id="technical-stack"
-                  className="textarea"
-                  placeholder="Tercih edilen dil, framework, veritabanı (örn. Python, FastAPI, PostgreSQL)."
-                  value={technicalStack}
-                  onChange={(e) => setTechnicalStack(e.target.value)}
-                  maxLength={500}
-                  rows={2}
-                  disabled={submitting}
-                />
-              </div>
-            </fieldset>
-
             {/* ============ 5) Lisans Süresi ============ */}
             <fieldset className="space-y-3">
               <legend className="text-sm font-bold uppercase tracking-wider text-kt-green-800 mb-2">
-                5) Lisans Kullanım Süresi
+                3) Lisans Kullanım Süresi
               </legend>
               <div>
                 <div className="label">

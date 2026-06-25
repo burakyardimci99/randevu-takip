@@ -18,7 +18,6 @@ import { warmupEmbeddings, backfillEmbeddings } from './services/embedding.servi
 import { warmupTranslation } from './services/image-gen.service';
 import { startMaintenance } from './services/maintenance.service';
 import { startBackupCron } from './services/backup.service';
-import { registerEmailHandler } from './services/notification.service';
 import { buildApp } from './app';
 
 async function start(): Promise<void> {
@@ -47,9 +46,6 @@ async function start(): Promise<void> {
   // Görsel prompt çeviri modelini (HF opus-mt-tr-en) arka planda ısıt — ilk
   // görsel üretiminde soğuk-başlangıç çevirisi zaman aşımına düşmesin. Non-blocking.
   void warmupTranslation();
-
-  // E-posta job handler (queue üzerinden async send)
-  registerEmailHandler();
 
   // Waitlist promotion cron (yarım dakika periyot)
   startWaitlistMaintenance();

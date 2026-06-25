@@ -233,6 +233,7 @@ router.post('/bookings/:id/review', async (req: Request, res: Response, next: Ne
       booking: result.booking,
       autoWaitlisted: result.autoWaitlisted ?? false,
       waitlistPosition: result.waitlistPosition,
+      approvalState: result.approvalState,
     });
   } catch (err) {
     next(err);

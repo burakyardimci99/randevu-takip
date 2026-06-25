@@ -1,8 +1,8 @@
 /**
  * In-app bildirim merkezi servisi.
  *
- * E-posta bildirimlerinden (notification.service.ts) AYRI: bu servis
- * uygulama içi kalıcı bildirimleri yönetir (header zil + popover).
+ * Uygulama içi kalıcı bildirimleri yönetir (header zil + popover).
+ * Tüm kullanıcı/admin bildirimleri bu kanaldan gider (e-posta kanalı kaldırıldı).
  *
  * Tasarım:
  *  - SSE anlık iletim sağlar; bu tablo kalıcılık sağlar.

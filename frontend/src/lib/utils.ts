@@ -31,6 +31,25 @@ export function addMonthsEndDate(dateStr: string, months: number): string {
 }
 
 /**
+ * Oda kategorisi etiketi — kapasiteye duyarlı. Pod'lar tek/iki kişilik olabildiği
+ * için yalnız roomType yetmiyordu ("Tekli Pod" filtresi 2 kişilikleri de getiriyordu).
+ */
+export function roomCategoryLabel(roomType: 'pod' | 'experience' | 'tribune', capacity: number): string {
+  if (roomType === 'experience') return 'Deneyim Alanı';
+  if (roomType === 'tribune') return 'Tribün';
+  return capacity <= 1 ? 'Tekli Pod' : 'İkili Pod';
+}
+
+/** Oda kategori filtre anahtarı — pod'u kapasiteye göre tekli/ikili ayırır. */
+export function roomCategoryKey(
+  roomType: 'pod' | 'experience' | 'tribune',
+  capacity: number
+): 'pod1' | 'pod2' | 'experience' | 'tribune' {
+  if (roomType === 'pod') return capacity <= 1 ? 'pod1' : 'pod2';
+  return roomType;
+}
+
+/**
  * Date input'larda takvimin yalnız ikon tıklamasıyla değil, alanın tamamına
  * tıklayınca açılması için onClick handler'ı (tarayıcı destekliyorsa).
  */

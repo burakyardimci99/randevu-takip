@@ -13,7 +13,6 @@
  */
 import './setup-env';
 process.env.DISABLE_RATE_LIMIT = '1';
-process.env.DISABLE_EMAIL = '1';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';

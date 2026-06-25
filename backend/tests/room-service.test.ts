@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';
 import { nanoid } from 'nanoid';
 import { initSchema, closeDb, dbRun } from '../src/db/schema';
-import { listRooms, getRoomsWithOccupancy } from '../src/services/room.service';
+import { listRooms, getRoomsWithOccupancy, getRoomAvailability } from '../src/services/room.service';
 
 const USER = nanoid();
 const ACTIVE_ROOM = nanoid();
@@ -135,5 +135,162 @@ describe('getRoomsWithOccupancy', () => {
     const active = rooms.find((r) => r.code === ACTIVE_CODE);
     expect(active!.pendingCount).toBeGreaterThanOrEqual(1);
     expect(active!.approvedCount).toBe(0);
+  });
+});
+
+describe('availableWeekdays + getRoomAvailability (full-week varsayılan model)', () => {
+  // weekdaySelection KAPALI (varsayılan): rezervasyon tüm haftayı kapsar →
+  // müsaitlik TARİH bazlı. Bugünü kapsayan herhangi bir booking odayı doldurur.
+  // İzole odalar — diğer testlerin booking'lerinden etkilenmesin.
+  const FREE_ROOM = nanoid();
+  const PARTIAL_ROOM = nanoid();
+  const FREE_CODE = `RF-${nanoid(4).toUpperCase()}`;
+  const PARTIAL_CODE = `RP-${nanoid(4).toUpperCase()}`;
+
+  beforeAll(async () => {
+    await dbRun(`INSERT INTO rooms (id, code, name, district, neighborhood, capacity, is_active) VALUES (?, ?, ?, 'T','M',4,1)`, [
+      FREE_ROOM, FREE_CODE, 'Boş Oda',
+    ]);
+    await dbRun(`INSERT INTO rooms (id, code, name, district, neighborhood, capacity, is_active) VALUES (?, ?, ?, 'T','M',4,1)`, [
+      PARTIAL_ROOM, PARTIAL_CODE, 'Kısmi Oda',
+    ]);
+    // PARTIAL_ROOM: bugünü kapsayan Pzt+Çar (mask 1|4 = 5) approved booking.
+    await dbRun(
+      `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
+         project_name, project_description, help_needed, technologies, weekday_mask, status)
+       VALUES (?, ?, ?, 1, ?, ?, 'Kısmi', 'Pzt+Çar dolu kısmi booking testi.', 'yok', '["X"]', 5, 'approved')`,
+      [nanoid(), USER, PARTIAL_ROOM, pastDate(1), futureDate(20)]
+    );
+  });
+
+  it('boş oda tüm haftayı müsait döner (availableWeekdays = [1..7])', async () => {
+    const rooms = await listRooms();
+    const free = rooms.find((r) => r.code === FREE_CODE)!;
+    expect(free.isAvailable).toBe(true);
+    expect(free.availableWeekdays).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it('full-week modda kısmi (Pzt+Çar) booking olan oda DOLU sayılır (tarih bazlı)', async () => {
+    const rooms = await listRooms();
+    const partial = rooms.find((r) => r.code === PARTIAL_CODE)!;
+    // Tam-hafta rezervasyon kısmi booking ile çakışacağından oda bookable değil.
+    expect(partial.isAvailable).toBe(false);
+    expect(partial.availableWeekdays).toEqual([]);
+    expect(partial.nextAvailableDate).toBeTruthy(); // ne zaman boşalacağı görünür
+  });
+
+  it('tam dolu oda availableWeekdays = []', async () => {
+    const rooms = await listRooms();
+    const booked = rooms.find((r) => r.code === BOOKED_CODE)!;
+    expect(booked.availableWeekdays).toEqual([]);
+  });
+
+  it('getRoomAvailability: dolu oda — boş gün yok ama dolu tarih aralığı (Pzt,Çar) görünür', async () => {
+    const avail = await getRoomAvailability(PARTIAL_ROOM);
+    expect(avail).toBeDefined();
+    expect(avail!.isAvailable).toBe(false); // full-week modda dolu
+    expect(avail!.availableWeekdays).toEqual([]);
+    expect(avail!.nextAvailableDate).toBeTruthy();
+    // busyRanges gerçek maskeyi taşır (kullanıcıya hangi günler dolu bilgisi).
+    expect(avail!.busyRanges.length).toBeGreaterThanOrEqual(1);
+    expect(avail!.busyRanges[0].weekdays).toEqual([1, 3]); // Pzt, Çar
+    expect(Array.isArray(avail!.appointments)).toBe(true);
+  });
+
+  it('getRoomAvailability: olmayan oda undefined döner', async () => {
+    const avail = await getRoomAvailability('nonexistent-room-id-xyz');
+    expect(avail).toBeUndefined();
+  });
+});
+
+describe('getRoomAvailability — boş aralık / dolu pencere / doluluk sonrası', () => {
+  const FUTURE_ROOM = nanoid(); // bugün müsait, ileride dolu pencere var
+  const GAP_ROOM = nanoid();    // bugün dolu + ileride ayrı bir dolu pencere
+
+  beforeAll(async () => {
+    await dbRun(`INSERT INTO rooms (id, code, name, district, neighborhood, capacity, is_active) VALUES (?, ?, 'F','T','M',4,1)`, [
+      FUTURE_ROOM, `RF-${nanoid(4).toUpperCase()}`,
+    ]);
+    await dbRun(`INSERT INTO rooms (id, code, name, district, neighborhood, capacity, is_active) VALUES (?, ?, 'G','T','M',4,1)`, [
+      GAP_ROOM, `RG-${nanoid(4).toUpperCase()}`,
+    ]);
+
+    // FUTURE_ROOM: bugün boş; 15..45 gün sonrası dolu (tek pencere).
+    await dbRun(
+      `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
+         project_name, project_description, help_needed, technologies, weekday_mask, status)
+       VALUES (?, ?, ?, 1, ?, ?, 'Gelecek', 'İleride dolu pencere.', 'yok', '["X"]', 127, 'approved')`,
+      [nanoid(), USER, FUTURE_ROOM, futureDate(15), futureDate(45)]
+    );
+
+    // GAP_ROOM: bugünü kapsayan doluluk (-2..+10) + ayrı gelecek pencere (+20..+40).
+    await dbRun(
+      `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
+         project_name, project_description, help_needed, technologies, weekday_mask, status)
+       VALUES (?, ?, ?, 1, ?, ?, 'Şimdi', 'Bugünü kapsayan doluluk.', 'yok', '["X"]', 127, 'approved')`,
+      [nanoid(), USER, GAP_ROOM, pastDate(2), futureDate(10)]
+    );
+    await dbRun(
+      `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
+         project_name, project_description, help_needed, technologies, weekday_mask, status)
+       VALUES (?, ?, ?, 1, ?, ?, 'İleride', 'Ayrı gelecek pencere.', 'yok', '["X"]', 127, 'approved')`,
+      [nanoid(), USER, GAP_ROOM, futureDate(20), futureDate(40)]
+    );
+  });
+
+  it('bugün müsait oda: nextOccupiedWindow + bugünden pencereye kadar boş aralık', async () => {
+    const a = (await getRoomAvailability(FUTURE_ROOM))!;
+    expect(a.isAvailable).toBe(true);
+    expect(a.earliestAvailableAfter).toBeNull(); // bugün zaten müsait
+    expect(a.nextOccupiedWindow).toEqual({ startDate: futureDate(15), endDate: futureDate(45) });
+    // İlk boş aralık bugünden başlayıp doluluğun bir gün öncesinde biter.
+    expect(a.freeGaps[0]).toEqual({ startDate: todayStr, endDate: futureDate(14) });
+  });
+
+  it('bugün dolu oda: earliestAvailableAfter doluluğun ertesi günü + pencereler arası boş aralık', async () => {
+    const a = (await getRoomAvailability(GAP_ROOM))!;
+    expect(a.isAvailable).toBe(false);
+    // Mevcut doluluk +10'da biter → +11 ilk müsait gün.
+    expect(a.earliestAvailableAfter).toBe(futureDate(11));
+    // Gelecekteki en yakın ayrı pencere +20..+40.
+    expect(a.nextOccupiedWindow).toEqual({ startDate: futureDate(20), endDate: futureDate(40) });
+    // İki pencere arası boş aralık: +11 .. +19.
+    expect(a.freeGaps).toContainEqual({ startDate: futureDate(11), endDate: futureDate(19) });
+  });
+});
+
+describe('listRooms tarih ARALIĞI filtresi (from, to)', () => {
+  const R = nanoid();
+  beforeAll(async () => {
+    await dbRun(`INSERT INTO rooms (id, code, name, district, neighborhood, capacity, is_active) VALUES (?, ?, 'Aralık','T','M',4,1)`, [
+      R, `RR-${nanoid(4).toUpperCase()}`,
+    ]);
+    // +15..+45 dolu (tam hafta).
+    await dbRun(
+      `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
+         project_name, project_description, help_needed, technologies, weekday_mask, status)
+       VALUES (?, ?, ?, 1, ?, ?, 'Aralık', 'Aralık filtre testi.', 'yok', '["X"]', 127, 'approved')`,
+      [nanoid(), USER, R, futureDate(15), futureDate(45)]
+    );
+  });
+  const availOf = async (from: string, to?: string) => {
+    const rooms = await listRooms(from, to);
+    return rooms.find((x) => x.id === R)?.isAvailable;
+  };
+
+  it('aralık booking ile örtüşürse oda DOLU', async () => {
+    expect(await availOf(futureDate(10), futureDate(20))).toBe(false); // +15 aralıkta
+    expect(await availOf(futureDate(20), futureDate(30))).toBe(false); // tamamen içinde
+    expect(await availOf(futureDate(40), futureDate(60))).toBe(false); // +45 aralıkta
+  });
+
+  it('aralık booking ile örtüşmezse oda MÜSAİT', async () => {
+    expect(await availOf(futureDate(1), futureDate(10))).toBe(true);   // booking öncesi
+    expect(await availOf(futureDate(46), futureDate(60))).toBe(true);  // booking sonrası
+  });
+
+  it('to verilmezse tek gün gibi davranır', async () => {
+    expect(await availOf(futureDate(20))).toBe(false); // +20 booking içinde
+    expect(await availOf(futureDate(5))).toBe(true);   // +5 booking dışında
   });
 });

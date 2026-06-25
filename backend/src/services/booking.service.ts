@@ -18,11 +18,6 @@ import {
 import { broadcastBooking, broadcastToAdmins } from './sse.service';
 import { recordAudit } from './audit.service';
 import { recordStageEvent } from './governance.service';
-import {
-  bookingCreatedAdminEmail,
-  bookingReviewedEmail,
-  enqueueEmail,
-} from './notification.service';
 import { logger } from '../utils/logger';
 import { maskToWeekdays, weekdaysToMask } from '../utils/weekdays';
 import { addMonthsEndDate } from '../utils/dates';
@@ -66,6 +61,8 @@ interface BookingRow {
   admin_feedback: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  admin_decision: 'approved' | 'rejected' | null;
+  analyst_decision: 'approved' | 'rejected' | null;
   lifecycle_stage: LifecycleStage;
   stage_entered_at: string;
   review_track: 'standard' | 'swat';
@@ -108,6 +105,8 @@ function rowToDto(r: BookingRow): BookingDto {
     adminFeedback: r.admin_feedback,
     reviewedBy: r.reviewed_by,
     reviewedAt: r.reviewed_at,
+    adminDecision: r.admin_decision ?? null,
+    analystDecision: r.analyst_decision ?? null,
     lifecycleStage: r.lifecycle_stage,
     stageEnteredAt: r.stage_entered_at,
     reviewTrack: r.review_track,
@@ -123,6 +122,28 @@ function rowToDto(r: BookingRow): BookingDto {
 
 // Bitiş tarihi hesabı utils/dates'e taşındı (ay taşması kıskaçlı, waitlist ile ortak).
 const addMonths = addMonthsEndDate;
+
+/** YYYY-MM-DD → DD.MM.YYYY (kullanıcıya gösterilen TR tarih). */
+function fmtTrDate(ymd: string): string {
+  const [y, m, d] = ymd.split('-');
+  return d && m && y ? `${d}.${m}.${y}` : ymd;
+}
+
+/** YYYY-MM-DD → ertesi gün (en erken müsait tarih). */
+function nextDayYmd(ymd: string): string {
+  return new Date(new Date(`${ymd}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10);
+}
+
+/**
+ * Çakışma hatası mesajı — odanın hangi tarih aralığında dolu olduğunu ve en
+ * erken ne zaman müsait olacağını söyler ("ne zamana kadar dolu" görünürlüğü).
+ */
+function roomBusyMessage(busyStart: string, busyEnd: string): string {
+  return (
+    `Bu oda ${fmtTrDate(busyStart)} – ${fmtTrDate(busyEnd)} tarihleri arasında dolu. ` +
+    `En erken ${fmtTrDate(nextDayYmd(busyEnd))} tarihinden itibaren rezervasyon yapabilirsiniz.`
+  );
+}
 
 // Hafta günü ↔ maske yardımcıları utils/weekdays'e taşındı (waitlist ile paylaşılıyor).
 
@@ -149,7 +170,8 @@ export async function createBooking(userId: string, input: CreateBookingInput): 
     throw new HttpError(400, 'Başlangıç tarihi bugünden önce olamaz.', 'INVALID_START_DATE');
   }
 
-  const endDate = addMonths(input.startDate, input.periodMonths);
+  // Manuel bitiş verilmişse o (esnek/kısa süre), yoksa periyottan türetilen tarih.
+  const endDate = input.endDate ?? addMonths(input.startDate, input.periodMonths);
 
   const bookingId = await dbTx(async () => {
     const room = await dbOne(`SELECT id, code, name FROM rooms WHERE id = ? AND is_active = 1`, [input.roomId]) as { id: string; code: string; name: string } | undefined;
@@ -163,17 +185,19 @@ export async function createBooking(userId: string, input: CreateBookingInput): 
     // Çakışma kontrolü + INSERT'i aynı oda için serialize et (çift rezervasyon race'i).
     await lockRoomForBooking(input.roomId);
 
-    const conflict = await dbOne(`SELECT id FROM bookings
+    const conflict = await dbOne(`SELECT MIN(start_date) AS busy_start, MAX(end_date) AS busy_end
+         FROM bookings
          WHERE room_id = ?
            AND status IN ('pending', 'approved', 'feedback_requested')
            AND NOT (end_date < ? OR start_date > ?)
-           AND (weekday_mask & ?) != 0
-         LIMIT 1`, [input.roomId, input.startDate, endDate, weekdayMask]);
+           AND (weekday_mask & ?) != 0`, [input.roomId, input.startDate, endDate, weekdayMask]) as
+      | { busy_start: string | null; busy_end: string | null }
+      | undefined;
 
-    if (conflict) {
+    if (conflict?.busy_end) {
       throw new HttpError(
         409,
-        'Seçtiğiniz günlerde bu oda, bu tarih aralığında dolu.',
+        roomBusyMessage(conflict.busy_start!, conflict.busy_end),
         'ROOM_NOT_AVAILABLE'
       );
     }
@@ -214,17 +238,17 @@ export async function createBooking(userId: string, input: CreateBookingInput): 
     userId
   );
 
-  // E-posta: admin'lere yeni talep bildirimi
-  const admins = await dbAll("SELECT email FROM admins WHERE status = 1", []) as Array<{ email: string }>;
-  for (const a of admins) {
-    void enqueueEmail(
-      bookingCreatedAdminEmail({
-        to: a.email,
-        projectName: created.projectName,
-        roomCode: created.roomCode,
-        submitterName: created.userFullName ?? 'Bir kullanıcı',
-      })
-    );
+  // In-app bildirim: aktif admin'lere yeni talep
+  const admins = await dbAll("SELECT id FROM admins WHERE status = 1", []) as Array<{ id: string }>;
+  if (admins.length > 0) {
+    void import('./notification-center.service').then((m) => {
+      m.pushNotificationBulk(admins.map((a) => a.id), 'admin', {
+        category: 'booking',
+        title: 'Yeni randevu talebi',
+        body: `${created.userFullName ?? 'Bir kullanıcı'} — "${created.projectName}" (${created.roomCode})`,
+        link: '/admin',
+      });
+    }).catch((err) => logger.warn('booking_created_notify_failed', { err: (err as Error).message }));
   }
 
   return created;
@@ -245,7 +269,8 @@ export async function updateBooking(
   bookingId: string,
   input: CreateBookingInput
 ): Promise<BookingDto> {
-  const endDate = addMonths(input.startDate, input.periodMonths);
+  // Manuel bitiş verilmişse o (esnek/kısa süre), yoksa periyottan türetilen tarih.
+  const endDate = input.endDate ?? addMonths(input.startDate, input.periodMonths);
 
   await dbTx(async () => {
     // 1) Booking varlığı + sahiplik + status kontrolü
@@ -272,26 +297,30 @@ export async function updateBooking(
     // 3) Gün-bazlı çakışma — kendi booking'i hariç, aynı gün + tarih örtüşmesi
     const weekdayMask = weekdaysToMask(input.weekdays);
     await lockRoomForBooking(input.roomId);
-    const conflict = await dbOne(`SELECT id FROM bookings
+    const conflict = await dbOne(`SELECT MIN(start_date) AS busy_start, MAX(end_date) AS busy_end
+         FROM bookings
          WHERE room_id = ?
            AND id != ?
            AND status IN ('pending', 'approved', 'feedback_requested')
            AND NOT (end_date < ? OR start_date > ?)
-           AND (weekday_mask & ?) != 0
-         LIMIT 1`, [input.roomId, bookingId, input.startDate, endDate, weekdayMask]);
-    if (conflict) {
+           AND (weekday_mask & ?) != 0`, [input.roomId, bookingId, input.startDate, endDate, weekdayMask]) as
+      | { busy_start: string | null; busy_end: string | null }
+      | undefined;
+    if (conflict?.busy_end) {
       throw new HttpError(
         409,
-        'Seçtiğiniz günlerde bu oda, bu tarih aralığında dolu.',
+        roomBusyMessage(conflict.busy_start!, conflict.busy_end),
         'ROOM_NOT_AVAILABLE'
       );
     }
 
-    // 4) Güncelle: düzenleme sonrası admin tekrar incelesin → status='pending'
+    // 4) Güncelle: düzenleme sonrası HER İKİ rol tekrar incelesin → status='pending',
+    //    çift-onay kararları sıfırlanır (admin + analitik yeniden değerlendirir).
     await dbRun(`UPDATE bookings
        SET room_id = ?, period_months = ?, weekday_mask = ?, start_date = ?, end_date = ?,
            project_name = ?, project_description = ?, help_needed = ?, technologies = ?,
            status = 'pending', admin_feedback = NULL, reviewed_by = NULL, reviewed_at = NULL,
+           admin_decision = NULL, analyst_decision = NULL,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`, [input.roomId,
       input.periodMonths,
@@ -525,6 +554,12 @@ export interface ReviewBookingResult {
   autoWaitlisted?: boolean;
   /** Waitlist'e taşındıysa atanmış sıra numarası. */
   waitlistPosition?: number;
+  /** Çift onay durumu — bu review sonrası (frontend "diğer onay bekleniyor" rozeti için). */
+  approvalState: {
+    adminDecision: 'approved' | 'rejected' | null;
+    analystDecision: 'approved' | 'rejected' | null;
+    finalStatus: BookingDto['status'];
+  };
 }
 
 export async function reviewBooking(
@@ -534,17 +569,21 @@ export async function reviewBooking(
   /** Review eden rol — admin ya da Analitik Danışman. Audit/timeline doğruluğu için. */
   actorType: 'admin' | 'danisman' = 'admin'
 ): Promise<ReviewBookingResult> {
-  const statusMap: Record<ReviewBookingInput['action'], BookingDto['status']> = {
-    approve: 'approved',
-    reject: 'rejected',
-    request_feedback: 'feedback_requested',
-  };
-  let newStatus = statusMap[input.action];
+  // ÇİFT ONAY: talep HEM admin HEM analitik (danışman) tarafından onaylanmalı.
+  //  - Paralel: herhangi sıra. İkisi de 'approved' → booking 'approved'.
+  //  - Veto: biri 'rejected' → booking anında 'rejected'.
+  //  - request_feedback → her iki karar sıfırlanır, kullanıcı düzeltir.
+  const role: 'admin' | 'analyst' = actorType === 'danisman' ? 'analyst' : 'admin';
+  // Yalnız iki sabit literal — SQL injection riski yok.
+  const decisionCol = role === 'admin' ? 'admin_decision' : 'analyst_decision';
+
+  // Bu review sonrası booking'in varacağı durum.
+  let newStatus: BookingDto['status'] = 'pending';
   let autoWaitlistedPosition: number | null = null;
 
   await dbTx(async () => {
     const existing = await dbOne(`SELECT id, user_id, status, room_id, period_months, weekday_mask, start_date, end_date,
-                project_name, project_description, help_needed, technologies
+                project_name, project_description, help_needed, technologies, admin_decision, analyst_decision
          FROM bookings WHERE id = ?`, [bookingId]) as
       | {
           id: string;
@@ -559,89 +598,115 @@ export async function reviewBooking(
           project_description: string;
           help_needed: string;
           technologies: string;
+          admin_decision: 'approved' | 'rejected' | null;
+          analyst_decision: 'approved' | 'rejected' | null;
         }
       | undefined;
 
     if (!existing) throw new HttpError(404, 'Booking bulunamadı.', 'BOOKING_NOT_FOUND');
 
-    if (newStatus === 'approved') {
-      await lockRoomForBooking(existing.room_id);
-      const conflict = await dbOne(`SELECT id FROM bookings
-           WHERE room_id = ? AND id != ? AND status = 'approved'
-             AND NOT (end_date < ? OR start_date > ?)
-             AND (weekday_mask & ?) != 0
-           LIMIT 1`, [existing.room_id, existing.id, existing.start_date, existing.end_date, existing.weekday_mask]);
-      if (conflict) {
-        // ❗ Eski davranış 409 ROOM_CONFLICT fırlatıyordu. Yeni davranış: bu
-        // booking'i otomatik olarak waitlist'e ekle, kendisini 'rejected' yap.
-        // Kullanıcı bekleme listesinde sıra alır; oda boşaldığında promote edilir.
-
-        // 1) Mevcut waiting kuyrukta sıra numarası belirle.
-        const maxRow = await dbOne(`SELECT COALESCE(MAX(position), 0) AS max_pos
-             FROM waitlist WHERE room_id = ? AND status = 'waiting'`, [existing.room_id]) as { max_pos: number };
-        const position = maxRow.max_pos + 1;
-
-        // 2) Aynı user aynı oda + aynı tarih için zaten kayıt var mı?
-        const dupe = await dbOne(`SELECT id FROM waitlist
-             WHERE user_id = ? AND room_id = ? AND desired_start_date = ?
-               AND status IN ('waiting', 'promoted')
-             LIMIT 1`, [existing.user_id, existing.room_id, existing.start_date]);
-
-        if (!dupe) {
-          const wId = nanoid();
-          // weekday_mask de taşınır — promote edildiğinde kullanıcının seçtiği
-          // günler korunur (önceden kaybolup tüm haftaya yayılıyordu).
-          await dbRun(`INSERT INTO waitlist (
-               id, user_id, room_id, period_months, desired_start_date,
-               project_name, project_description, help_needed, technologies, weekday_mask, position, status
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`, [wId,
-            existing.user_id,
-            existing.room_id,
-            existing.period_months,
-            existing.start_date,
-            existing.project_name,
-            existing.project_description,
-            existing.help_needed,
-            existing.technologies,
-            existing.weekday_mask,
-            position]);
-        }
-
-        // 3) Booking artık reddedilmiş + otomatik açıklayıcı feedback.
-        newStatus = 'rejected';
-        autoWaitlistedPosition = position;
-        const autoFeedback =
-          `Oda bu tarih aralığında dolu olduğu için talebiniz otomatik olarak ` +
-          `bekleme listesine alındı (sıra: ${position}). Oda boşaldığında ` +
-          `yeniden değerlendirilecektir.` +
-          (input.feedback ? `\n\nAdmin notu: ${input.feedback}` : '');
-
-        await dbRun(`UPDATE bookings
-           SET status = 'rejected', admin_feedback = ?, reviewed_by = ?,
-               reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?`, [autoFeedback, adminId, bookingId]);
-
-        return; // status update tamam, aşağıdaki update'i atla
-      }
+    // Yalnız değerlendirilebilir durumlar incelenebilir (sonuçlanmış talep tekrar incelenemez).
+    if (existing.status !== 'pending' && existing.status !== 'feedback_requested') {
+      throw new HttpError(409, 'Bu talep zaten sonuçlandırılmış.', 'BOOKING_NOT_REVIEWABLE');
     }
 
-    await dbRun(`UPDATE bookings
-       SET status = ?, admin_feedback = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`, [newStatus, input.feedback ?? null, adminId, bookingId]);
-
-    // Onay sonrası proje yaşam döngüsüne giriş: application → development
-    // (sadece henüz application aşamasındaki booking'ler için; tekrar approve'da
-    // mevcut aşama korunur).
-    if (newStatus === 'approved') {
+    if (input.action === 'request_feedback') {
+      // Kullanıcıdan düzeltme iste — her iki çift-onay kararını sıfırla.
+      newStatus = 'feedback_requested';
       await dbRun(`UPDATE bookings
-         SET lifecycle_stage = 'development',
-             stage_entered_at = CURRENT_TIMESTAMP,
+         SET status = 'feedback_requested', admin_feedback = ?, reviewed_by = ?,
+             reviewed_at = CURRENT_TIMESTAMP, admin_decision = NULL, analyst_decision = NULL,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND lifecycle_stage = 'application'`, [bookingId]);
+         WHERE id = ?`, [input.feedback ?? null, adminId, bookingId]);
+      return;
     }
+
+    if (input.action === 'reject') {
+      // VETO: bu rol reddetti → booking anında reddedilir (diğer rolü beklemez).
+      newStatus = 'rejected';
+      await dbRun(`UPDATE bookings
+         SET status = 'rejected', ${decisionCol} = 'rejected', admin_feedback = ?, reviewed_by = ?,
+             reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`, [input.feedback ?? null, adminId, bookingId]);
+      return;
+    }
+
+    // input.action === 'approve' → bu rolün kararı 'approved'.
+    const otherApproved =
+      role === 'admin' ? existing.analyst_decision === 'approved' : existing.admin_decision === 'approved';
+
+    if (!otherApproved) {
+      // KISMİ onay — diğer rolün onayı bekleniyor. status 'pending' kalır.
+      newStatus = 'pending';
+      await dbRun(`UPDATE bookings
+         SET ${decisionCol} = 'approved', admin_feedback = ?, reviewed_by = ?,
+             reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`, [input.feedback ?? null, adminId, bookingId]);
+      return;
+    }
+
+    // NİHAİ ONAY (her iki rol de onayladı) → çakışma kontrolü + auto-waitlist + lifecycle.
+    await lockRoomForBooking(existing.room_id);
+    const conflict = await dbOne(`SELECT id FROM bookings
+         WHERE room_id = ? AND id != ? AND status = 'approved'
+           AND NOT (end_date < ? OR start_date > ?)
+           AND (weekday_mask & ?) != 0
+         LIMIT 1`, [existing.room_id, existing.id, existing.start_date, existing.end_date, existing.weekday_mask]);
+    if (conflict) {
+      // Oda dolu → booking'i otomatik waitlist'e ekle, kendisini 'rejected' yap.
+      const maxRow = await dbOne(`SELECT COALESCE(MAX(position), 0) AS max_pos
+           FROM waitlist WHERE room_id = ? AND status = 'waiting'`, [existing.room_id]) as { max_pos: number };
+      const position = maxRow.max_pos + 1;
+      const dupe = await dbOne(`SELECT id FROM waitlist
+           WHERE user_id = ? AND room_id = ? AND desired_start_date = ?
+             AND status IN ('waiting', 'promoted')
+           LIMIT 1`, [existing.user_id, existing.room_id, existing.start_date]);
+      if (!dupe) {
+        const wId = nanoid();
+        await dbRun(`INSERT INTO waitlist (
+             id, user_id, room_id, period_months, desired_start_date,
+             project_name, project_description, help_needed, technologies, weekday_mask, position, status
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`, [wId,
+          existing.user_id,
+          existing.room_id,
+          existing.period_months,
+          existing.start_date,
+          existing.project_name,
+          existing.project_description,
+          existing.help_needed,
+          existing.technologies,
+          existing.weekday_mask,
+          position]);
+      }
+      newStatus = 'rejected';
+      autoWaitlistedPosition = position;
+      const autoFeedback =
+        `Oda bu tarih aralığında dolu olduğu için talebiniz otomatik olarak ` +
+        `bekleme listesine alındı (sıra: ${position}). Oda boşaldığında ` +
+        `yeniden değerlendirilecektir.` +
+        (input.feedback ? `\n\nNot: ${input.feedback}` : '');
+      await dbRun(`UPDATE bookings
+         SET status = 'rejected', ${decisionCol} = 'approved', admin_feedback = ?, reviewed_by = ?,
+             reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`, [autoFeedback, adminId, bookingId]);
+      return;
+    }
+
+    // Çakışma yok → tam onay + lifecycle application → development.
+    newStatus = 'approved';
+    await dbRun(`UPDATE bookings
+       SET status = 'approved', ${decisionCol} = 'approved', admin_feedback = ?, reviewed_by = ?,
+           reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`, [input.feedback ?? null, adminId, bookingId]);
+    await dbRun(`UPDATE bookings
+       SET lifecycle_stage = 'development',
+           stage_entered_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND lifecycle_stage = 'application'`, [bookingId]);
   });
   const reviewed = await getBookingByIdAdmin(bookingId) as BookingDto;
+  // tx içindeki karar dallarından sonra otoriter (DB'deki) nihai durum.
+  newStatus = reviewed.status;
 
   // Audit timeline: ilk onayda application → development geçişini kaydet.
   // (advance/regress kendi fonksiyonlarında ayrı stage event'i atar.)
@@ -669,28 +734,18 @@ export async function reviewBooking(
     reviewed.userId
   );
 
-  // E-posta: kullanıcıya inceleme sonucu
-  if (reviewed.userEmail && (newStatus === 'approved' || newStatus === 'rejected' || newStatus === 'feedback_requested')) {
-    void enqueueEmail(
-      bookingReviewedEmail({
-        to: reviewed.userEmail,
-        toName: reviewed.userFullName ?? '',
-        projectName: reviewed.projectName,
-        roomCode: reviewed.roomCode,
-        status: newStatus as 'approved' | 'rejected' | 'feedback_requested',
-        feedback: reviewed.adminFeedback,
-      })
-    );
-  }
-
-  // In-app bildirim — talep sahibine.
+  // In-app bildirim — talep sahibine. Kısmi onayda (status hâlâ 'pending') ilerleme bildirilir.
   void import('./notification-center.service').then((m) => {
     const notifTitle =
       newStatus === 'approved'
         ? 'Randevu talebin onaylandı'
         : newStatus === 'rejected'
           ? 'Randevu talebin reddedildi'
-          : 'Randevu talebin için düzeltme istendi';
+          : newStatus === 'feedback_requested'
+            ? 'Randevu talebin için düzeltme istendi'
+            : role === 'admin'
+              ? 'Admin onayladı — analitik onayı bekleniyor'
+              : 'Analitik onayladı — admin onayı bekleniyor';
     m.pushNotification({
       recipientId: reviewed.userId,
       recipientType: 'user',
@@ -741,6 +796,11 @@ export async function reviewBooking(
     booking: reviewed,
     autoWaitlisted: autoWaitlistedPosition !== null,
     waitlistPosition: autoWaitlistedPosition ?? undefined,
+    approvalState: {
+      adminDecision: reviewed.adminDecision,
+      analystDecision: reviewed.analystDecision,
+      finalStatus: reviewed.status,
+    },
   };
 }
 

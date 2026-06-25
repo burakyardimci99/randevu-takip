@@ -28,11 +28,6 @@ import { dbAll, dbOne, dbRun, dbTx } from '../db/schema';
 import { HttpError } from '../middleware/error.middleware';
 import { LICENSE_CATALOG, type LicenseInfo } from './license.service';
 import {
-  enqueueEmail,
-  licenseRequestedAdminEmail,
-  licenseReviewedEmail,
-} from './notification.service';
-import {
   pushNotification,
   pushNotificationBulk,
 } from './notification-center.service';
@@ -426,25 +421,27 @@ export async function getLicenseBudgetReport(): Promise<LicenseBudgetReport> {
  * ============================================================ */
 
 export interface CreateLicenseRequestInput {
+  // Çekirdek (zorunlu) alanlar
   requestTitle: string;
   reason: string;
-  expectedBenefit: string;
-  successCriteria: string;
   items: Array<{
     licenseKey: string;
     licenseName: string;
     vendor?: string | null;
     category?: string | null;
   }>;
-  projectType: ProjectType;
-  estimatedDurationDays?: number | null;
-  dataToUse: string;
-  technicalStack?: string | null;
   durationMonths: 1 | 3 | 6 | 12;
+  // Opsiyonel alanlar (sadeleştirilmiş form göndermeyebilir)
+  expectedBenefit?: string | null;
+  successCriteria?: string | null;
+  projectType?: ProjectType | null;
+  estimatedDurationDays?: number | null;
+  dataToUse?: string | null;
+  technicalStack?: string | null;
   /** Dış servis / API erişimi var mı (yönetişim kapsamı). */
-  usesExternalApi: boolean;
+  usesExternalApi?: boolean;
   /** Gerçek banka verisi / üretim / AD-LDAP beyanı — true ise otomatik red. */
-  involvesRealData: boolean;
+  involvesRealData?: boolean;
 }
 
 /**
@@ -472,8 +469,9 @@ export async function createLicenseRequest(
   const items = input.items.map(normalizeItem);
   const primary = items[0]!; // schema min(1) garantili
 
-  const governanceLevel = governanceLevelForProjectType(input.projectType);
-  // Kılavuz §5: gerçek veri beyanı → otomatik red.
+  // Proje türü opsiyonel — verilmezse 'poc' (basic governance).
+  const governanceLevel = governanceLevelForProjectType(input.projectType ?? 'poc');
+  // Kılavuz §5: gerçek veri beyanı → otomatik red (verilmezse false).
   const autoRejected = input.involvesRealData === true;
   const status: LicenseRequestStatus = autoRejected ? 'rejected' : 'pending';
   const adminFeedback = autoRejected ? AUTO_REJECT_FEEDBACK : null;
@@ -496,13 +494,13 @@ export async function createLicenseRequest(
       input.reason.trim(),
       input.durationMonths,
       input.requestTitle.trim(),
-      input.expectedBenefit.trim(),
-      input.successCriteria.trim(),
-      input.projectType,
+      input.expectedBenefit?.trim() || null,
+      input.successCriteria?.trim() || null,
+      input.projectType ?? null,
       input.estimatedDurationDays ?? null,
-      input.dataToUse.trim(),
+      input.dataToUse?.trim() || null,
       input.technicalStack?.trim() || null,
-      input.usesExternalApi ? 1 : 0,
+      input.usesExternalApi == null ? null : input.usesExternalApi ? 1 : 0,
       input.involvesRealData ? 1 : 0,
       governanceLevel,
       status,
@@ -562,7 +560,30 @@ export async function updateLicenseRequest(
 
   const items = input.items.map(normalizeItem);
   const primary = items[0]!;
-  const governanceLevel = governanceLevelForProjectType(input.projectType);
+
+  // Opsiyonel alanlar GÖNDERİLMEDİYSE (undefined) eski kaydın değerini KORU.
+  // Sadeleştirilmiş form bu alanları artık göndermiyor; düz overwrite, eski
+  // (sadeleştirme öncesi) başvuru düzenlenince geçmiş yönetişim verisini sessizce
+  // silerdi. Açıkça gönderilen değer (boş '' dahil → optionalShortText undefined'a
+  // map'ler) korunur; yalnız gerçekten verilen alan güncellenir.
+  const expectedBenefit =
+    input.expectedBenefit !== undefined ? input.expectedBenefit?.trim() || null : existing.expected_benefit;
+  const successCriteria =
+    input.successCriteria !== undefined ? input.successCriteria?.trim() || null : existing.success_criteria;
+  const projectType = input.projectType !== undefined ? input.projectType : existing.project_type;
+  const estimatedDurationDays =
+    input.estimatedDurationDays !== undefined ? input.estimatedDurationDays ?? null : existing.estimated_duration_days;
+  const dataToUse = input.dataToUse !== undefined ? input.dataToUse?.trim() || null : existing.data_to_use;
+  const technicalStack =
+    input.technicalStack !== undefined ? input.technicalStack?.trim() || null : existing.technical_stack;
+  const usesExternalApi =
+    input.usesExternalApi !== undefined ? (input.usesExternalApi ? 1 : 0) : existing.uses_external_api;
+  const involvesRealDataVal =
+    input.involvesRealData !== undefined ? (input.involvesRealData ? 1 : 0) : existing.involves_real_data;
+
+  // Yönetişim seviyesi korunan/güncellenen proje türünden türetilir.
+  const governanceLevel = governanceLevelForProjectType((projectType as ProjectType | null) ?? 'poc');
+  // Yalnızca bu güncellemede AÇIKÇA gerçek-veri beyanı yapıldıysa otomatik red.
   const autoRejected = input.involvesRealData === true;
   const status: LicenseRequestStatus = autoRejected ? 'rejected' : 'pending';
   const adminFeedback = autoRejected ? AUTO_REJECT_FEEDBACK : existing.admin_feedback;
@@ -585,14 +606,14 @@ export async function updateLicenseRequest(
       input.reason.trim(),
       input.durationMonths,
       input.requestTitle.trim(),
-      input.expectedBenefit.trim(),
-      input.successCriteria.trim(),
-      input.projectType,
-      input.estimatedDurationDays ?? null,
-      input.dataToUse.trim(),
-      input.technicalStack?.trim() || null,
-      input.usesExternalApi ? 1 : 0,
-      input.involvesRealData ? 1 : 0,
+      expectedBenefit,
+      successCriteria,
+      projectType,
+      estimatedDurationDays,
+      dataToUse,
+      technicalStack,
+      usesExternalApi,
+      involvesRealDataVal,
       governanceLevel,
       status,
       adminFeedback,
@@ -626,12 +647,12 @@ export async function updateLicenseRequest(
 }
 
 /**
- * Yeni başvuruda aktif admin'lere e-posta + in-app bildirim.
+ * Yeni başvuruda aktif admin'lere in-app bildirim.
  */
 export async function notifyAdminsLicenseRequested(
   request: LicenseRequest
 ): Promise<void> {
-  const admins = await dbAll("SELECT id, email FROM admins WHERE status = 1", []) as Array<{ id: string; email: string }>;
+  const admins = await dbAll("SELECT id FROM admins WHERE status = 1", []) as Array<{ id: string }>;
   if (admins.length === 0) return;
 
   const submitter = await dbOne('SELECT full_name FROM users WHERE id = ?', [request.userId]) as { full_name: string } | undefined;
@@ -639,11 +660,6 @@ export async function notifyAdminsLicenseRequested(
 
   const tools = request.items.map((i) => i.licenseName).join(', ') || request.licenseName;
   const title = request.requestTitle ?? request.licenseName;
-  for (const a of admins) {
-    await enqueueEmail(
-      licenseRequestedAdminEmail({ to: a.email, requestTitle: title, tools, submitterName })
-    );
-  }
 
   pushNotificationBulk(admins.map((a) => a.id), 'admin', {
     category: 'license',
@@ -791,17 +807,6 @@ export async function reviewLicenseRequest(
 
   const result = (await getAdminLicenseRequestById(requestId))!;
   const reqTitle = result.requestTitle ?? result.licenseName;
-
-  // Kullanıcıya sonuç e-postası (best-effort, queue üzerinden).
-  void enqueueEmail(
-    licenseReviewedEmail({
-      to: result.userEmail,
-      toName: result.userFullName,
-      requestTitle: reqTitle,
-      status: nextStatus,
-      feedback: result.adminFeedback,
-    })
-  );
 
   // In-app bildirim — talep sahibine.
   const notifTitle =

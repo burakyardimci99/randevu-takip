@@ -52,6 +52,7 @@ import type {
   PublicProfile,
   ReviewBookingPayload,
   Room,
+  RoomAvailability,
   ShowcaseComment,
   ShowcaseEngagement,
   ShowcaseItem,
@@ -570,9 +571,24 @@ export const api = {
 
   /* ============ ROOMS / BOOKINGS ============ */
 
-  async listUserRooms(date?: string) {
-    const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+  async listUserRooms(from?: string, to?: string) {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const qs = params.toString() ? `?${params.toString()}` : '';
     return request<{ rooms: Room[] }>(`/user/rooms${qs}`, { kind: 'user' });
+  },
+
+  /** Oda müsaitlik detayı — boş günler, dolu tarih aralıkları, dolu saatler. */
+  async roomAvailability(roomId: string, params?: { from?: string; to?: string }) {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set('from', params.from);
+    if (params?.to) qs.set('to', params.to);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request<RoomAvailability>(
+      `/user/rooms/${encodeURIComponent(roomId)}/availability${suffix}`,
+      { kind: 'user' }
+    );
   },
 
   async listUserBookings() {
@@ -1637,23 +1653,27 @@ export const api = {
   },
 };
 
-/** createLicenseRequest / updateLicenseRequest ortak gövdesi. */
+/**
+ * createLicenseRequest / updateLicenseRequest ortak gövdesi.
+ * Sadeleştirilmiş form yalnızca çekirdek alanları (ad/amaç/araç/süre) gönderir;
+ * geri kalanlar opsiyoneldir (backend null/varsayılan yazar).
+ */
 export interface LicenseRequestPayload {
   requestTitle: string;
   reason: string;
-  expectedBenefit: string;
-  successCriteria: string;
   items: Array<{
     licenseKey: string;
     licenseName: string;
     vendor?: string | null;
     category?: string | null;
   }>;
-  projectType: 'poc' | 'integration';
-  estimatedDurationDays?: number | null;
-  dataToUse: string;
-  technicalStack?: string | null;
   durationMonths: 1 | 3 | 6 | 12;
-  usesExternalApi: boolean;
-  involvesRealData: boolean;
+  expectedBenefit?: string;
+  successCriteria?: string;
+  projectType?: 'poc' | 'integration';
+  estimatedDurationDays?: number | null;
+  dataToUse?: string;
+  technicalStack?: string | null;
+  usesExternalApi?: boolean;
+  involvesRealData?: boolean;
 }

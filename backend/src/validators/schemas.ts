@@ -6,6 +6,7 @@
  * - app_security.md §4: Parola politikası: min 12 karakter, karmaşıklık zorunlu.
  */
 import { z } from 'zod';
+import { addMonthsEndDate } from '../utils/dates';
 
 export const emailSchema = z
   .string()
@@ -195,6 +196,12 @@ export const createBookingSchema = z.object({
   startDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Tarih formatı YYYY-MM-DD olmalı.'),
+  // Esnek/kısa süreli randevu: manuel bitiş tarihi. Verilmezse start + periyot
+  // türetilir; verilirse periyot preset'inden bağımsız (kısa veya özel süre).
+  endDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Tarih formatı YYYY-MM-DD olmalı.')
+    .optional(),
   projectName: safeText(3, 120, 'Proje adı'),
   projectDescription: safeText(20, 2000, 'Proje açıklaması'),
   helpNeeded: safeText(10, 2000, 'Yardım talebi'),
@@ -208,7 +215,10 @@ export const createBookingSchema = z.object({
     .min(1, 'En az bir gün seçin.')
     .max(7)
     .optional(),
-});
+}).refine(
+  (d) => !d.endDate || d.endDate >= d.startDate,
+  { message: 'Bitiş tarihi başlangıçtan önce olamaz.', path: ['endDate'] }
+);
 
 // Kullanıcı dashboard'u — ilerleme notu (boş string = notu temizle).
 export const bookingProgressSchema = z.object({
@@ -254,6 +264,11 @@ export const joinWaitlistSchema = z.object({
   desiredStartDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Tarih formatı YYYY-MM-DD olmalı.'),
+  // Manuel (periyottan kısa) bitiş tarihi. Verilmezse start + periyot türetilir.
+  desiredEndDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Tarih formatı YYYY-MM-DD olmalı.')
+    .optional(),
   projectName: safeText(3, 120, 'Proje adı'),
   projectDescription: safeText(20, 2000, 'Proje açıklaması'),
   helpNeeded: safeText(10, 2000, 'Yardım talebi'),
@@ -267,7 +282,15 @@ export const joinWaitlistSchema = z.object({
     .min(1, 'En az bir gün seçin.')
     .max(7)
     .optional(),
-});
+})
+  .refine(
+    (d) => !d.desiredEndDate || d.desiredEndDate >= d.desiredStartDate,
+    { message: 'Bitiş tarihi başlangıçtan önce olamaz.', path: ['desiredEndDate'] }
+  )
+  .refine(
+    (d) => !d.desiredEndDate || d.desiredEndDate <= addMonthsEndDate(d.desiredStartDate, d.periodMonths),
+    { message: 'Bitiş tarihi periyodun ötesine geçemez.', path: ['desiredEndDate'] }
+  );
 
 export type JoinWaitlistInput = z.infer<typeof joinWaitlistSchema>;
 
@@ -359,45 +382,49 @@ const licenseRequestItemSchema = z.object({
   category: z.string().trim().max(40).nullable().optional(),
 });
 
+/**
+ * Sadeleştirilmiş başvuru formu (talep): yalnızca çekirdek alanlar ZORUNLU —
+ * Talep Adı (ad), Kullanım Amacı (amaç), AI Araç/Lisans (araç) ve Süre.
+ * Diğer alanlar (beklenen fayda, başarı kriteri, proje türü, kullanılacak veri,
+ * dış API, gerçek veri beyanı, teknik yığın, tahmini süre) OPSİYONELDİR; form
+ * göndermezse server null/varsayılan yazar. DB kolonları zaten nullable.
+ */
 export const createLicenseRequestSchema = z.object({
-  // Talep adı (PNG: zorunlu, kısa başlık)
+  // Talep adı — zorunlu, kısa başlık
   requestTitle: z
     .string()
     .trim()
     .min(5, 'Talep adı en az 5 karakter olmalı.')
     .max(120, 'Talep adı en fazla 120 karakter olabilir.'),
 
-  // Kullanım amacı — mevcut `reason` kolonuna yazılır (PNG: zorunlu)
+  // Kullanım amacı — mevcut `reason` kolonuna yazılır (zorunlu)
   reason: z
     .string()
     .trim()
     .min(20, 'Kullanım amacı en az 20 karakter olmalı.')
     .max(1000, 'Kullanım amacı en fazla 1000 karakter olabilir.'),
 
-  // Beklenen fayda (PNG: zorunlu)
-  expectedBenefit: z
-    .string()
-    .trim()
-    .min(20, 'Beklenen fayda en az 20 karakter olmalı.')
-    .max(1000, 'Beklenen fayda en fazla 1000 karakter olabilir.'),
-
-  // Başarı kriteri (PNG: zorunlu)
-  successCriteria: z
-    .string()
-    .trim()
-    .min(20, 'Başarı kriteri en az 20 karakter olmalı.')
-    .max(1000, 'Başarı kriteri en fazla 1000 karakter olabilir.'),
-
-  // AI Araç / Lisans Talebi (PNG: zorunlu, çoklu seçim)
+  // AI Araç / Lisans Talebi — zorunlu, çoklu seçim
   items: z
     .array(licenseRequestItemSchema)
     .min(1, 'En az bir AI aracı / lisans seçilmeli.')
     .max(10, 'En fazla 10 AI aracı seçilebilir.'),
 
-  // Proje türü (PNG: zorunlu)
-  projectType: z.union([z.literal('poc'), z.literal('integration')]),
+  // Lisans kullanım süresi (ay) — zorunlu
+  durationMonths: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(12)]),
 
-  // Tahmini süre — gün (PNG: önerilen, opsiyonel)
+  /* --- Opsiyonel alanlar (form göndermeyebilir) --- */
+
+  // Beklenen fayda (opsiyonel)
+  expectedBenefit: optionalShortText(1000),
+
+  // Başarı kriteri (opsiyonel)
+  successCriteria: optionalShortText(1000),
+
+  // Proje türü (opsiyonel — verilmezse 'poc' kabul edilir → governance 'basic')
+  projectType: z.union([z.literal('poc'), z.literal('integration')]).optional(),
+
+  // Tahmini süre — gün (opsiyonel)
   estimatedDurationDays: z
     .number()
     .int()
@@ -406,14 +433,10 @@ export const createLicenseRequestSchema = z.object({
     .nullable()
     .optional(),
 
-  // Kullanılacak veri (PNG: zorunlu)
-  dataToUse: z
-    .string()
-    .trim()
-    .min(10, 'Kullanılacak veri tanımı en az 10 karakter olmalı.')
-    .max(500, 'Kullanılacak veri tanımı en fazla 500 karakter olabilir.'),
+  // Kullanılacak veri (opsiyonel)
+  dataToUse: optionalShortText(500),
 
-  // Teknik yığın (PNG: önerilen, opsiyonel)
+  // Teknik yığın (opsiyonel)
   technicalStack: z
     .string()
     .trim()
@@ -421,15 +444,12 @@ export const createLicenseRequestSchema = z.object({
     .nullable()
     .optional(),
 
-  // Lisans kullanım süresi (ay) — mevcut alan, korunur
-  durationMonths: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(12)]),
+  // Yönetişim — dış servis/API erişimi var mı (opsiyonel)
+  usesExternalApi: z.boolean().optional(),
 
-  // Yönetişim — dış servis/API erişimi var mı (kapsam belirler)
-  usesExternalApi: z.boolean(),
-
-  // Yönetişim §5 — gerçek banka verisi / üretim / AD-LDAP beyanı.
-  // true ise başvuru otomatik reddedilir.
-  involvesRealData: z.boolean(),
+  // Yönetişim §5 — gerçek banka verisi / üretim / AD-LDAP beyanı (opsiyonel).
+  // true ise başvuru otomatik reddedilir; verilmezse false kabul edilir.
+  involvesRealData: z.boolean().optional(),
 });
 
 export type CreateLicenseRequestInput = z.infer<typeof createLicenseRequestSchema>;

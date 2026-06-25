@@ -16,6 +16,7 @@ import {
   tryPromoteForRoom,
   listUserWaitlist,
 } from '../src/services/waitlist.service';
+import { addMonthsEndDate } from '../src/utils/dates';
 import { HttpError } from '../src/middleware/error.middleware';
 
 const USER_A = nanoid();
@@ -75,6 +76,14 @@ describe('joinWaitlist', () => {
     expect(entry.status).toBe('waiting');
     expect(entry.position).toBe(1);
     expect(entry.userId).toBe(USER_B);
+  });
+
+  it('entry desiredEndDate = istenen başlangıç + periyot (türetilmiş, başlangıçtan sonra)', async () => {
+    const entries = await listUserWaitlist(USER_B);
+    const e = entries.find((x) => x.roomCode === 'WL-01' && x.status === 'waiting');
+    expect(e).toBeDefined();
+    expect(e!.desiredEndDate).toBe(addMonthsEndDate(e!.desiredStartDate, e!.periodMonths));
+    expect(e!.desiredEndDate > e!.desiredStartDate).toBe(true);
   });
 
   it('aynı user aynı oda+tarih için ikinci entry açamaz', async () => {
@@ -138,4 +147,76 @@ describe('tryPromoteForRoom', () => {
   });
 });
 
-void HttpError;
+describe('manuel bitiş tarihi (desiredEndDate)', () => {
+  const ROOM2 = nanoid();
+  const BLOCK2 = nanoid();
+
+  beforeAll(async () => {
+    await dbRun(`INSERT OR IGNORE INTO rooms (id, code, name, district, neighborhood, capacity) VALUES (?, ?, ?, ?, ?, ?)`, [ROOM2, 'WL-02', 'WL Oda 2', 'Test', 'Mahalle', 4]);
+    // Geniş bloklayıcı booking — manuel bitiş testleri için oda dolu kalsın.
+    await dbRun(
+      `INSERT INTO bookings (id, user_id, room_id, period_months, start_date, end_date,
+         project_name, project_description, help_needed, technologies, status)
+       VALUES (?, ?, ?, 3, ?, ?, 'Blok2', 'Bloklayıcı — manuel bitiş testi.', 'yok', '["X"]', 'approved')`,
+      [BLOCK2, USER_A, ROOM2, futureDate(7), futureDate(160)]
+    );
+  });
+
+  it('periyottan kısa manuel bitiş kabul edilir ve saklanır', async () => {
+    const start = futureDate(10);
+    const manualEnd = futureDate(40); // 3 ay periyottan belirgin kısa
+    const entry = await joinWaitlist(USER_A, {
+      roomId: ROOM2,
+      periodMonths: 3,
+      desiredStartDate: start,
+      desiredEndDate: manualEnd,
+      projectName: 'Manuel bitiş kısa',
+      projectDescription: 'Kullanıcı periyottan kısa bir bitiş tarihi seçiyor.',
+      helpNeeded: 'Yok',
+      technologies: ['Claude'],
+    });
+    expect(entry.desiredEndDate).toBe(manualEnd);
+    // Periyot-türevinden kısa olmalı.
+    expect(entry.desiredEndDate < addMonthsEndDate(start, 3)).toBe(true);
+  });
+
+  it('periyodu aşan manuel bitiş reddedilir', async () => {
+    await expect(joinWaitlist(USER_B, {
+      roomId: ROOM2,
+      periodMonths: 3,
+      desiredStartDate: futureDate(11),
+      desiredEndDate: futureDate(200), // periyot sonunu aşıyor
+      projectName: 'Manuel bitiş uzun',
+      projectDescription: 'Bu bitiş tarihi periyodun ötesinde olduğu için reddedilmeli.',
+      helpNeeded: 'Yok',
+      technologies: ['GPT'],
+    })).rejects.toThrow(/periyod|INVALID_END_DATE/i);
+  });
+
+  it('başlangıçtan önceki manuel bitiş reddedilir', async () => {
+    await expect(joinWaitlist(USER_B, {
+      roomId: ROOM2,
+      periodMonths: 3,
+      desiredStartDate: futureDate(20),
+      desiredEndDate: futureDate(15), // başlangıçtan önce
+      projectName: 'Manuel bitiş ters',
+      projectDescription: 'Bitiş başlangıçtan önce olduğu için reddedilmeli.',
+      helpNeeded: 'Yok',
+      technologies: ['GPT'],
+    })).rejects.toThrow(HttpError);
+  });
+
+  it('manuel bitiş verilmezse periyottan türetilir', async () => {
+    const start = futureDate(12);
+    const entry = await joinWaitlist(USER_B, {
+      roomId: ROOM2,
+      periodMonths: 2,
+      desiredStartDate: start,
+      projectName: 'Manuel bitiş yok',
+      projectDescription: 'Bitiş verilmedi; periyottan türetilmeli (start + 2 ay).',
+      helpNeeded: 'Yok',
+      technologies: ['Gemini'],
+    });
+    expect(entry.desiredEndDate).toBe(addMonthsEndDate(start, 2));
+  });
+});

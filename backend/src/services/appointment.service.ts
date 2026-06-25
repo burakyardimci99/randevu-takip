@@ -428,16 +428,16 @@ export async function listAllAppointments(
  * ============================================================ */
 
 export interface ApptHeatmapSlot {
-  start: string; // ISO datetime
-  end: string;   // ISO datetime
-  title: string;
-  user: string;
+  start: string; // booking start_date (YYYY-MM-DD)
+  end: string;   // booking end_date (YYYY-MM-DD)
+  title: string; // proje adı
+  user: string;  // rezervasyon sahibi
 }
 export interface ApptHeatmapDay {
   date: string;    // YYYY-MM-DD
   weekday: number; // 1=Pzt .. 7=Paz
-  count: number;   // o gün o odadaki scheduled randevu sayısı
-  slots: ApptHeatmapSlot[]; // saatli detay (tıklayınca gösterilir)
+  count: number;   // o gün o odayı kaplayan onaylı rezervasyon sayısı
+  slots: ApptHeatmapSlot[]; // o günkü rezervasyon detayı (tıklayınca gösterilir)
 }
 export interface ApptHeatmapRoom {
   roomId: string;
@@ -471,10 +471,17 @@ function enumerateDates(from: string, to: string): string[] {
 }
 
 /**
- * Oda × gün doluluk ısı-haritası — scheduled APPOINTMENT'lara dayanır (booking
- * weekday_mask'ine değil). Her hücre o gün o odadaki randevu sayısını ve saatli
- * detayını (slots) içerir → frontend hücreye tıklayınca "hangi saatlerde dolu"
- * gösterir. Varsayılan aralık: içinde bulunulan hafta (Pzt–Paz).
+ * Oda × gün doluluk ısı-haritası — ONAYLI (approved) BOOKING rezervasyonlarına
+ * dayanır. Her hücre o gün o odayı kaç rezervasyonun kapladığını ve detayını
+ * (slots: proje + kullanıcı + tarih aralığı) içerir → frontend hücreye tıklayınca
+ * "o gün hangi projeler dolu" gösterir. Bir booking, [start_date, end_date]
+ * aralığındaki ve weekday_mask'ine uyan her günü doldurur.
+ *
+ * NOT: Eskiden 'appointments' (status='scheduled') tablosundan besleniyordu; o
+ * tablo aktif randevu akışında doldurulmadığından harita hep boş ("Veri yok")
+ * görünüyordu. Gerçek rezervasyon verisi bookings tablosundadır.
+ *
+ * Varsayılan aralık: içinde bulunulan hafta (Pzt–Paz).
  */
 export async function getRoomAppointmentHeatmap(opts: { from?: string; to?: string }): Promise<RoomApptHeatmap> {
   const valid = (d?: string): d is string => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d);
@@ -491,35 +498,40 @@ export async function getRoomAppointmentHeatmap(opts: { from?: string; to?: stri
 
   const rooms = await dbAll(`SELECT id, code, name FROM rooms WHERE is_active = 1 ORDER BY code`, []) as Array<{ id: string; code: string; name: string }>;
 
-  // Aralıkla örtüşen scheduled randevular. start_at/end_at ISO string → leksik
-  // karşılaştırma güvenli (to günün sonuna kadar dahil edilir).
-  const appts = await dbAll(`SELECT a.id, a.room_id, a.start_at, a.end_at, a.title, u.full_name AS user_full_name
-       FROM appointments a
-       INNER JOIN users u ON u.id = a.user_id
-       WHERE a.status = 'scheduled'
-         AND a.end_at >= ?
-         AND a.start_at <= ?
-       ORDER BY a.start_at ASC`, [from, `${to}T23:59:59.999`]) as Array<{
-      id: string; room_id: string; start_at: string; end_at: string; title: string; user_full_name: string;
+  // [from,to] ile örtüşen onaylı booking'ler (tarih aralığı + weekday_mask).
+  const bookings = await dbAll(`SELECT b.room_id, b.start_date, b.end_date, b.weekday_mask,
+            b.project_name, u.full_name AS user_full_name
+       FROM bookings b
+       INNER JOIN users u ON u.id = b.user_id
+       WHERE b.status = 'approved'
+         AND b.end_date >= ?
+         AND b.start_date <= ?
+       ORDER BY b.start_date ASC`, [from, to]) as Array<{
+      room_id: string; start_date: string; end_date: string; weekday_mask: number;
+      project_name: string; user_full_name: string;
     }>;
 
-  // room_id → (date → slots)
+  const dates = enumerateDates(from, to);
+
+  // room_id → (date → slots). Booking, aralığındaki ve maskesine uyan her günü doldurur.
   const byRoomDate = new Map<string, Map<string, ApptHeatmapSlot[]>>();
-  for (const a of appts) {
-    const date = a.start_at.slice(0, 10);
-    let dm = byRoomDate.get(a.room_id);
+  for (const b of bookings) {
+    let dm = byRoomDate.get(b.room_id);
     if (!dm) {
       dm = new Map();
-      byRoomDate.set(a.room_id, dm);
+      byRoomDate.set(b.room_id, dm);
     }
-    const list = dm.get(date) ?? [];
-    list.push({ start: a.start_at, end: a.end_at, title: a.title, user: a.user_full_name });
-    dm.set(date, list);
+    for (const date of dates) {
+      if (date < b.start_date || date > b.end_date) continue;
+      const wd = weekdayMon(date); // 1=Pzt..7=Paz
+      if ((b.weekday_mask & (1 << (wd - 1))) === 0) continue;
+      const list = dm.get(date) ?? [];
+      list.push({ start: b.start_date, end: b.end_date, title: b.project_name, user: b.user_full_name });
+      dm.set(date, list);
+    }
   }
 
-  const dates = enumerateDates(from, to);
   let maxCount = 0;
-
   const resultRooms: ApptHeatmapRoom[] = rooms.map((r) => {
     const dm = byRoomDate.get(r.id);
     let total = 0;

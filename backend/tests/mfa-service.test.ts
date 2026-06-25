@@ -4,7 +4,6 @@
  * Odak: backup code'ların DB'de PLAIN değil argon2 HASH olarak saklanması ve
  * tek-kullanımlık tüketimi (production hardening, CWE-312/CWE-522 koruması).
  */
-process.env.DISABLE_EMAIL = '1';
 import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';

@@ -28,7 +28,6 @@ import {
   bookingTextForEmbedding,
   saveBookingEmbedding,
 } from './embedding.service';
-import { enqueueEmail, waitlistPromotedEmail } from './notification.service';
 import { maskToWeekdays, weekdaysToMask } from '../utils/weekdays';
 import type { WaitlistEntry as SharedWaitlistEntry } from '@klab/shared';
 import { addMonthsEndDate } from '../utils/dates';
@@ -46,6 +45,7 @@ interface WaitlistRow {
   room_name?: string;
   period_months: number;
   desired_start_date: string;
+  desired_end_date: string | null;
   project_name: string;
   project_description: string;
   help_needed: string;
@@ -77,6 +77,9 @@ function rowToDto(r: WaitlistRow): WaitlistEntryDto {
     roomName: r.room_name ?? '',
     periodMonths: r.period_months,
     desiredStartDate: r.desired_start_date,
+    // Bitiş tarihi: kullanıcı manuel (kısa) seçtiyse o, yoksa start + periyot ile
+    // türetilir (booking ile aynı kural, addMonthsEndDate).
+    desiredEndDate: r.desired_end_date ?? addMonths(r.desired_start_date, r.period_months),
     projectName: r.project_name,
     projectDescription: r.project_description,
     helpNeeded: r.help_needed,
@@ -105,6 +108,8 @@ export interface JoinWaitlistInput {
   roomId: string;
   periodMonths: 1 | 2 | 3;
   desiredStartDate: string;
+  /** Manuel (periyottan kısa) bitiş tarihi. Verilmezse start + periyot türetilir. */
+  desiredEndDate?: string;
   projectName: string;
   projectDescription: string;
   helpNeeded: string;
@@ -118,7 +123,17 @@ export async function joinWaitlist(userId: string, input: JoinWaitlistInput): Pr
     throw new HttpError(400, 'Başlangıç tarihi bugünden önce olamaz.', 'INVALID_START_DATE');
   }
 
-  const endDate = addMonths(input.desiredStartDate, input.periodMonths);
+  const periodEnd = addMonths(input.desiredStartDate, input.periodMonths);
+  if (input.desiredEndDate) {
+    if (input.desiredEndDate < input.desiredStartDate) {
+      throw new HttpError(400, 'Bitiş tarihi başlangıçtan önce olamaz.', 'INVALID_END_DATE');
+    }
+    if (input.desiredEndDate > periodEnd) {
+      throw new HttpError(400, 'Bitiş tarihi periyodun ötesine geçemez.', 'INVALID_END_DATE');
+    }
+  }
+  // Manuel (kısa) bitiş verilmişse o, yoksa periyottan türetilen tarih.
+  const endDate = input.desiredEndDate ?? periodEnd;
   const weekdayMask = weekdaysToMask(input.weekdays);
 
   const id = await dbTx(async () => {
@@ -163,13 +178,14 @@ export async function joinWaitlist(userId: string, input: JoinWaitlistInput): Pr
 
     const id = nanoid();
     await dbRun(`INSERT INTO waitlist (
-         id, user_id, room_id, period_months, desired_start_date,
+         id, user_id, room_id, period_months, desired_start_date, desired_end_date,
          project_name, project_description, help_needed, technologies, weekday_mask, position, status
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`, [id,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`, [id,
       userId,
       input.roomId,
       input.periodMonths,
       input.desiredStartDate,
+      input.desiredEndDate ?? null,
       input.projectName,
       input.projectDescription,
       input.helpNeeded,
@@ -398,7 +414,8 @@ export async function tryPromoteForRoom(roomId: string): Promise<string[]> {
   const promotedIds: string[] = [];
 
   for (const entry of entries) {
-    const endDate = addMonths(entry.desired_start_date, entry.period_months);
+    // Manuel (kısa) bitiş seçilmişse o, yoksa periyottan türetilen tarih.
+    const endDate = entry.desired_end_date ?? addMonths(entry.desired_start_date, entry.period_months);
 
     // Tarih geçti mi?
     const today = new Date();
@@ -471,19 +488,18 @@ export async function tryPromoteForRoom(roomId: string): Promise<string[]> {
         details: { waitlistId: entry.id, newBookingId, roomId },
       });
 
-      // E-posta: "Sıranız geldi" bildirimi
-      const userRow = await dbOne('SELECT email, full_name FROM users WHERE id = ? AND status = 1', [entry.user_id]) as { email: string; full_name: string } | undefined;
-      if (userRow?.email) {
-        const roomRow = await dbOne('SELECT code FROM rooms WHERE id = ?', [roomId]) as { code: string } | undefined;
-        void enqueueEmail(
-          waitlistPromotedEmail({
-            to: userRow.email,
-            toName: userRow.full_name,
-            projectName: entry.project_name,
-            roomCode: roomRow?.code ?? '???',
-          })
-        );
-      }
+      // In-app bildirim: "Sıranız geldi" — talep sahibine
+      const roomRow = await dbOne('SELECT code FROM rooms WHERE id = ?', [roomId]) as { code: string } | undefined;
+      void import('./notification-center.service').then((m) => {
+        m.pushNotification({
+          recipientId: entry.user_id,
+          recipientType: 'user',
+          category: 'waitlist',
+          title: 'Sıranız geldi',
+          body: `"${entry.project_name}" için ${roomRow?.code ?? '???'} odası serbest kaldı — talebiniz oluşturuldu.`,
+          link: '/bookings',
+        });
+      }).catch((err) => logger.warn('waitlist_promote_notify_failed', { err: (err as Error).message }));
 
       broadcastBooking(
         {

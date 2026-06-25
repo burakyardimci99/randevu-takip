@@ -81,6 +81,7 @@ router.post(
         booking: result.booking,
         autoWaitlisted: result.autoWaitlisted ?? false,
         waitlistPosition: result.waitlistPosition,
+        approvalState: result.approvalState,
       });
     } catch (err) {
       next(err);

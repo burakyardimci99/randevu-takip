@@ -8,8 +8,10 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { JoinWaitlistPayload, Room } from '../types';
-import { openDatePicker, ymdLocal } from '../lib/utils';
+import { addMonthsEndDate, openDatePicker, ymdLocal } from '../lib/utils';
 import { FEATURES } from '../constants/features';
+
+const WEEKDAY_LABELS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
 
 const TECH_OPTIONS = [
   'Claude', 'GPT', 'Gemini', 'OpenAI', 'LangChain', 'LlamaIndex',
@@ -23,13 +25,17 @@ interface Props {
   room: Room | null;
   open: boolean;
   loading: boolean;
+  /** Odalar tarih filtresi aktifse istenen başlangıç tarihini önceden doldur. */
+  initialStartDate?: string;
   onClose: () => void;
   onSubmit: (payload: JoinWaitlistPayload) => void | Promise<void>;
 }
 
-export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props) {
+export function WaitlistModal({ room, open, loading, initialStartDate, onClose, onSubmit }: Props) {
   const [periodMonths, setPeriodMonths] = useState<1 | 2 | 3>(1);
   const [desiredStartDate, setDesiredStartDate] = useState<string>(todayISO());
+  // Boş = periyottan türetilen bitiş. Doldurulursa kullanıcının manuel (kısa) bitişi.
+  const [desiredEndDate, setDesiredEndDate] = useState<string>('');
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
   const [helpNeeded, setHelpNeeded] = useState('');
@@ -40,7 +46,8 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
   useEffect(() => {
     if (open) {
       setPeriodMonths(1);
-      setDesiredStartDate(todayISO());
+      setDesiredStartDate(initialStartDate && initialStartDate >= todayISO() ? initialStartDate : todayISO());
+      setDesiredEndDate('');
       setProjectName('');
       setProjectDescription('');
       setHelpNeeded('');
@@ -48,7 +55,7 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
       setWeekdays([1, 2, 3, 4, 5]);
       setCustomTech('');
     }
-  }, [open]);
+  }, [open, initialStartDate]);
 
   if (!open || !room) return null;
 
@@ -74,10 +81,18 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
     e.preventDefault();
     if (!room) return;
     if (FEATURES.weekdaySelection && weekdays.length === 0) return;
+    // Manuel bitiş yalnız [start, periyot-türevi) aralığındaysa gönderilir;
+    // boş veya tam periyot sonuysa undefined → server periyottan türetir.
+    const periodEnd = addMonthsEndDate(desiredStartDate, periodMonths);
+    const manualEnd =
+      desiredEndDate && desiredEndDate >= desiredStartDate && desiredEndDate < periodEnd
+        ? desiredEndDate
+        : undefined;
     onSubmit({
       roomId: room.id,
       periodMonths,
       desiredStartDate,
+      desiredEndDate: manualEnd,
       projectName: projectName.trim(),
       projectDescription: projectDescription.trim(),
       helpNeeded: helpNeeded.trim(),
@@ -157,6 +172,64 @@ export function WaitlistModal({ room, open, loading, onClose, onSubmit }: Props)
                 required
               />
             </div>
+          </div>
+
+          {/* Bitiş tarihi — periyottan türetilir; istersen daha kısa seç. */}
+          <div>
+            <label className="label">Bitiş tarihi <span className="text-kt-gray-400 font-normal">(istersen daha kısa seç)</span></label>
+            <input
+              type="date"
+              className="input cursor-pointer"
+              value={desiredEndDate || (desiredStartDate ? addMonthsEndDate(desiredStartDate, periodMonths) : '')}
+              min={desiredStartDate || undefined}
+              max={desiredStartDate ? addMonthsEndDate(desiredStartDate, periodMonths) : undefined}
+              onChange={(e) => setDesiredEndDate(e.target.value)}
+              onClick={openDatePicker}
+            />
+            <p className="text-[11px] text-kt-gray-500 mt-1">
+              {desiredStartDate
+                ? `Sıranız geldiğinde oda ${new Date(desiredStartDate).toLocaleDateString('tr-TR')} – ${new Date(desiredEndDate || addMonthsEndDate(desiredStartDate, periodMonths)).toLocaleDateString('tr-TR')} için rezerve edilir. En geç ${new Date(addMonthsEndDate(desiredStartDate, periodMonths)).toLocaleDateString('tr-TR')} (${periodMonths} ay).`
+                : 'Başlangıç tarihi seçin.'}
+            </p>
+          </div>
+
+          {/* Oda müsaitlik bilgisi — tahmini boşalma + boş günler */}
+          <div className="rounded-lg bg-kt-gray-50 border border-kt-gray-200 p-3 space-y-2">
+            <div className="text-xs font-semibold text-kt-gray-600">Oda müsaitlik durumu</div>
+            {room.nextAvailableDate ? (
+              <div className="text-xs text-kt-gray-700">
+                Tahmini boşalma:{' '}
+                <span className="font-semibold text-kt-green-800">
+                  {new Date(room.nextAvailableDate).toLocaleDateString('tr-TR')}
+                </span>
+              </div>
+            ) : (
+              <div className="text-xs text-kt-gray-700">
+                Bu oda kısmen dolu — seçtiğiniz günlere göre sıraya alınırsınız.
+              </div>
+            )}
+            {FEATURES.weekdaySelection && (
+              <div>
+                <div className="text-[10px] text-kt-gray-400 mb-1">Boş günler</div>
+                <div className="grid grid-cols-7 gap-0.5">
+                  {WEEKDAY_LABELS.map((l, i) => {
+                    const free = (room.availableWeekdays ?? []).includes(i + 1);
+                    return (
+                      <div
+                        key={i}
+                        className={`py-1 rounded text-[10px] font-bold text-center ${
+                          free
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-kt-gray-100 text-kt-gray-300 line-through'
+                        }`}
+                      >
+                        {l}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {FEATURES.weekdaySelection && (

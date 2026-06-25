@@ -87,13 +87,6 @@ services:
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       # Embedding modeli cache'i node_modules yerine yazılabilir data volume'una.
       MODEL_CACHE_DIR: /app/data/models
-      # E-posta bildirimleri (SMTP) — boşsa transport kurulmaz, bildirim atlanır.
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-}
-      SMTP_SECURE: ${SMTP_SECURE:-}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_FROM: ${SMTP_FROM:-}
       # Kuyruk backend'i — boşsa in-memory fallback (tek instance).
       REDIS_URL: ${REDIS_URL:-}
       # Observability (OpenTelemetry) — endpoint boşsa trace exporter kapalı.

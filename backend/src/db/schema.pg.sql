@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS waitlist (
           room_id TEXT NOT NULL,
           period_months INTEGER NOT NULL CHECK(period_months IN (1, 2, 3)),
           desired_start_date TEXT NOT NULL,
+          -- NULL = start + period ile türetilir; dolu ise kullanıcının manuel (kısa) bitişi.
+          desired_end_date TEXT,
           project_name TEXT NOT NULL,
           project_description TEXT NOT NULL,
           help_needed TEXT NOT NULL,
@@ -269,6 +271,9 @@ CREATE TABLE IF NOT EXISTS "bookings" (
             admin_feedback TEXT,
             reviewed_by TEXT,
             reviewed_at TEXT,
+            -- Çift onay: her rolün kararı (NULL=bekliyor, 'approved'/'rejected').
+            admin_decision TEXT,
+            analyst_decision TEXT,
             created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
             updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
             showcase_visible INTEGER NOT NULL DEFAULT 1,

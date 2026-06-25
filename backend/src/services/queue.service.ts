@@ -140,5 +140,4 @@ export function getQueue(): QueueAdapter {
  * ============================================================ */
 export const JobNames = {
   EMBED_BOOKING: 'embed_booking',
-  NOTIFY_EMAIL: 'notify_email',
 } as const;

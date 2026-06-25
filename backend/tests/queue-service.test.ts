@@ -21,7 +21,6 @@ describe('getQueue singleton', () => {
   });
 
   it('standart job adları export edilir', () => {
-    expect(JobNames.NOTIFY_EMAIL).toBe('notify_email');
     expect(JobNames.EMBED_BOOKING).toBe('embed_booking');
   });
 });

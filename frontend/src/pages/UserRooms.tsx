@@ -8,18 +8,18 @@ import { useToast } from '../components/Toast';
 import { useRealtimeEvents } from '../hooks/useRealtimeEvents';
 import { api } from '../services/api';
 import { RoomDetailModal } from '../components/RoomDetailModal';
-import { openDatePicker, ymdLocal } from '../lib/utils';
+import { openDatePicker, roomCategoryKey, roomCategoryLabel, ymdLocal } from '../lib/utils';
+import { FEATURES } from '../constants/features';
 import type { CreateBookingPayload, JoinWaitlistPayload, Room } from '../types';
 
-const CATEGORY_LABEL: Record<Room['roomType'], string> = {
-  pod: 'Tekli Pod',
-  experience: 'Deneyim Alanı',
-  tribune: 'Tribün',
-};
+const WEEKDAY_LABELS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
 
-const CATEGORY_FILTERS: Array<{ key: 'all' | Room['roomType']; label: string }> = [
+type CategoryKey = 'all' | 'pod1' | 'pod2' | 'experience' | 'tribune';
+
+const CATEGORY_FILTERS: Array<{ key: CategoryKey; label: string }> = [
   { key: 'all', label: 'Tümü' },
-  { key: 'pod', label: 'Tekli Pod' },
+  { key: 'pod1', label: 'Tekli Pod' },
+  { key: 'pod2', label: 'İkili Pod' },
   { key: 'experience', label: 'Deneyim Alanı' },
   { key: 'tribune', label: 'Tribün' },
 ];
@@ -30,9 +30,13 @@ export default function UserRooms() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'available'>('all');
-  const [category, setCategory] = useState<'all' | Room['roomType']>('all');
-  const [filterDate, setFilterDate] = useState('');
+  const [category, setCategory] = useState<CategoryKey>('all');
+  // Tarih ARALIĞI filtresi: oda [başlangıç, bitiş] boyunca müsaitse listelenir.
+  const [filterStart, setFilterStart] = useState('');
+  const [filterEnd, setFilterEnd] = useState('');
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  // "Doluluk sonrası randevu al" ile açıldığında booking modalına geçilecek başlangıç tarihi.
+  const [bookAfterDate, setBookAfterDate] = useState<string | null>(null);
   const [detailRoom, setDetailRoom] = useState<Room | null>(null);
   const [waitlistRoom, setWaitlistRoom] = useState<Room | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -41,14 +45,14 @@ export default function UserRooms() {
   const loadRooms = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.listUserRooms(filterDate || undefined);
+      const res = await api.listUserRooms(filterStart || undefined, filterEnd || undefined);
       setRooms(res.rooms);
     } catch (err) {
       toast.push('error', (err as Error).message || 'Odalar yüklenemedi.');
     } finally {
       setLoading(false);
     }
-  }, [toast, filterDate]);
+  }, [toast, filterStart, filterEnd]);
 
   useEffect(() => {
     loadRooms();
@@ -82,8 +86,11 @@ export default function UserRooms() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rooms.filter((r) => {
+      // Tarih aralığı filtresi aktifse liste DARALIR: yalnız o aralıkta müsait odalar
+      // listelenir (isAvailable backend'de aralığa göre hesaplanır). Dolu odalar gizlenir.
+      if (filterStart && !r.isAvailable) return false;
       if (filter === 'available' && !r.isAvailable) return false;
-      if (category !== 'all' && r.roomType !== category) return false;
+      if (category !== 'all' && roomCategoryKey(r.roomType, r.capacity) !== category) return false;
       if (!q) return true;
       return (
         r.name.toLowerCase().includes(q) ||
@@ -91,7 +98,23 @@ export default function UserRooms() {
         (r.description?.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [rooms, search, filter, category]);
+  }, [rooms, search, filter, category, filterStart]);
+
+  // Tarih aralığı filtresinde gizlenen (o aralıkta dolu) oda sayısı — kullanıcı
+  // listenin daraldığını bilsin ve isterse filtreyi temizlesin.
+  const hiddenBusyOnDate = useMemo(
+    () => (filterStart ? rooms.filter((r) => !r.isAvailable).length : 0),
+    [rooms, filterStart]
+  );
+
+  // Aralık etiketi: "12 Temmuz – 20 Temmuz" veya tek gün "12 Temmuz günü".
+  const rangeLabel = useMemo(() => {
+    if (!filterStart) return '';
+    const fmt = (d: string) => new Date(d).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' });
+    return filterEnd && filterEnd !== filterStart
+      ? `${fmt(filterStart)} – ${fmt(filterEnd)}`
+      : `${fmt(filterStart)} günü`;
+  }, [filterStart, filterEnd]);
 
   async function submitBooking(payload: CreateBookingPayload) {
     setSubmitting(true);
@@ -108,6 +131,7 @@ export default function UserRooms() {
         );
       }
       setSelectedRoom(null);
+      setBookAfterDate(null);
       await loadRooms();
     } catch (err) {
       toast.push('error', (err as Error).message || 'Talep gönderilemedi.');
@@ -170,7 +194,9 @@ export default function UserRooms() {
         <div className="flex flex-wrap gap-2 mt-3">
           {CATEGORY_FILTERS.map((c) => {
             const count =
-              c.key === 'all' ? rooms.length : rooms.filter((r) => r.roomType === c.key).length;
+              c.key === 'all'
+                ? rooms.length
+                : rooms.filter((r) => roomCategoryKey(r.roomType, r.capacity) === c.key).length;
             return (
               <button
                 key={c.key}
@@ -188,33 +214,51 @@ export default function UserRooms() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 mt-3">
-          <label htmlFor="rooms-date" className="text-xs font-semibold text-kt-gray-600">
-            Tarihte müsait:
-          </label>
+          <span className="text-xs font-semibold text-kt-gray-600">Tarih aralığında müsait:</span>
           <input
-            id="rooms-date"
+            id="rooms-start"
             type="date"
-            value={filterDate}
+            aria-label="Başlangıç tarihi"
+            value={filterStart}
             min={ymdLocal()}
-            onChange={(e) => setFilterDate(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setFilterStart(v);
+              // Bitiş başlangıçtan önceyse sıfırla.
+              if (filterEnd && v && filterEnd < v) setFilterEnd('');
+            }}
             onClick={openDatePicker}
             className="px-3 py-1.5 rounded-lg border border-kt-gray-200 text-sm text-kt-green-800 focus:border-kt-violet-400 outline-none"
           />
-          {filterDate && (
+          <span className="text-xs text-kt-gray-400">→</span>
+          <input
+            id="rooms-end"
+            type="date"
+            aria-label="Bitiş tarihi"
+            value={filterEnd}
+            min={filterStart || ymdLocal()}
+            disabled={!filterStart}
+            onChange={(e) => setFilterEnd(e.target.value)}
+            onClick={openDatePicker}
+            title={!filterStart ? 'Önce başlangıç tarihi seçin' : 'Bitiş tarihi (opsiyonel)'}
+            className="px-3 py-1.5 rounded-lg border border-kt-gray-200 text-sm text-kt-green-800 focus:border-kt-violet-400 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+          />
+          {filterStart && (
             <>
               <button
-                onClick={() => setFilterDate('')}
+                onClick={() => {
+                  setFilterStart('');
+                  setFilterEnd('');
+                }}
                 className="text-xs font-semibold text-kt-violet-700 hover:text-kt-violet-900"
               >
                 Temizle
               </button>
               <span className="text-xs text-kt-gray-500">
-                {new Date(filterDate).toLocaleDateString('tr-TR', {
-                  weekday: 'long',
-                  day: 'numeric',
-                  month: 'long',
-                })}{' '}
-                için müsaitlik
+                {rangeLabel} arası müsait odalar
+                {hiddenBusyOnDate > 0 && (
+                  <span className="text-kt-gold-700"> · {hiddenBusyOnDate} dolu oda gizlendi</span>
+                )}
               </span>
             </>
           )}
@@ -235,8 +279,31 @@ export default function UserRooms() {
       ) : filtered.length === 0 ? (
         <div className="card p-12 text-center">
           <div className="text-5xl mb-4">🔍</div>
-          <h3 className="text-xl font-bold text-kt-green-800 mb-2">Eşleşen oda bulunamadı</h3>
-          <p className="text-kt-gray-500">Arama kriterlerini değiştirip tekrar deneyin.</p>
+          {filterStart ? (
+            <>
+              <h3 className="text-xl font-bold text-kt-green-800 mb-2">
+                Bu tarih aralığında müsait oda yok
+              </h3>
+              <p className="text-kt-gray-500 mb-4">
+                {rangeLabel} için tüm odalar dolu{hiddenBusyOnDate > 0 ? ` (${hiddenBusyOnDate} oda)` : ''}.
+                Başka bir aralık deneyin veya filtreyi temizleyin.
+              </p>
+              <button
+                onClick={() => {
+                  setFilterStart('');
+                  setFilterEnd('');
+                }}
+                className="btn-primary text-sm"
+              >
+                Tarih filtresini temizle
+              </button>
+            </>
+          ) : (
+            <>
+              <h3 className="text-xl font-bold text-kt-green-800 mb-2">Eşleşen oda bulunamadı</h3>
+              <p className="text-kt-gray-500">Arama kriterlerini değiştirip tekrar deneyin.</p>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -258,7 +325,7 @@ export default function UserRooms() {
 
                 <div className="absolute top-3 left-3">
                   <span className="px-2 py-0.5 rounded-md bg-white/25 backdrop-blur text-white text-xs font-bold tracking-wider">
-                    {CATEGORY_LABEL[room.roomType]}
+                    {roomCategoryLabel(room.roomType, room.capacity)}
                   </span>
                 </div>
                 <div className="absolute top-3 right-3">
@@ -310,6 +377,60 @@ export default function UserRooms() {
                 >
                   Devamını göster →
                 </button>
+
+                {/* Müsait vakitler — haftanın boş günleri (yalnız gün-bazlı mod) */}
+                {FEATURES.weekdaySelection && (
+                  <div className="mb-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-kt-gray-400 mb-1">
+                      Müsait günler
+                    </div>
+                    <div className="grid grid-cols-7 gap-0.5">
+                      {WEEKDAY_LABELS.map((l, i) => {
+                        const free = (room.availableWeekdays ?? []).includes(i + 1);
+                        return (
+                          <div
+                            key={i}
+                            className={`py-1 rounded text-[10px] font-bold text-center ${
+                              free
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-kt-gray-100 text-kt-gray-300 line-through'
+                            }`}
+                            title={free ? `${l}: müsait` : `${l}: dolu`}
+                          >
+                            {l}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Müsaitlik durumu — full-week modda tarih bazlı net bilgi.
+                    Tarih filtresi aktifse durum O TARİHE göredir. */}
+                <div className="mb-3">
+                  {(() => {
+                    const dateLabel = filterStart ? rangeLabel : null;
+                    if (room.isAvailable) {
+                      return (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          {dateLabel ? `${dateLabel} arası müsait` : 'Randevuya uygun'}
+                        </span>
+                      );
+                    }
+                    return (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-kt-gold-700">
+                        <span className="w-1.5 h-1.5 rounded-full bg-kt-gold-500" />
+                        {dateLabel
+                          ? `${dateLabel} arası dolu`
+                          : room.nextAvailableDate
+                            ? `${new Date(room.nextAvailableDate).toLocaleDateString('tr-TR')} tarihine kadar dolu`
+                            : 'Şu an dolu'}
+                      </span>
+                    );
+                  })()}
+                </div>
+
                 <div className="flex items-center justify-between text-xs text-kt-gray-500 mb-4">
                   <span className="flex items-center gap-1">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -317,9 +438,6 @@ export default function UserRooms() {
                     </svg>
                     {room.capacity === 1 ? '1 kişilik' : `${room.capacity} kişilik`}
                   </span>
-                  {!room.isAvailable && room.nextAvailableDate && (
-                    <span>Müsait: {new Date(room.nextAvailableDate).toLocaleDateString('tr-TR')}</span>
-                  )}
                 </div>
                 {room.isAvailable ? (
                   <button
@@ -346,7 +464,12 @@ export default function UserRooms() {
         room={selectedRoom}
         open={!!selectedRoom}
         loading={submitting}
-        onClose={() => !submitting && setSelectedRoom(null)}
+        initialStartDate={bookAfterDate || filterStart || undefined}
+        onClose={() => {
+          if (submitting) return;
+          setSelectedRoom(null);
+          setBookAfterDate(null);
+        }}
         onSubmit={submitBooking}
       />
 
@@ -354,6 +477,7 @@ export default function UserRooms() {
         room={waitlistRoom}
         open={!!waitlistRoom}
         loading={joining}
+        initialStartDate={filterStart || undefined}
         onClose={() => !joining && setWaitlistRoom(null)}
         onSubmit={submitWaitlist}
       />
@@ -366,6 +490,11 @@ export default function UserRooms() {
           setDetailRoom(null);
           if (r.isAvailable) setSelectedRoom(r);
           else setWaitlistRoom(r);
+        }}
+        onBookAfter={(r, startDate) => {
+          setDetailRoom(null);
+          setBookAfterDate(startDate);
+          setSelectedRoom(r);
         }}
       />
     </AppShell>

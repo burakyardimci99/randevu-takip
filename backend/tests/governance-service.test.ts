@@ -10,7 +10,6 @@
  *  - Proje türü yükseltme (PoC → Kuruma Entegre)
  *  - SLA hesabı
  */
-process.env.DISABLE_EMAIL = '1';
 import './setup-env';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';

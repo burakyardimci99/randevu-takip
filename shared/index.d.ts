@@ -175,6 +175,10 @@ export interface Booking {
   adminFeedback: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  /** Çift onay: admin'in kararı (null=bekliyor, 'approved'/'rejected'). */
+  adminDecision: 'approved' | 'rejected' | null;
+  /** Çift onay: analitik (danışman) kararı (null=bekliyor, 'approved'/'rejected'). */
+  analystDecision: 'approved' | 'rejected' | null;
   lifecycleStage: LifecycleStage;
   stageEnteredAt: string;
   reviewTrack: 'standard' | 'swat';
@@ -200,6 +204,11 @@ export interface WaitlistEntry {
   roomName: string;
   periodMonths: number;
   desiredStartDate: string;
+  /**
+   * İstenen bitiş tarihi. Kullanıcı manuel (periyottan kısa) seçtiyse o; aksi halde
+   * desiredStartDate + periodMonths ile server'da türetilir.
+   */
+  desiredEndDate: string;
   projectName: string;
   projectDescription: string;
   helpNeeded: string;

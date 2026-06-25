@@ -1,8 +1,26 @@
-import { useEffect, useState } from 'react';
-import type { Booking, CreateBookingPayload, Room } from '../types';
+import { useEffect, useMemo, useState } from 'react';
+import type { Booking, CreateBookingPayload, Room, RoomAvailability } from '../types';
 import { addMonthsEndDate, openDatePicker, ymdLocal } from '../lib/utils';
 import { FEATURES } from '../constants/features';
+import { api } from '../services/api';
 import { MovableModalShell } from './MovableModalShell';
+
+const WEEKDAY_LABELS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
+
+function fmtTrDate(ymd: string): string {
+  if (!ymd) return '';
+  return new Date(`${ymd}T00:00:00`).toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+/** YYYY-MM-DD aralıkları örtüşüyor mu (leksik karşılaştırma güvenli). */
+function rangesOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
+  return !(aEnd < bStart || aStart > bEnd);
+}
+
+/** YYYY-MM-DD → ertesi gün (en erken müsait tarih gösterimi). */
+function nextDayYmd(ymd: string): string {
+  return new Date(new Date(`${ymd}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10);
+}
 
 interface BookingModalProps {
   room: Room | null;
@@ -10,6 +28,8 @@ interface BookingModalProps {
   loading: boolean;
   /** Düzenleme modu için varsa, mevcut booking verisi. Yoksa create modu. */
   editingBooking?: Booking | null;
+  /** Oluşturma modunda başlangıç tarihini önceden doldur (odalar tarih filtresi). */
+  initialStartDate?: string;
   onClose: () => void;
   onSubmit: (payload: CreateBookingPayload) => Promise<void>;
 }
@@ -77,10 +97,12 @@ function todayPlus(days: number): string {
   return ymdLocal(d);
 }
 
-export function BookingModal({ room, open, loading, editingBooking, onClose, onSubmit }: BookingModalProps) {
+export function BookingModal({ room, open, loading, editingBooking, initialStartDate, onClose, onSubmit }: BookingModalProps) {
   const isEditing = !!editingBooking;
   const [periodMonths, setPeriodMonths] = useState<1 | 2 | 3>(1);
   const [startDate, setStartDate] = useState(todayPlus(1));
+  // Boş = periyottan türetilen bitiş. Doldurulursa esnek/kısa süre (manuel bitiş).
+  const [endDate, setEndDate] = useState('');
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
   const [helpNeeded, setHelpNeeded] = useState('');
@@ -88,12 +110,63 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
   const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]); // varsayılan: hafta içi
   const [customTech, setCustomTech] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [availability, setAvailability] = useState<RoomAvailability | null>(null);
+
+  // Oda müsaitliğini aç-fetch et — dolu tarih aralıklarını göster + çakışma ön-kontrolü.
+  useEffect(() => {
+    if (!open || !room) {
+      setAvailability(null);
+      return;
+    }
+    let cancelled = false;
+    setAvailability(null);
+    api
+      .roomAvailability(room.id)
+      .then((res) => {
+        if (!cancelled) setAvailability(res);
+      })
+      .catch(() => {
+        /* best-effort — müsaitlik çekilemezse modal yine çalışır */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, room]);
+
+  // Seçilen aralık mevcut bir booking ile çakışıyor mu? (gönderme öncesi uyarı)
+  // Manuel bitiş varsa o, yoksa periyottan türetilen tarih.
+  const selectedEnd = endDate || (startDate ? addMonthsEndDate(startDate, periodMonths) : '');
+  const conflict = useMemo(() => {
+    if (!availability || !startDate || !selectedEnd) return null;
+    return (
+      availability.busyRanges.find((b) => {
+        if (!rangesOverlap(startDate, selectedEnd, b.startDate, b.endDate)) return false;
+        // Full-week modda gün ayrımı yok (her tarih çakışması blokedir); gün-bazlı
+        // modda yalnız seçili günler busy günlerle kesişiyorsa çakışır.
+        if (!FEATURES.weekdaySelection) return true;
+        return weekdays.some((d) => b.weekdays.includes(d));
+      }) ?? null
+    );
+  }, [availability, startDate, selectedEnd, weekdays]);
+  // Düzenlemede kendi booking'i busyRanges içinde olabilir → kendini çakışma sayma.
+  const blockingConflict =
+    conflict && !(isEditing && editingBooking &&
+      conflict.startDate === editingBooking.startDate && conflict.endDate === editingBooking.endDate)
+      ? conflict
+      : null;
 
   useEffect(() => {
     if (open) {
       if (editingBooking) {
         setPeriodMonths(editingBooking.periodMonths as 1 | 2 | 3);
         setStartDate(editingBooking.startDate);
+        // Mevcut bitiş, periyot-türevinden farklıysa manuel kabul edilir (korunur).
+        setEndDate(
+          editingBooking.endDate &&
+            editingBooking.endDate !== addMonthsEndDate(editingBooking.startDate, editingBooking.periodMonths)
+            ? editingBooking.endDate
+            : ''
+        );
         setProjectName(editingBooking.projectName);
         setProjectDescription(editingBooking.projectDescription);
         setHelpNeeded(editingBooking.helpNeeded);
@@ -105,7 +178,9 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
         );
       } else {
         setPeriodMonths(1);
-        setStartDate(todayPlus(1));
+        // Odalar sekmesi tarih filtresi aktifse o tarihle aç (bugünden önce değilse).
+        setStartDate(initialStartDate && initialStartDate >= todayPlus(0) ? initialStartDate : todayPlus(1));
+        setEndDate('');
         setProjectName('');
         setProjectDescription('');
         setHelpNeeded('');
@@ -115,7 +190,7 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
       setCustomTech('');
       setErrors({});
     }
-  }, [open, editingBooking]);
+  }, [open, editingBooking, initialStartDate]);
 
   function toggleTech(t: string) {
     setTechnologies((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
@@ -151,6 +226,16 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
       return;
     }
 
+    // Seçilen aralık dolu — gönderme (buton da disabled, bu ek savunma).
+    if (blockingConflict) {
+      setErrors({
+        startDate: `Bu oda ${fmtTrDate(blockingConflict.startDate)} – ${fmtTrDate(
+          blockingConflict.endDate
+        )} arası dolu. En erken ${fmtTrDate(nextDayYmd(blockingConflict.endDate))} tarihinden seçin.`,
+      });
+      return;
+    }
+
     await onSubmit({
       roomId: room.id,
       periodMonths,
@@ -160,6 +245,8 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
           ? editingBooking!.weekdays
           : undefined,
       startDate,
+      // Manuel bitiş girilmişse gönder; boşsa undefined → server periyottan türetir.
+      endDate: endDate || undefined,
       projectName: projectName.trim(),
       projectDescription: projectDescription.trim(),
       helpNeeded: helpNeeded.trim(),
@@ -202,7 +289,10 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
                 <button
                   type="button"
                   key={m}
-                  onClick={() => setPeriodMonths(m as 1 | 2 | 3)}
+                  onClick={() => {
+                    setPeriodMonths(m as 1 | 2 | 3);
+                    setEndDate(''); // preset seçimi bitişi periyot-türevine döndürür
+                  }}
                   className={`py-3 rounded-xl font-bold transition-all ${
                     periodMonths === m
                       ? 'bg-kt-gold-500 text-white shadow-kt-gold'
@@ -224,7 +314,12 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
                 className="input cursor-pointer"
                 value={startDate}
                 min={todayPlus(0)}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setStartDate(v);
+                  // Manuel bitiş yeni başlangıçtan önce kaldıysa sıfırla.
+                  if (endDate && v && endDate < v) setEndDate('');
+                }}
                 onClick={openDatePicker}
                 required
               />
@@ -234,17 +329,86 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
               <input
                 id="end-date"
                 type="date"
-                className="input bg-kt-gray-50 text-kt-gray-600 cursor-default"
-                value={addMonthsEndDate(startDate, periodMonths)}
-                readOnly
-                tabIndex={-1}
+                className="input cursor-pointer"
+                value={selectedEnd}
+                min={startDate || todayPlus(0)}
+                onChange={(e) => setEndDate(e.target.value)}
+                onClick={openDatePicker}
                 aria-describedby="end-date-hint"
               />
               <p id="end-date-hint" className="text-[11px] text-kt-gray-500 mt-1">
-                Seçilen süreye göre otomatik hesaplanır.
+                Periyottan hesaplanır; kısa/özel süre için değiştirebilirsin.
               </p>
             </div>
           </div>
+
+          {/* Çakışma uyarısı — seçilen aralık dolu (gönderme öncesi net bilgi) */}
+          {blockingConflict && (
+            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-800">
+              <div className="font-bold mb-1">⛔ Seçtiğiniz tarih aralığı dolu</div>
+              <div>
+                Bu oda{' '}
+                <strong>
+                  {fmtTrDate(blockingConflict.startDate)} – {fmtTrDate(blockingConflict.endDate)}
+                </strong>{' '}
+                tarihleri arasında rezerve. En erken{' '}
+                <strong>{fmtTrDate(nextDayYmd(blockingConflict.endDate))}</strong> tarihinden itibaren
+                randevu alabilirsiniz.
+              </div>
+            </div>
+          )}
+
+          {/* Boş (rezerve edilebilir) aralıklar — tıkla, başlangıç tarihini ata */}
+          {availability && availability.freeGaps.length > 0 && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <div className="text-xs font-semibold text-emerald-700 mb-1.5">
+                Boş tarih aralıkları
+              </div>
+              <ul className="space-y-1 text-xs text-emerald-800">
+                {availability.freeGaps.map((g, i) => (
+                  <li key={i} className="flex items-center gap-2">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span>{fmtTrDate(g.startDate)} – {fmtTrDate(g.endDate)}</span>
+                    <button
+                      type="button"
+                      onClick={() => setStartDate(g.startDate)}
+                      className="text-[11px] font-semibold text-emerald-700 underline hover:text-emerald-900"
+                    >
+                      başlangıç yap
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[10px] text-emerald-600 mt-1.5">
+                Dolu dönemlerden önceki/araki boş aralıklar — tıklayınca başlangıç tarihi atanır.
+              </p>
+            </div>
+          )}
+
+          {/* Odanın dolu dönemleri — kullanıcı boş tarih seçebilsin diye önden göster */}
+          {availability && availability.busyRanges.length > 0 && (
+            <div className="rounded-lg border border-kt-gray-200 bg-kt-gray-50 p-3">
+              <div className="text-xs font-semibold text-kt-gray-600 mb-1.5">
+                Bu odanın dolu dönemleri
+              </div>
+              <ul className="space-y-1 text-xs text-kt-gray-700">
+                {availability.busyRanges.map((b, i) => {
+                  const overlaps = !!startDate && rangesOverlap(startDate, selectedEnd, b.startDate, b.endDate);
+                  return (
+                    <li key={i} className={`flex items-center gap-2 ${overlaps ? 'text-red-700 font-semibold' : ''}`}>
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${overlaps ? 'bg-red-500' : 'bg-kt-gold-500'}`} />
+                      {fmtTrDate(b.startDate)} – {fmtTrDate(b.endDate)}
+                      {FEATURES.weekdaySelection && (
+                        <span className="text-kt-gray-400">
+                          ({b.weekdays.map((d) => WEEKDAY_LABELS[d - 1]).join(', ')})
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
           {FEATURES.weekdaySelection && (
           <div>
@@ -417,8 +581,9 @@ export function BookingModal({ room, open, loading, editingBooking, onClose, onS
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={loading}
+            disabled={loading || !!blockingConflict}
             className="btn-primary"
+            title={blockingConflict ? 'Seçilen tarih aralığı dolu — farklı tarih seçin.' : undefined}
           >
             {loading ? (isEditing ? 'Güncelleniyor...' : 'Gönderiliyor...') : (isEditing ? 'Değişiklikleri Kaydet' : 'Talebi Gönder')}
           </button>

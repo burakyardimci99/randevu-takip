@@ -8,7 +8,6 @@
  */
 import './setup-env';
 process.env.DISABLE_RATE_LIMIT = '1';
-process.env.DISABLE_EMAIL = '1';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -107,7 +106,8 @@ describe('booking oluşturma → onay → ilerleme notu akışı', () => {
     expect(res.status).toBe(409);
   });
 
-  it('admin approve → approved + lifecycle development', async () => {
+  it('çift onay: admin approve → pending (analitik bekleniyor), analitik approve → approved', async () => {
+    // 1) Admin onayı — tek başına yetmez, status 'pending' kalır.
     const { agent, csrf, token } = await login(ADMIN.email, ADMIN.password);
     const res = await agent
       .post(`/api/admin/bookings/${bookingId}/review`)
@@ -115,8 +115,16 @@ describe('booking oluşturma → onay → ilerleme notu akışı', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ action: 'approve' });
     expect(res.status).toBe(200);
-    expect(res.body.booking.status).toBe('approved');
-    expect(res.body.booking.lifecycleStage).toBe('development');
+    expect(res.body.booking.status).toBe('pending');
+    expect(res.body.booking.adminDecision).toBe('approved');
+    expect(res.body.approvalState.analystDecision).toBeNull();
+
+    // 2) Analitik (danışman) onayı — servis üzerinden (route ayrı danışman token gerektirir).
+    const { reviewBooking } = await import('../src/services/booking.service');
+    const result = await reviewBooking(ADMIN.id, bookingId, { action: 'approve' }, 'danisman');
+    expect(result.booking.status).toBe('approved');
+    expect(result.booking.lifecycleStage).toBe('development');
+    expect(result.booking.analystDecision).toBe('approved');
   });
 
   it('sahibi ilerleme notunu günceller; başkası 404 alır (IDOR)', async () => {

@@ -22,7 +22,6 @@ import { HttpError } from '../middleware/error.middleware';
 import { logger } from '../utils/logger';
 import { hashPassword } from './auth.service';
 import { revokeAllForSubject } from './token.service';
-import { enqueueEmail, passwordResetEmail } from './notification.service';
 
 /** Token geçerlilik süresi — 1 saat. */
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
@@ -55,11 +54,11 @@ export async function requestPasswordReset(email: string): Promise<void> {
   await dbRun(`INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at)
      VALUES (?, ?, ?, ?)`, [nanoid(), user.id, hashToken(rawToken), expiresAt]);
 
-  const base = process.env.FRONTEND_ORIGIN ?? '';
-  const resetUrl = `${base}/reset-password?token=${rawToken}`;
-  await enqueueEmail(
-    passwordResetEmail({ to: user.email, toName: user.full_name, resetUrl })
-  );
+  // NOT: Token üretildi ve saklandı, ancak teslimat kanalı (e-posta) kaldırıldı.
+  // Yeni bildirim yöntemi belirlenince sıfırlama linki burada gönderilecek:
+  //   const resetUrl = `${FRONTEND_ORIGIN}/reset-password?token=${rawToken}`;
+  // Şimdilik link teslim EDİLMEZ.
+  logger.info('password_reset_token_created', { userId: user.id });
 }
 
 /**
